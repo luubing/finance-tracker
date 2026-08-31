@@ -25,14 +25,7 @@ public class PaymentChannelsController : BaseApiController
         var userId = GetUserId();
         var channels = await _paymentChannelService.GetPaymentChannelsAsync(userId);
 
-        return Ok(channels.Select(c => new
-        {
-            id = c.Id,
-            name = c.Name,
-            icon = c.Icon,
-            isPreset = c.IsPreset,
-            sortOrder = c.SortOrder
-        }));
+        return Ok(channels.Select(MapToResponse));
     }
 
     /// <summary>
@@ -51,14 +44,7 @@ public class PaymentChannelsController : BaseApiController
             return NotFound(new { message = "支付渠道不存在" });
         }
 
-        return Ok(new
-        {
-            id = channel.Id,
-            name = channel.Name,
-            icon = channel.Icon,
-            isPreset = channel.IsPreset,
-            sortOrder = channel.SortOrder
-        });
+        return Ok(MapToResponse(channel));
     }
 
     /// <summary>
@@ -86,14 +72,7 @@ public class PaymentChannelsController : BaseApiController
 
         var createdChannel = await _paymentChannelService.CreatePaymentChannelAsync(channel);
 
-        return CreatedAtAction(nameof(GetPaymentChannel), new { id = createdChannel.Id }, new
-        {
-            id = createdChannel.Id,
-            name = createdChannel.Name,
-            icon = createdChannel.Icon,
-            isPreset = createdChannel.IsPreset,
-            sortOrder = createdChannel.SortOrder
-        });
+        return CreatedAtAction(nameof(GetPaymentChannel), new { id = createdChannel.Id }, MapToResponse(createdChannel));
     }
 
     /// <summary>
@@ -112,6 +91,18 @@ public class PaymentChannelsController : BaseApiController
             return BadRequest(new { message = "渠道名称不能为空" });
         }
 
+        // 检查渠道是否存在且属于当前用户
+        var existingChannel = await _paymentChannelService.GetPaymentChannelByIdAsync(id);
+        if (existingChannel == null || (!existingChannel.IsPreset && existingChannel.UserId != userId))
+        {
+            return NotFound(new { message = "支付渠道不存在" });
+        }
+
+        if (existingChannel.IsPreset)
+        {
+            return Forbid("不能修改预设支付渠道");
+        }
+
         var channel = new Core.Entities.PaymentChannel
         {
             Id = id,
@@ -124,23 +115,11 @@ public class PaymentChannelsController : BaseApiController
         try
         {
             var updatedChannel = await _paymentChannelService.UpdatePaymentChannelAsync(channel);
-
-            return Ok(new
-            {
-                id = updatedChannel.Id,
-                name = updatedChannel.Name,
-                icon = updatedChannel.Icon,
-                isPreset = updatedChannel.IsPreset,
-                sortOrder = updatedChannel.SortOrder
-            });
+            return Ok(MapToResponse(updatedChannel));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Forbid(ex.Message);
         }
     }
 
@@ -163,7 +142,7 @@ public class PaymentChannelsController : BaseApiController
                 return NotFound(new { message = "支付渠道不存在" });
             }
 
-            return Ok(new { message = "删除成功" });
+            return NoContent();
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -174,6 +153,15 @@ public class PaymentChannelsController : BaseApiController
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    private static object MapToResponse(Core.Entities.PaymentChannel channel) => new
+    {
+        id = channel.Id,
+        name = channel.Name,
+        icon = channel.Icon,
+        isPreset = channel.IsPreset,
+        sortOrder = channel.SortOrder
+    };
 }
 
 /// <summary>

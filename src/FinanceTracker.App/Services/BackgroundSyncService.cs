@@ -12,7 +12,6 @@ public class BackgroundSyncService : IDisposable
     private readonly INetworkService _networkService;
     private readonly ILogger<BackgroundSyncService> _logger;
     private Timer? _timer;
-    private int _isSyncing; // 使用 int 用于 Interlocked 操作
     private Guid? _userId;
     private readonly SemaphoreSlim _syncLock = new(1, 1);
 

@@ -83,19 +83,10 @@ public class BillsController : BaseApiController
     {
         var userId = GetUserId();
 
-        if (request.Amount <= 0)
+        var validationError = ValidateBillRequest(request);
+        if (validationError != null)
         {
-            return BadRequest(new { message = "金额必须大于0" });
-        }
-
-        if (request.CategoryId == Guid.Empty)
-        {
-            return BadRequest(new { message = "请选择分类" });
-        }
-
-        if (request.PaymentChannelId == Guid.Empty)
-        {
-            return BadRequest(new { message = "请选择支付渠道" });
+            return validationError;
         }
 
         var bill = new Core.Entities.Bill
@@ -125,19 +116,10 @@ public class BillsController : BaseApiController
     {
         var userId = GetUserId();
 
-        if (request.Amount <= 0)
+        var validationError = ValidateBillRequest(request);
+        if (validationError != null)
         {
-            return BadRequest(new { message = "金额必须大于0" });
-        }
-
-        if (request.CategoryId == Guid.Empty)
-        {
-            return BadRequest(new { message = "请选择分类" });
-        }
-
-        if (request.PaymentChannelId == Guid.Empty)
-        {
-            return BadRequest(new { message = "请选择支付渠道" });
+            return validationError;
         }
 
         var bill = new Core.Entities.Bill
@@ -179,7 +161,27 @@ public class BillsController : BaseApiController
             return NotFound(new { message = "账单不存在" });
         }
 
-        return Ok(new { message = "删除成功" });
+        return NoContent();
+    }
+
+    private IActionResult? ValidateBillRequest(BillRequest request)
+    {
+        if (request.Amount <= 0)
+        {
+            return BadRequest(new { message = "金额必须大于0" });
+        }
+
+        if (request.CategoryId == Guid.Empty)
+        {
+            return BadRequest(new { message = "请选择分类" });
+        }
+
+        if (request.PaymentChannelId == Guid.Empty)
+        {
+            return BadRequest(new { message = "请选择支付渠道" });
+        }
+
+        return null;
     }
 
     private static object MapToResponse(Core.Entities.Bill bill) => new

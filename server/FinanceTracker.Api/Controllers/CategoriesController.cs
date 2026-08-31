@@ -27,15 +27,7 @@ public class CategoriesController : BaseApiController
         var userId = GetUserId();
         var categories = await _categoryService.GetCategoriesAsync(userId, type);
 
-        return Ok(categories.Select(c => new
-        {
-            id = c.Id,
-            name = c.Name,
-            icon = c.Icon,
-            type = c.Type.ToString(),
-            isPreset = c.IsPreset,
-            sortOrder = c.SortOrder
-        }));
+        return Ok(categories.Select(MapToResponse));
     }
 
     /// <summary>
@@ -54,15 +46,7 @@ public class CategoriesController : BaseApiController
             return NotFound(new { message = "分类不存在" });
         }
 
-        return Ok(new
-        {
-            id = category.Id,
-            name = category.Name,
-            icon = category.Icon,
-            type = category.Type.ToString(),
-            isPreset = category.IsPreset,
-            sortOrder = category.SortOrder
-        });
+        return Ok(MapToResponse(category));
     }
 
     /// <summary>
@@ -91,15 +75,7 @@ public class CategoriesController : BaseApiController
 
         var createdCategory = await _categoryService.CreateCategoryAsync(category);
 
-        return CreatedAtAction(nameof(GetCategory), new { id = createdCategory.Id }, new
-        {
-            id = createdCategory.Id,
-            name = createdCategory.Name,
-            icon = createdCategory.Icon,
-            type = createdCategory.Type.ToString(),
-            isPreset = createdCategory.IsPreset,
-            sortOrder = createdCategory.SortOrder
-        });
+        return CreatedAtAction(nameof(GetCategory), new { id = createdCategory.Id }, MapToResponse(createdCategory));
     }
 
     /// <summary>
@@ -118,6 +94,18 @@ public class CategoriesController : BaseApiController
             return BadRequest(new { message = "分类名称不能为空" });
         }
 
+        // 检查分类是否存在且属于当前用户
+        var existingCategory = await _categoryService.GetCategoryByIdAsync(id);
+        if (existingCategory == null || (!existingCategory.IsPreset && existingCategory.UserId != userId))
+        {
+            return NotFound(new { message = "分类不存在" });
+        }
+
+        if (existingCategory.IsPreset)
+        {
+            return Forbid("不能修改预设分类");
+        }
+
         var category = new Core.Entities.Category
         {
             Id = id,
@@ -131,24 +119,11 @@ public class CategoriesController : BaseApiController
         try
         {
             var updatedCategory = await _categoryService.UpdateCategoryAsync(category);
-
-            return Ok(new
-            {
-                id = updatedCategory.Id,
-                name = updatedCategory.Name,
-                icon = updatedCategory.Icon,
-                type = updatedCategory.Type.ToString(),
-                isPreset = updatedCategory.IsPreset,
-                sortOrder = updatedCategory.SortOrder
-            });
+            return Ok(MapToResponse(updatedCategory));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Forbid(ex.Message);
         }
     }
 
@@ -171,7 +146,7 @@ public class CategoriesController : BaseApiController
                 return NotFound(new { message = "分类不存在" });
             }
 
-            return Ok(new { message = "删除成功" });
+            return NoContent();
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -182,6 +157,16 @@ public class CategoriesController : BaseApiController
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    private static object MapToResponse(Core.Entities.Category category) => new
+    {
+        id = category.Id,
+        name = category.Name,
+        icon = category.Icon,
+        type = category.Type.ToString(),
+        isPreset = category.IsPreset,
+        sortOrder = category.SortOrder
+    };
 }
 
 /// <summary>

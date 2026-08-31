@@ -29,6 +29,11 @@ if (jwtSettings.SecretKey.Length < 32)
     throw new InvalidOperationException("JWT SecretKey 长度必须至少 32 个字符");
 }
 
+if (string.IsNullOrWhiteSpace(jwtSettings.Issuer) || string.IsNullOrWhiteSpace(jwtSettings.Audience))
+{
+    throw new InvalidOperationException("JWT Issuer 和 Audience 不能为空");
+}
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
