@@ -9,3 +9,4 @@ C:\code\finance-tracker\src\FinanceTracker.Shared\obj\Debug\net10.0\FinanceTrack
 C:\code\finance-tracker\src\FinanceTracker.Shared\obj\Debug\net10.0\refint\FinanceTracker.Shared.dll
 C:\code\finance-tracker\src\FinanceTracker.Shared\obj\Debug\net10.0\FinanceTracker.Shared.pdb
 C:\code\finance-tracker\src\FinanceTracker.Shared\obj\Debug\net10.0\ref\FinanceTracker.Shared.dll
+C:\code\finance-tracker\src\FinanceTracker.Shared\obj\Debug\net10.0\FinanceTracker.Shared.sourcelink.json

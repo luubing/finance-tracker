@@ -3,7 +3,7 @@ namespace FinanceTracker.Core.Entities;
 /// <summary>
 /// 用户实体
 /// </summary>
-public class User
+public class User : BaseEntity
 {
     /// <summary>
     /// 用户ID
@@ -14,11 +14,6 @@ public class User
     /// 手机号（唯一标识）
     /// </summary>
     public string PhoneNumber { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 创建时间
-    /// </summary>
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
     /// 是否已删除（软删除）

@@ -2934,12 +2934,8 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\Masa.Blazor\js\wrappers\vditor\vditor-helper.js
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_framework\blazor.modules.json
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_framework\blazor.webview.js
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\FinanceTracker.App.styles.css
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\FinanceTracker.Web.zw2t6q13lo.bundle.scp.css.gz
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\exampleJsInterop.js.gz
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\FinanceTracker.Web.zw2t6q13lo.bundle.scp.css.br
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\exampleJsInterop.js.br
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\FinanceTracker.Web.zw2t6q13lo.bundle.scp.css
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\background.png
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\exampleJsInterop.js
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\OpenSans-Regular.ttf
@@ -3030,3 +3026,4 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\index.html.gz
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\index.html.br
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\index.html
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\FinanceTracker.App.sourcelink.json

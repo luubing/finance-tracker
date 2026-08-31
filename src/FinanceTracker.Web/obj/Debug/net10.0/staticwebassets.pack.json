@@ -1,10 +1,6 @@
 {
   "Files": [
     {
-      "Id": "C:\\code\\finance-tracker\\src\\FinanceTracker.Web\\obj\\Debug\\net10.0\\scopedcss\\projectbundle\\FinanceTracker.Web.bundle.scp.css",
-      "PackagePath": "staticwebassets\\FinanceTracker.Web.zw2t6q13lo.bundle.scp.css"
-    },
-    {
       "Id": "C:\\code\\finance-tracker\\src\\FinanceTracker.Web\\wwwroot\\background.png",
       "PackagePath": "staticwebassets\\background.png"
     },

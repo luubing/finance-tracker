@@ -3,7 +3,7 @@ namespace FinanceTracker.Core.Entities;
 /// <summary>
 /// 支付渠道
 /// </summary>
-public class PaymentChannel
+public class PaymentChannel : BaseEntity
 {
     /// <summary>
     /// 渠道ID

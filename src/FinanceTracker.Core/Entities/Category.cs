@@ -5,7 +5,7 @@ namespace FinanceTracker.Core.Entities;
 /// <summary>
 /// 分类
 /// </summary>
-public class Category
+public class Category : BaseEntity
 {
     /// <summary>
     /// 分类ID

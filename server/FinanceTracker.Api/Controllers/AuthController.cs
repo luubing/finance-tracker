@@ -1,4 +1,5 @@
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Shared.Validators;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -25,15 +26,10 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+        var validationResult = PhoneValidator.Validate(request.PhoneNumber);
+        if (!validationResult.IsValid)
         {
-            return BadRequest(new { message = "手机号不能为空" });
-        }
-
-        // 简单的手机号格式验证
-        if (request.PhoneNumber.Length != 11 || !request.PhoneNumber.StartsWith("1"))
-        {
-            return BadRequest(new { message = "手机号格式不正确" });
+            return BadRequest(new { message = validationResult.ErrorMessage });
         }
 
         var user = await _authService.RegisterOrLoginAsync(request.PhoneNumber);

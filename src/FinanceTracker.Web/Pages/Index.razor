@@ -1,8 +1,10 @@
 @page "/"
 @using FinanceTracker.Core.Interfaces
+@using Microsoft.Extensions.Logging
 @inject IAuthService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject ILogger<Index> Logger
 
 @if (_isLoading)
 {
@@ -25,7 +27,7 @@ else
                         欢迎回来
                     </MCardTitle>
                     <MCardText>
-                        <div class="text-h6">手机号: @_user.PhoneNumber</div>
+                        <div class="text-h6">手机号: @MaskPhoneNumber(_user.PhoneNumber)</div>
                         <div class="text-body-2 text--secondary">注册时间: @_user.CreatedAt.ToString("yyyy-MM-dd HH:mm")</div>
                     </MCardText>
                 </MCard>
@@ -81,14 +83,25 @@ else
                 _user = await AuthService.GetUserByIdAsync(userId);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 忽略错误，显示登录页面
+            // 记录异常，但不影响用户体验
+            Logger.LogWarning(ex, "加载用户信息失败，将显示登录页面");
         }
         finally
         {
             _isLoading = false;
         }
+    }
+
+    private string MaskPhoneNumber(string phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber) || phoneNumber.Length != 11)
+        {
+            return phoneNumber;
+        }
+
+        return $"{phoneNumber[..3]}****{phoneNumber[7..]}";
     }
 
     private void NavigateToAddBill()

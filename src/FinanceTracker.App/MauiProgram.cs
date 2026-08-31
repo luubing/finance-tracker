@@ -40,6 +40,21 @@ public static class MauiProgram
         builder.Logging.AddDebug();
 #endif
 
-        return builder.Build();
+        var app = builder.Build();
+
+        // 初始化数据库和预设数据
+        InitializeDatabaseAsync(app.Services).Wait();
+
+        return app;
+    }
+
+    private static async Task InitializeDatabaseAsync(IServiceProvider services)
+    {
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await context.Database.MigrateAsync();
+
+        var presetService = scope.ServiceProvider.GetRequiredService<IPresetDataService>();
+        await presetService.InitializePresetDataAsync();
     }
 }

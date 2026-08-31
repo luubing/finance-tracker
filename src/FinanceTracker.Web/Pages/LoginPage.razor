@@ -1,8 +1,10 @@
 @page "/login"
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Shared.Validators
 @inject IAuthService AuthService
 @inject NavigationManager Navigation
 @inject IJSRuntime JSRuntime
+@inject IPopupService PopupService
 
 <MContainer Style="max-width: 400px; margin-top: 100px;">
     <MCard>
@@ -52,9 +54,11 @@
 
     private List<Func<string, StringBoolean>> PhoneNumberRules => new()
     {
-        value => string.IsNullOrWhiteSpace(value) ? "请输入手机号" : true,
-        value => value.Length != 11 ? "手机号必须是11位" : true,
-        value => !value.StartsWith("1") ? "手机号格式不正确" : true
+        value =>
+        {
+            var result = PhoneValidator.Validate(value);
+            return result.IsValid ? true : result.ErrorMessage!;
+        }
     };
 
     private async Task HandleLogin()
@@ -77,8 +81,8 @@
         }
         catch (Exception ex)
         {
-            // 显示错误信息
-            await JSRuntime.InvokeVoidAsync("alert", $"登录失败: {ex.Message}");
+            // 使用 MASA Blazor 的 PopupService 显示错误信息
+            await PopupService.EnqueueSnackbarAsync($"登录失败: {ex.Message}", AlertTypes.Error);
         }
         finally
         {

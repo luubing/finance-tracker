@@ -388,3 +388,4 @@ C:\code\finance-tracker\src\FinanceTracker.App\bin\Debug\net10.0-ios\iossimulato
 C:\code\finance-tracker\src\FinanceTracker.App\bin\Debug\net10.0-ios\iossimulator-x64\SQLitePCLRaw.core.dll
 C:\code\finance-tracker\src\FinanceTracker.App\bin\Debug\net10.0-ios\iossimulator-x64\SQLitePCLRaw.lib.e_sqlite3.ios.dll
 C:\code\finance-tracker\src\FinanceTracker.App\bin\Debug\net10.0-ios\iossimulator-x64\SQLitePCLRaw.provider.internal.dll
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-ios\iossimulator-x64\FinanceTracker.App.sourcelink.json

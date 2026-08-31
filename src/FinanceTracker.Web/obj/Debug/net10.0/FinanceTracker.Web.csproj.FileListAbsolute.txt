@@ -18,12 +18,8 @@ C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\FinanceTracker.
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\rjimswa.dswa.cache.json
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\rjsmrazor.dswa.cache.json
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\rjsmcshtml.dswa.cache.json
-C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\scopedcss\Component1.razor.rz.scp.css
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\scopedcss\bundle\FinanceTracker.Web.styles.css
-C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\scopedcss\projectbundle\FinanceTracker.Web.bundle.scp.css
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\compressed\fk8il5rrd6-{0}-6pqz8bsss0-6pqz8bsss0.gz
-C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\compressed\lglg84dy6w-{0}-zw2t6q13lo-zw2t6q13lo.gz
-C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\compressed\ca8rx5gtrh-{0}-zw2t6q13lo-zw2t6q13lo.gz
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\staticwebassets.build.json
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\staticwebassets.build.json.cache
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\staticwebassets.development.json
@@ -41,3 +37,4 @@ C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\refint\FinanceT
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\FinanceTracker.Web.pdb
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\ref\FinanceTracker.Web.dll
 C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\compressed\kst936f2on-{0}-pb6m4a4aws-pb6m4a4aws.gz
+C:\code\finance-tracker\src\FinanceTracker.Web\obj\Debug\net10.0\FinanceTracker.Web.sourcelink.json

@@ -1,3 +1,4 @@
+using FinanceTracker.Api.Middleware;
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
@@ -25,6 +26,8 @@ builder.Services.AddControllers();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+app.UseMiddleware<ExceptionHandlingMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -33,5 +36,15 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.MapControllers();
+
+// 初始化数据库和预设数据
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await context.Database.MigrateAsync();
+
+    var presetService = scope.ServiceProvider.GetRequiredService<IPresetDataService>();
+    await presetService.InitializePresetDataAsync();
+}
 
 app.Run();

@@ -13,3 +13,4 @@ C:\code\finance-tracker\src\FinanceTracker.Core\obj\Debug\net10.0\FinanceTracker
 C:\code\finance-tracker\src\FinanceTracker.Core\obj\Debug\net10.0\refint\FinanceTracker.Core.dll
 C:\code\finance-tracker\src\FinanceTracker.Core\obj\Debug\net10.0\FinanceTracker.Core.pdb
 C:\code\finance-tracker\src\FinanceTracker.Core\obj\Debug\net10.0\ref\FinanceTracker.Core.dll
+C:\code\finance-tracker\src\FinanceTracker.Core\obj\Debug\net10.0\FinanceTracker.Core.sourcelink.json
