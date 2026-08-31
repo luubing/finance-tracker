@@ -51,7 +51,7 @@ public class SyncService : ISyncService
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "同步账单 {BillId} 失败", bill.Id);
-                    bill.SyncStatus = SyncStatus.Synced;
+                    bill.SyncStatus = SyncStatus.Failed;
                     result.FailedCount++;
                 }
             }

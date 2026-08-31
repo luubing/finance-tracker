@@ -19,7 +19,7 @@ public class PaymentChannelService : IPaymentChannelService
     public async Task<List<PaymentChannel>> GetPaymentChannelsAsync(Guid? userId)
     {
         var query = _context.PaymentChannels
-            .Where(c => c.IsPreset || (userId.HasValue && c.UserId == userId.Value));
+            .Where(c => !c.IsDeleted && (c.IsPreset || (userId.HasValue && c.UserId == userId.Value)));
 
         return await query
             .OrderBy(c => c.SortOrder)
@@ -29,7 +29,7 @@ public class PaymentChannelService : IPaymentChannelService
     public async Task<PaymentChannel?> GetPaymentChannelByIdAsync(Guid channelId)
     {
         return await _context.PaymentChannels
-            .FirstOrDefaultAsync(c => c.Id == channelId);
+            .FirstOrDefaultAsync(c => c.Id == channelId && !c.IsDeleted);
     }
 
     public async Task<PaymentChannel> CreatePaymentChannelAsync(PaymentChannel channel)

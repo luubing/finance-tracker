@@ -87,7 +87,7 @@
                     <MCardText>
                         @if (_trendData.Any())
                         {
-                            <MLineChart Data="@_expenseChartData" Height="300" />
+                            <MECharts Option="@_expenseLineOption" Height="300" />
                         }
                         else
                         {
@@ -108,7 +108,7 @@
                     <MCardText>
                         @if (_trendData.Any())
                         {
-                            <MLineChart Data="@_incomeChartData" Height="300" />
+                            <MECharts Option="@_incomeLineOption" Height="300" />
                         }
                         else
                         {
@@ -119,7 +119,7 @@
             </MCol>
         </MRow>
 
-        <MRow>
+        <MRow Class="mb-4">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -129,7 +129,7 @@
                     <MCardText>
                         @if (_trendData.Any())
                         {
-                            <MLineChart Data="@_netIncomeChartData" Height="300" />
+                            <MECharts Option="@_netIncomeLineOption" Height="300" />
                         }
                         else
                         {
@@ -187,9 +187,9 @@
     private string _selectedDimension = "day";
 
     private List<TrendDataModel> _trendData = new();
-    private List<LineChartData> _expenseChartData = new();
-    private List<LineChartData> _incomeChartData = new();
-    private List<LineChartData> _netIncomeChartData = new();
+    private object? _expenseLineOption;
+    private object? _incomeLineOption;
+    private object? _netIncomeLineOption;
 
     private decimal _totalExpense;
     private decimal _totalIncome;
@@ -247,44 +247,11 @@
             _totalNetIncome = _trendData.Sum(t => t.NetIncome);
 
             // 准备图表数据
-            _expenseChartData = new List<LineChartData>
-            {
-                new()
-                {
-                    Name = "支出",
-                    Data = _trendData.Select(t => new LineChartPoint
-                    {
-                        X = t.Date.ToString("MM-dd"),
-                        Y = t.Expense
-                    }).ToList()
-                }
-            };
+            var dates = _trendData.Select(t => t.Date.ToString("MM-dd")).ToArray();
 
-            _incomeChartData = new List<LineChartData>
-            {
-                new()
-                {
-                    Name = "收入",
-                    Data = _trendData.Select(t => new LineChartPoint
-                    {
-                        X = t.Date.ToString("MM-dd"),
-                        Y = t.Income
-                    }).ToList()
-                }
-            };
-
-            _netIncomeChartData = new List<LineChartData>
-            {
-                new()
-                {
-                    Name = "净收支",
-                    Data = _trendData.Select(t => new LineChartPoint
-                    {
-                        X = t.Date.ToString("MM-dd"),
-                        Y = t.NetIncome
-                    }).ToList()
-                }
-            };
+            _expenseLineOption = BuildLineOption("支出趋势", dates, _trendData.Select(t => t.Expense).ToArray());
+            _incomeLineOption = BuildLineOption("收入趋势", dates, _trendData.Select(t => t.Income).ToArray());
+            _netIncomeLineOption = BuildLineOption("净收支趋势", dates, _trendData.Select(t => t.NetIncome).ToArray());
         }
         catch (Exception ex)
         {
@@ -294,6 +261,35 @@
         {
             _isLoading = false;
         }
+    }
+
+    private object BuildLineOption(string title, string[] dates, decimal[] values)
+    {
+        return new
+        {
+            title = new { text = title, left = "center" },
+            tooltip = new { trigger = "axis" },
+            legend = new { data = new[] { title }, bottom = "0" },
+            xAxis = new
+            {
+                type = "category",
+                data = dates,
+                axisLabel = new { rotate = 45 }
+            },
+            yAxis = new { type = "value", axisLabel = new { formatter = "¥{value}" } },
+            series = new[]
+            {
+                new
+                {
+                    name = title,
+                    type = "line",
+                    data = values.Select(v => (double)v).ToArray(),
+                    smooth = true,
+                    areaStyle = new { opacity = 0.3 },
+                    itemStyle = new { color = title.Contains("支出") ? "#FF5252" : title.Contains("收入") ? "#4CAF50" : "#2196F3" }
+                }
+            }
+        };
     }
 
     private (DateTime startDate, DateTime endDate) GetDateRange(string range)
@@ -329,17 +325,5 @@
         public decimal Expense { get; set; }
         public decimal Income { get; set; }
         public decimal NetIncome { get; set; }
-    }
-
-    private class LineChartData
-    {
-        public string Name { get; set; } = string.Empty;
-        public List<LineChartPoint> Data { get; set; } = new();
-    }
-
-    private class LineChartPoint
-    {
-        public string X { get; set; } = string.Empty;
-        public decimal Y { get; set; }
     }
 }

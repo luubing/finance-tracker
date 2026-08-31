@@ -28,7 +28,7 @@ public class BillService : IBillService
         int pageSize = 20)
     {
         var query = _context.Bills
-            .Where(b => b.UserId == userId);
+            .Where(b => b.UserId == userId && !b.IsDeleted);
 
         if (startDate.HasValue)
         {
@@ -136,7 +136,7 @@ public class BillService : IBillService
         BillType? type = null)
     {
         var query = _context.Bills
-            .Where(b => b.UserId == userId);
+            .Where(b => b.UserId == userId && !b.IsDeleted);
 
         if (startDate.HasValue)
         {

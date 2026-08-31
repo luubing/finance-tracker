@@ -1,4 +1,4 @@
-<api type="debug" assembly-name="FinanceTracker.App" mvid="165b5d4b7e3040da850dffa6843cd96a">
+<api type="debug" assembly-name="FinanceTracker.App" mvid="4e5ff4e8c77c431094d726db2e946629">
   <java-to-managed>
     <entry java-name="crc64b478ddc5c2b788e8/MainActivity" managed-name="FinanceTracker.App.MainActivity, FinanceTracker.App" managed-type-token-id="33554442" />
     <entry java-name="crc64b478ddc5c2b788e8/MainApplication" managed-name="FinanceTracker.App.MainApplication, FinanceTracker.App" managed-type-token-id="33554443" />

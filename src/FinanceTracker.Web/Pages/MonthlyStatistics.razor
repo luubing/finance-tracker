@@ -80,7 +80,7 @@
                         {
                             <MRow>
                                 <MCol Cols="12" Md="6">
-                                    <MPieChart Data="@_expenseChartData" Height="300" />
+                                    <MECharts Option="@_expensePieOption" Height="300" />
                                 </MCol>
                                 <MCol Cols="12" Md="6">
                                     <MList>
@@ -125,7 +125,7 @@
                         {
                             <MRow>
                                 <MCol Cols="12" Md="6">
-                                    <MPieChart Data="@_incomeChartData" Height="300" />
+                                    <MECharts Option="@_incomePieOption" Height="300" />
                                 </MCol>
                                 <MCol Cols="12" Md="6">
                                     <MList>
@@ -167,8 +167,8 @@
     private MonthlyStatisticsModel? _monthlyStats;
     private List<CategoryStatisticsModel> _expenseCategories = new();
     private List<CategoryStatisticsModel> _incomeCategories = new();
-    private List<PieChartData> _expenseChartData = new();
-    private List<PieChartData> _incomeChartData = new();
+    private object? _expensePieOption;
+    private object? _incomePieOption;
 
     private Guid _userId;
 
@@ -211,11 +211,7 @@
                 Count = s.Count
             }).ToList();
 
-            _expenseChartData = _expenseCategories.Select(c => new PieChartData
-            {
-                Name = c.CategoryName,
-                Value = c.Amount
-            }).ToList();
+            _expensePieOption = BuildPieOption(_expenseCategories, "支出分类");
 
             // 加载收入分类统计
             var incomeStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Income);
@@ -229,11 +225,7 @@
                 Count = s.Count
             }).ToList();
 
-            _incomeChartData = _incomeCategories.Select(c => new PieChartData
-            {
-                Name = c.CategoryName,
-                Value = c.Amount
-            }).ToList();
+            _incomePieOption = BuildPieOption(_incomeCategories, "收入分类");
         }
         catch (Exception ex)
         {
@@ -243,6 +235,35 @@
         {
             _isLoading = false;
         }
+    }
+
+    private object BuildPieOption(List<CategoryStatisticsModel> categories, string title)
+    {
+        return new
+        {
+            title = new { text = title, left = "center" },
+            tooltip = new { trigger = "item", formatter = "{b}: ¥{c} ({d}%)" },
+            legend = new { orient = "vertical", left = "left" },
+            series = new[]
+            {
+                new
+                {
+                    name = title,
+                    type = "pie",
+                    radius = "50%",
+                    data = categories.Select(c => new { name = c.CategoryName, value = c.Amount }).ToArray(),
+                    emphasis = new
+                    {
+                        itemStyle = new
+                        {
+                            shadowBlur = 10,
+                            shadowOffsetX = 0,
+                            shadowColor = "rgba(0, 0, 0, 0.5)"
+                        }
+                    }
+                }
+            }
+        };
     }
 
     private async Task PreviousMonth()
@@ -283,11 +304,5 @@
         public decimal Amount { get; set; }
         public decimal Percentage { get; set; }
         public int Count { get; set; }
-    }
-
-    private class PieChartData
-    {
-        public string Name { get; set; } = string.Empty;
-        public decimal Value { get; set; }
     }
 }

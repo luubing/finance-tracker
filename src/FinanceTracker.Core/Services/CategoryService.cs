@@ -20,7 +20,7 @@ public class CategoryService : ICategoryService
     public async Task<List<Category>> GetCategoriesAsync(Guid? userId, BillType? type = null)
     {
         var query = _context.Categories
-            .Where(c => c.IsPreset || (userId.HasValue && c.UserId == userId.Value));
+            .Where(c => !c.IsDeleted && (c.IsPreset || (userId.HasValue && c.UserId == userId.Value)));
 
         if (type.HasValue)
         {
@@ -36,7 +36,7 @@ public class CategoryService : ICategoryService
     public async Task<Category?> GetCategoryByIdAsync(Guid categoryId)
     {
         return await _context.Categories
-            .FirstOrDefaultAsync(c => c.Id == categoryId);
+            .FirstOrDefaultAsync(c => c.Id == categoryId && !c.IsDeleted);
     }
 
     public async Task<Category> CreateCategoryAsync(Category category)
