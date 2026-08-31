@@ -1,6 +1,7 @@
+using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
-using FinanceTracker.Shared.Validators;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -10,6 +11,7 @@ namespace FinanceTracker.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class CategoriesController : ControllerBase
 {
     private readonly ICategoryService _categoryService;
@@ -19,15 +21,25 @@ public class CategoriesController : ControllerBase
         _categoryService = categoryService;
     }
 
+    private Guid GetUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            throw new UnauthorizedAccessException("未授权");
+        }
+        return userId;
+    }
+
     /// <summary>
     /// 获取分类列表
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <param name="type">分类类型（Expense/Income）</param>
     /// <returns>分类列表</returns>
     [HttpGet]
-    public async Task<IActionResult> GetCategories([FromQuery] Guid? userId, [FromQuery] BillType? type = null)
+    public async Task<IActionResult> GetCategories([FromQuery] BillType? type = null)
     {
+        var userId = GetUserId();
         var categories = await _categoryService.GetCategoriesAsync(userId, type);
 
         return Ok(categories.Select(c => new
@@ -49,9 +61,10 @@ public class CategoriesController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetCategory(Guid id)
     {
+        var userId = GetUserId();
         var category = await _categoryService.GetCategoryByIdAsync(id);
 
-        if (category == null)
+        if (category == null || (!category.IsPreset && category.UserId != userId))
         {
             return NotFound(new { message = "分类不存在" });
         }
@@ -75,19 +88,16 @@ public class CategoriesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryRequest request)
     {
+        var userId = GetUserId();
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { message = "分类名称不能为空" });
         }
 
-        if (request.UserId == Guid.Empty)
-        {
-            return BadRequest(new { message = "用户ID不能为空" });
-        }
-
         var category = new Core.Entities.Category
         {
-            UserId = request.UserId,
+            UserId = userId,
             Name = request.Name,
             Icon = request.Icon ?? "mdi-tag",
             Type = request.Type,
@@ -116,6 +126,8 @@ public class CategoriesController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequest request)
     {
+        var userId = GetUserId();
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { message = "分类名称不能为空" });
@@ -124,7 +136,7 @@ public class CategoriesController : ControllerBase
         var category = new Core.Entities.Category
         {
             Id = id,
-            UserId = request.UserId,
+            UserId = userId,
             Name = request.Name,
             Icon = request.Icon ?? "mdi-tag",
             Type = request.Type,
@@ -159,11 +171,12 @@ public class CategoriesController : ControllerBase
     /// 删除自定义分类
     /// </summary>
     /// <param name="id">分类ID</param>
-    /// <param name="userId">用户ID</param>
     /// <returns>删除结果</returns>
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteCategory(Guid id, [FromQuery] Guid userId)
+    public async Task<IActionResult> DeleteCategory(Guid id)
     {
+        var userId = GetUserId();
+
         try
         {
             var result = await _categoryService.DeleteCategoryAsync(id, userId);
@@ -192,11 +205,6 @@ public class CategoriesController : ControllerBase
 public class CreateCategoryRequest
 {
     /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
-    /// <summary>
     /// 分类名称
     /// </summary>
     public string Name { get; set; } = string.Empty;
@@ -222,11 +230,6 @@ public class CreateCategoryRequest
 /// </summary>
 public class UpdateCategoryRequest
 {
-    /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
     /// <summary>
     /// 分类名称
     /// </summary>

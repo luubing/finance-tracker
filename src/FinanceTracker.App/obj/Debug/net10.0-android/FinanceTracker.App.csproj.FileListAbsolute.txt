@@ -2524,7 +2524,6 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\assets\x86_64\_Microsoft.Android.Resource.Designer.typemap.xml
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\__environment__.txt
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.arm64-v8a.ll
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.x86_64.ll
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\AndroidManifest.xml
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\AndroidManifest.xml
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\src\mono\MonoRuntimeProvider.java
@@ -2533,9 +2532,7 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\bin\mono.android.jar
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\static.flag
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.arm64-v8a.ll
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.x86_64.ll
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.arm64-v8a.ll
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.x86_64.ll
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\src\androidx\activity\ktx\R.java
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\src\androidx\activity\R.java
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\src\androidx\annotation\experimental\R.java
@@ -2944,19 +2941,12 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\src\com\financetracker\app\R.java
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\_CompileJava.FileList.txt
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.arm64-v8a.ll
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.x86_64.ll
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.arm64-v8a.o
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.x86_64.o
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.arm64-v8a.o
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.x86_64.o
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.arm64-v8a.o
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.x86_64.o
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.arm64-v8a.o
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.x86_64.o
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\jni_remap.arm64-v8a.o
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\jni_remap.x86_64.o
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\app_shared_libraries\arm64-v8a\libxamarin-app.so
-C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\app_shared_libraries\x86_64\libxamarin-app.so
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\bin\classes.dex
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\bin\classes2.dex
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\stamp\_CleanIntermediateIfNeeded.stamp

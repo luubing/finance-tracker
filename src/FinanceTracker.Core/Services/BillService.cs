@@ -78,6 +78,12 @@ public class BillService : IBillService
         bill.SyncStatus = SyncStatus.Pending;
         bill.Source = BillSource.Manual;
 
+        // 确保 TransactionTime 为 UTC 时间
+        if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+        {
+            bill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+        }
+
         _context.Bills.Add(bill);
         await _context.SaveChangesAsync();
 
@@ -99,7 +105,17 @@ public class BillService : IBillService
         existingBill.Type = bill.Type;
         existingBill.CategoryId = bill.CategoryId;
         existingBill.PaymentChannelId = bill.PaymentChannelId;
-        existingBill.TransactionTime = bill.TransactionTime;
+
+        // 确保 TransactionTime 为 UTC 时间
+        if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+        {
+            existingBill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+        }
+        else
+        {
+            existingBill.TransactionTime = bill.TransactionTime;
+        }
+
         existingBill.Note = bill.Note;
         existingBill.SyncStatus = SyncStatus.Pending;
 

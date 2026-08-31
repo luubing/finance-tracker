@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using FinanceTracker.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -8,6 +10,7 @@ namespace FinanceTracker.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class PaymentChannelsController : ControllerBase
 {
     private readonly IPaymentChannelService _paymentChannelService;
@@ -17,14 +20,24 @@ public class PaymentChannelsController : ControllerBase
         _paymentChannelService = paymentChannelService;
     }
 
+    private Guid GetUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            throw new UnauthorizedAccessException("未授权");
+        }
+        return userId;
+    }
+
     /// <summary>
     /// 获取支付渠道列表
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <returns>支付渠道列表</returns>
     [HttpGet]
-    public async Task<IActionResult> GetPaymentChannels([FromQuery] Guid? userId)
+    public async Task<IActionResult> GetPaymentChannels()
     {
+        var userId = GetUserId();
         var channels = await _paymentChannelService.GetPaymentChannelsAsync(userId);
 
         return Ok(channels.Select(c => new
@@ -45,9 +58,10 @@ public class PaymentChannelsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetPaymentChannel(Guid id)
     {
+        var userId = GetUserId();
         var channel = await _paymentChannelService.GetPaymentChannelByIdAsync(id);
 
-        if (channel == null)
+        if (channel == null || (!channel.IsPreset && channel.UserId != userId))
         {
             return NotFound(new { message = "支付渠道不存在" });
         }
@@ -70,19 +84,16 @@ public class PaymentChannelsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreatePaymentChannel([FromBody] CreatePaymentChannelRequest request)
     {
+        var userId = GetUserId();
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { message = "渠道名称不能为空" });
         }
 
-        if (request.UserId == Guid.Empty)
-        {
-            return BadRequest(new { message = "用户ID不能为空" });
-        }
-
         var channel = new Core.Entities.PaymentChannel
         {
-            UserId = request.UserId,
+            UserId = userId,
             Name = request.Name,
             Icon = request.Icon ?? "mdi-credit-card",
             SortOrder = request.SortOrder
@@ -109,6 +120,8 @@ public class PaymentChannelsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdatePaymentChannel(Guid id, [FromBody] UpdatePaymentChannelRequest request)
     {
+        var userId = GetUserId();
+
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return BadRequest(new { message = "渠道名称不能为空" });
@@ -117,7 +130,7 @@ public class PaymentChannelsController : ControllerBase
         var channel = new Core.Entities.PaymentChannel
         {
             Id = id,
-            UserId = request.UserId,
+            UserId = userId,
             Name = request.Name,
             Icon = request.Icon ?? "mdi-credit-card",
             SortOrder = request.SortOrder
@@ -150,11 +163,12 @@ public class PaymentChannelsController : ControllerBase
     /// 删除自定义支付渠道
     /// </summary>
     /// <param name="id">渠道ID</param>
-    /// <param name="userId">用户ID</param>
     /// <returns>删除结果</returns>
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeletePaymentChannel(Guid id, [FromQuery] Guid userId)
+    public async Task<IActionResult> DeletePaymentChannel(Guid id)
     {
+        var userId = GetUserId();
+
         try
         {
             var result = await _paymentChannelService.DeletePaymentChannelAsync(id, userId);
@@ -183,11 +197,6 @@ public class PaymentChannelsController : ControllerBase
 public class CreatePaymentChannelRequest
 {
     /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
-    /// <summary>
     /// 渠道名称
     /// </summary>
     public string Name { get; set; } = string.Empty;
@@ -208,11 +217,6 @@ public class CreatePaymentChannelRequest
 /// </summary>
 public class UpdatePaymentChannelRequest
 {
-    /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
     /// <summary>
     /// 渠道名称
     /// </summary>

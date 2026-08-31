@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -9,6 +11,7 @@ namespace FinanceTracker.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class StatisticsController : ControllerBase
 {
     private readonly IStatisticsService _statisticsService;
@@ -18,19 +21,29 @@ public class StatisticsController : ControllerBase
         _statisticsService = statisticsService;
     }
 
+    private Guid GetUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            throw new UnauthorizedAccessException("未授权");
+        }
+        return userId;
+    }
+
     /// <summary>
     /// 获取月度统计数据
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
     /// <returns>月度统计数据</returns>
     [HttpGet("monthly")]
     public async Task<IActionResult> GetMonthlyStatistics(
-        [FromQuery] Guid userId,
         [FromQuery] int year,
         [FromQuery] int month)
     {
+        var userId = GetUserId();
+
         if (year < 2000 || year > 2100)
         {
             return BadRequest(new { message = "年份不正确" });
@@ -57,18 +70,18 @@ public class StatisticsController : ControllerBase
     /// <summary>
     /// 获取分类统计数据
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
     /// <param name="type">账单类型</param>
     /// <returns>分类统计数据</returns>
     [HttpGet("category")]
     public async Task<IActionResult> GetCategoryStatistics(
-        [FromQuery] Guid userId,
         [FromQuery] int year,
         [FromQuery] int month,
         [FromQuery] BillType type)
     {
+        var userId = GetUserId();
+
         if (year < 2000 || year > 2100)
         {
             return BadRequest(new { message = "年份不正确" });
@@ -95,18 +108,18 @@ public class StatisticsController : ControllerBase
     /// <summary>
     /// 获取趋势数据
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <param name="startDate">开始日期</param>
     /// <param name="endDate">结束日期</param>
     /// <param name="dimension">维度（day/week/month）</param>
     /// <returns>趋势数据</returns>
     [HttpGet("trend")]
     public async Task<IActionResult> GetTrendData(
-        [FromQuery] Guid userId,
         [FromQuery] DateTime startDate,
         [FromQuery] DateTime endDate,
         [FromQuery] string dimension = "day")
     {
+        var userId = GetUserId();
+
         if (startDate >= endDate)
         {
             return BadRequest(new { message = "开始日期必须早于结束日期" });

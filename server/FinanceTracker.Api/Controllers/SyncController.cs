@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using FinanceTracker.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -8,6 +10,7 @@ namespace FinanceTracker.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class SyncController : ControllerBase
 {
     private readonly ISyncService _syncService;
@@ -17,18 +20,24 @@ public class SyncController : ControllerBase
         _syncService = syncService;
     }
 
+    private Guid GetUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            throw new UnauthorizedAccessException("未授权");
+        }
+        return userId;
+    }
+
     /// <summary>
     /// 同步账单到云端
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <returns>同步结果</returns>
     [HttpPost("bills")]
-    public async Task<IActionResult> SyncBills([FromQuery] Guid userId)
+    public async Task<IActionResult> SyncBills()
     {
-        if (userId == Guid.Empty)
-        {
-            return BadRequest(new { message = "用户ID不能为空" });
-        }
+        var userId = GetUserId();
 
         var canSync = await _syncService.CanSyncAsync();
         if (!canSync)
@@ -50,16 +59,11 @@ public class SyncController : ControllerBase
     /// <summary>
     /// 获取待同步的账单数量
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <returns>待同步数量</returns>
     [HttpGet("pending-count")]
-    public async Task<IActionResult> GetPendingCount([FromQuery] Guid userId)
+    public async Task<IActionResult> GetPendingCount()
     {
-        if (userId == Guid.Empty)
-        {
-            return BadRequest(new { message = "用户ID不能为空" });
-        }
-
+        var userId = GetUserId();
         var count = await _syncService.GetOfflineCacheCountAsync(userId);
 
         return Ok(new { count });

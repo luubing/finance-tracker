@@ -1,5 +1,7 @@
+using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -9,6 +11,7 @@ namespace FinanceTracker.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class BillsController : ControllerBase
 {
     private readonly IBillService _billService;
@@ -18,10 +21,19 @@ public class BillsController : ControllerBase
         _billService = billService;
     }
 
+    private Guid GetUserId()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            throw new UnauthorizedAccessException("未授权");
+        }
+        return userId;
+    }
+
     /// <summary>
     /// 获取账单列表
     /// </summary>
-    /// <param name="userId">用户ID</param>
     /// <param name="startDate">开始日期</param>
     /// <param name="endDate">结束日期</param>
     /// <param name="categoryId">分类ID</param>
@@ -32,7 +44,6 @@ public class BillsController : ControllerBase
     /// <returns>账单列表</returns>
     [HttpGet]
     public async Task<IActionResult> GetBills(
-        [FromQuery] Guid userId,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null,
         [FromQuery] Guid? categoryId = null,
@@ -41,6 +52,8 @@ public class BillsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
+        var userId = GetUserId();
+
         var bills = await _billService.GetBillsAsync(
             userId, startDate, endDate, categoryId, paymentChannelId, type, page, pageSize);
 
@@ -80,9 +93,10 @@ public class BillsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetBill(Guid id)
     {
+        var userId = GetUserId();
         var bill = await _billService.GetBillByIdAsync(id);
 
-        if (bill == null)
+        if (bill == null || bill.UserId != userId)
         {
             return NotFound(new { message = "账单不存在" });
         }
@@ -114,10 +128,7 @@ public class BillsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateBill([FromBody] CreateBillRequest request)
     {
-        if (request.UserId == Guid.Empty)
-        {
-            return BadRequest(new { message = "用户ID不能为空" });
-        }
+        var userId = GetUserId();
 
         if (request.Amount <= 0)
         {
@@ -136,7 +147,7 @@ public class BillsController : ControllerBase
 
         var bill = new Core.Entities.Bill
         {
-            UserId = request.UserId,
+            UserId = userId,
             Amount = request.Amount,
             Type = request.Type,
             CategoryId = request.CategoryId,
@@ -175,6 +186,8 @@ public class BillsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateBill(Guid id, [FromBody] UpdateBillRequest request)
     {
+        var userId = GetUserId();
+
         if (request.Amount <= 0)
         {
             return BadRequest(new { message = "金额必须大于0" });
@@ -193,7 +206,7 @@ public class BillsController : ControllerBase
         var bill = new Core.Entities.Bill
         {
             Id = id,
-            UserId = request.UserId,
+            UserId = userId,
             Amount = request.Amount,
             Type = request.Type,
             CategoryId = request.CategoryId,
@@ -234,11 +247,11 @@ public class BillsController : ControllerBase
     /// 删除账单
     /// </summary>
     /// <param name="id">账单ID</param>
-    /// <param name="userId">用户ID</param>
     /// <returns>删除结果</returns>
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteBill(Guid id, [FromQuery] Guid userId)
+    public async Task<IActionResult> DeleteBill(Guid id)
     {
+        var userId = GetUserId();
         var result = await _billService.DeleteBillAsync(id, userId);
 
         if (!result)
@@ -255,11 +268,6 @@ public class BillsController : ControllerBase
 /// </summary>
 public class CreateBillRequest
 {
-    /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
     /// <summary>
     /// 金额
     /// </summary>
@@ -296,11 +304,6 @@ public class CreateBillRequest
 /// </summary>
 public class UpdateBillRequest
 {
-    /// <summary>
-    /// 用户ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
     /// <summary>
     /// 金额
     /// </summary>
