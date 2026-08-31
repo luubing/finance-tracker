@@ -1,7 +1,5 @@
-using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -9,26 +7,13 @@ namespace FinanceTracker.Api.Controllers;
 /// <summary>
 /// 统计控制器
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class StatisticsController : ControllerBase
+public class StatisticsController : BaseApiController
 {
     private readonly IStatisticsService _statisticsService;
 
     public StatisticsController(IStatisticsService statisticsService)
     {
         _statisticsService = statisticsService;
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
-        {
-            throw new UnauthorizedAccessException("未授权");
-        }
-        return userId;
     }
 
     /// <summary>

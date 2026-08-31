@@ -1,7 +1,5 @@
-using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -9,26 +7,13 @@ namespace FinanceTracker.Api.Controllers;
 /// <summary>
 /// 分类控制器
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class CategoriesController : ControllerBase
+public class CategoriesController : BaseApiController
 {
     private readonly ICategoryService _categoryService;
 
     public CategoriesController(ICategoryService categoryService)
     {
         _categoryService = categoryService;
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
-        {
-            throw new UnauthorizedAccessException("未授权");
-        }
-        return userId;
     }
 
     /// <summary>
@@ -86,7 +71,7 @@ public class CategoriesController : ControllerBase
     /// <param name="request">分类请求</param>
     /// <returns>创建的分类</returns>
     [HttpPost]
-    public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryRequest request)
+    public async Task<IActionResult> CreateCategory([FromBody] CategoryRequest request)
     {
         var userId = GetUserId();
 
@@ -124,7 +109,7 @@ public class CategoriesController : ControllerBase
     /// <param name="request">分类请求</param>
     /// <returns>更新的分类</returns>
     [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequest request)
+    public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] CategoryRequest request)
     {
         var userId = GetUserId();
 
@@ -200,35 +185,9 @@ public class CategoriesController : ControllerBase
 }
 
 /// <summary>
-/// 创建分类请求
+/// 分类请求
 /// </summary>
-public class CreateCategoryRequest
-{
-    /// <summary>
-    /// 分类名称
-    /// </summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 图标
-    /// </summary>
-    public string? Icon { get; set; }
-
-    /// <summary>
-    /// 分类类型
-    /// </summary>
-    public BillType Type { get; set; }
-
-    /// <summary>
-    /// 排序顺序
-    /// </summary>
-    public int SortOrder { get; set; }
-}
-
-/// <summary>
-/// 更新分类请求
-/// </summary>
-public class UpdateCategoryRequest
+public class CategoryRequest
 {
     /// <summary>
     /// 分类名称

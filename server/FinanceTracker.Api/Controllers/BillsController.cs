@@ -1,7 +1,5 @@
-using System.Security.Claims;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -9,26 +7,13 @@ namespace FinanceTracker.Api.Controllers;
 /// <summary>
 /// 账单控制器
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class BillsController : ControllerBase
+public class BillsController : BaseApiController
 {
     private readonly IBillService _billService;
 
     public BillsController(IBillService billService)
     {
         _billService = billService;
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
-        {
-            throw new UnauthorizedAccessException("未授权");
-        }
-        return userId;
     }
 
     /// <summary>
@@ -62,23 +47,7 @@ public class BillsController : ControllerBase
 
         return Ok(new
         {
-            items = bills.Select(b => new
-            {
-                id = b.Id,
-                amount = b.Amount,
-                type = b.Type.ToString(),
-                categoryId = b.CategoryId,
-                categoryName = b.Category?.Name,
-                categoryIcon = b.Category?.Icon,
-                paymentChannelId = b.PaymentChannelId,
-                paymentChannelName = b.PaymentChannel?.Name,
-                paymentChannelIcon = b.PaymentChannel?.Icon,
-                transactionTime = b.TransactionTime,
-                note = b.Note,
-                source = b.Source.ToString(),
-                syncStatus = b.SyncStatus.ToString(),
-                createdAt = b.CreatedAt
-            }),
+            items = bills.Select(MapToResponse),
             totalCount,
             page,
             pageSize
@@ -101,23 +70,7 @@ public class BillsController : ControllerBase
             return NotFound(new { message = "账单不存在" });
         }
 
-        return Ok(new
-        {
-            id = bill.Id,
-            amount = bill.Amount,
-            type = bill.Type.ToString(),
-            categoryId = bill.CategoryId,
-            categoryName = bill.Category?.Name,
-            categoryIcon = bill.Category?.Icon,
-            paymentChannelId = bill.PaymentChannelId,
-            paymentChannelName = bill.PaymentChannel?.Name,
-            paymentChannelIcon = bill.PaymentChannel?.Icon,
-            transactionTime = bill.TransactionTime,
-            note = bill.Note,
-            source = bill.Source.ToString(),
-            syncStatus = bill.SyncStatus.ToString(),
-            createdAt = bill.CreatedAt
-        });
+        return Ok(MapToResponse(bill));
     }
 
     /// <summary>
@@ -126,7 +79,7 @@ public class BillsController : ControllerBase
     /// <param name="request">账单请求</param>
     /// <returns>创建的账单</returns>
     [HttpPost]
-    public async Task<IActionResult> CreateBill([FromBody] CreateBillRequest request)
+    public async Task<IActionResult> CreateBill([FromBody] BillRequest request)
     {
         var userId = GetUserId();
 
@@ -158,23 +111,7 @@ public class BillsController : ControllerBase
 
         var createdBill = await _billService.CreateBillAsync(bill);
 
-        return CreatedAtAction(nameof(GetBill), new { id = createdBill.Id }, new
-        {
-            id = createdBill.Id,
-            amount = createdBill.Amount,
-            type = createdBill.Type.ToString(),
-            categoryId = createdBill.CategoryId,
-            categoryName = createdBill.Category?.Name,
-            categoryIcon = createdBill.Category?.Icon,
-            paymentChannelId = createdBill.PaymentChannelId,
-            paymentChannelName = createdBill.PaymentChannel?.Name,
-            paymentChannelIcon = createdBill.PaymentChannel?.Icon,
-            transactionTime = createdBill.TransactionTime,
-            note = createdBill.Note,
-            source = createdBill.Source.ToString(),
-            syncStatus = createdBill.SyncStatus.ToString(),
-            createdAt = createdBill.CreatedAt
-        });
+        return CreatedAtAction(nameof(GetBill), new { id = createdBill.Id }, MapToResponse(createdBill));
     }
 
     /// <summary>
@@ -184,7 +121,7 @@ public class BillsController : ControllerBase
     /// <param name="request">账单请求</param>
     /// <returns>更新的账单</returns>
     [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateBill(Guid id, [FromBody] UpdateBillRequest request)
+    public async Task<IActionResult> UpdateBill(Guid id, [FromBody] BillRequest request)
     {
         var userId = GetUserId();
 
@@ -218,24 +155,7 @@ public class BillsController : ControllerBase
         try
         {
             var updatedBill = await _billService.UpdateBillAsync(bill);
-
-            return Ok(new
-            {
-                id = updatedBill.Id,
-                amount = updatedBill.Amount,
-                type = updatedBill.Type.ToString(),
-                categoryId = updatedBill.CategoryId,
-                categoryName = updatedBill.Category?.Name,
-                categoryIcon = updatedBill.Category?.Icon,
-                paymentChannelId = updatedBill.PaymentChannelId,
-                paymentChannelName = updatedBill.PaymentChannel?.Name,
-                paymentChannelIcon = updatedBill.PaymentChannel?.Icon,
-                transactionTime = updatedBill.TransactionTime,
-                note = updatedBill.Note,
-                source = updatedBill.Source.ToString(),
-                syncStatus = updatedBill.SyncStatus.ToString(),
-                createdAt = updatedBill.CreatedAt
-            });
+            return Ok(MapToResponse(updatedBill));
         }
         catch (ArgumentException ex)
         {
@@ -261,48 +181,30 @@ public class BillsController : ControllerBase
 
         return Ok(new { message = "删除成功" });
     }
+
+    private static object MapToResponse(Core.Entities.Bill bill) => new
+    {
+        id = bill.Id,
+        amount = bill.Amount,
+        type = bill.Type.ToString(),
+        categoryId = bill.CategoryId,
+        categoryName = bill.Category?.Name,
+        categoryIcon = bill.Category?.Icon,
+        paymentChannelId = bill.PaymentChannelId,
+        paymentChannelName = bill.PaymentChannel?.Name,
+        paymentChannelIcon = bill.PaymentChannel?.Icon,
+        transactionTime = bill.TransactionTime,
+        note = bill.Note,
+        source = bill.Source.ToString(),
+        syncStatus = bill.SyncStatus.ToString(),
+        createdAt = bill.CreatedAt
+    };
 }
 
 /// <summary>
-/// 创建账单请求
+/// 账单请求
 /// </summary>
-public class CreateBillRequest
-{
-    /// <summary>
-    /// 金额
-    /// </summary>
-    public decimal Amount { get; set; }
-
-    /// <summary>
-    /// 账单类型
-    /// </summary>
-    public BillType Type { get; set; }
-
-    /// <summary>
-    /// 分类ID
-    /// </summary>
-    public Guid CategoryId { get; set; }
-
-    /// <summary>
-    /// 支付渠道ID
-    /// </summary>
-    public Guid PaymentChannelId { get; set; }
-
-    /// <summary>
-    /// 交易时间
-    /// </summary>
-    public DateTime? TransactionTime { get; set; }
-
-    /// <summary>
-    /// 备注
-    /// </summary>
-    public string? Note { get; set; }
-}
-
-/// <summary>
-/// 更新账单请求
-/// </summary>
-public class UpdateBillRequest
+public class BillRequest
 {
     /// <summary>
     /// 金额

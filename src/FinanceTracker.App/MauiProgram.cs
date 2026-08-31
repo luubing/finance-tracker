@@ -58,19 +58,17 @@ public static class MauiProgram
 
         var app = builder.Build();
 
-        // 初始化数据库和预设数据
-        InitializeDatabaseAsync(app.Services).Wait();
+        // 初始化数据库和预设数据（使用 Task.Run 避免死锁）
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await context.Database.MigrateAsync();
+
+            var presetService = scope.ServiceProvider.GetRequiredService<IPresetDataService>();
+            await presetService.InitializePresetDataAsync();
+        }).GetAwaiter().GetResult();
 
         return app;
-    }
-
-    private static async Task InitializeDatabaseAsync(IServiceProvider services)
-    {
-        using var scope = services.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await context.Database.MigrateAsync();
-
-        var presetService = scope.ServiceProvider.GetRequiredService<IPresetDataService>();
-        await presetService.InitializePresetDataAsync();
     }
 }

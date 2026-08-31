@@ -12,8 +12,9 @@ public class BackgroundSyncService : IDisposable
     private readonly INetworkService _networkService;
     private readonly ILogger<BackgroundSyncService> _logger;
     private Timer? _timer;
-    private bool _isSyncing;
+    private int _isSyncing; // 使用 int 用于 Interlocked 操作
     private Guid? _userId;
+    private readonly SemaphoreSlim _syncLock = new(1, 1);
 
     public BackgroundSyncService(
         ISyncService syncService,
@@ -63,18 +64,25 @@ public class BackgroundSyncService : IDisposable
 
     private async Task SyncAsync()
     {
-        if (_isSyncing || !_userId.HasValue)
+        // 使用 SemaphoreSlim 防止并发同步
+        if (!await _syncLock.WaitAsync(0))
         {
+            _logger.LogInformation("同步正在进行中，跳过");
+            return;
+        }
+
+        if (!_userId.HasValue)
+        {
+            _syncLock.Release();
             return;
         }
 
         if (!_networkService.IsConnected())
         {
             _logger.LogInformation("无网络连接，跳过同步");
+            _syncLock.Release();
             return;
         }
-
-        _isSyncing = true;
 
         try
         {
@@ -98,22 +106,34 @@ public class BackgroundSyncService : IDisposable
         }
         finally
         {
-            _isSyncing = false;
+            _syncLock.Release();
         }
     }
 
-    private async void OnConnectivityChanged(object? sender, bool isConnected)
+    private void OnConnectivityChanged(object? sender, bool isConnected)
     {
         if (isConnected)
         {
             _logger.LogInformation("网络已恢复，触发同步");
-            await SyncAsync();
+            // 使用 Task.Run 避免在事件处理器中直接 async
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await SyncAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "网络恢复同步失败");
+                }
+            });
         }
     }
 
     public void Dispose()
     {
         _timer?.Dispose();
+        _syncLock?.Dispose();
         _networkService.ConnectivityChanged -= OnConnectivityChanged;
     }
 }

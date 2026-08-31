@@ -1,6 +1,4 @@
-using System.Security.Claims;
 using FinanceTracker.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -8,26 +6,13 @@ namespace FinanceTracker.Api.Controllers;
 /// <summary>
 /// 同步控制器
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class SyncController : ControllerBase
+public class SyncController : BaseApiController
 {
     private readonly ISyncService _syncService;
 
     public SyncController(ISyncService syncService)
     {
         _syncService = syncService;
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
-        {
-            throw new UnauthorizedAccessException("未授权");
-        }
-        return userId;
     }
 
     /// <summary>

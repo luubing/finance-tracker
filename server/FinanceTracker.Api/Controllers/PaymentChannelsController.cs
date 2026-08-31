@@ -1,6 +1,4 @@
-using System.Security.Claims;
 using FinanceTracker.Core.Interfaces;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -8,26 +6,13 @@ namespace FinanceTracker.Api.Controllers;
 /// <summary>
 /// 支付渠道控制器
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
-[Authorize]
-public class PaymentChannelsController : ControllerBase
+public class PaymentChannelsController : BaseApiController
 {
     private readonly IPaymentChannelService _paymentChannelService;
 
     public PaymentChannelsController(IPaymentChannelService paymentChannelService)
     {
         _paymentChannelService = paymentChannelService;
-    }
-
-    private Guid GetUserId()
-    {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
-        {
-            throw new UnauthorizedAccessException("未授权");
-        }
-        return userId;
     }
 
     /// <summary>
@@ -82,7 +67,7 @@ public class PaymentChannelsController : ControllerBase
     /// <param name="request">支付渠道请求</param>
     /// <returns>创建的支付渠道</returns>
     [HttpPost]
-    public async Task<IActionResult> CreatePaymentChannel([FromBody] CreatePaymentChannelRequest request)
+    public async Task<IActionResult> CreatePaymentChannel([FromBody] PaymentChannelRequest request)
     {
         var userId = GetUserId();
 
@@ -118,7 +103,7 @@ public class PaymentChannelsController : ControllerBase
     /// <param name="request">支付渠道请求</param>
     /// <returns>更新的支付渠道</returns>
     [HttpPut("{id}")]
-    public async Task<IActionResult> UpdatePaymentChannel(Guid id, [FromBody] UpdatePaymentChannelRequest request)
+    public async Task<IActionResult> UpdatePaymentChannel(Guid id, [FromBody] PaymentChannelRequest request)
     {
         var userId = GetUserId();
 
@@ -192,30 +177,9 @@ public class PaymentChannelsController : ControllerBase
 }
 
 /// <summary>
-/// 创建支付渠道请求
+/// 支付渠道请求
 /// </summary>
-public class CreatePaymentChannelRequest
-{
-    /// <summary>
-    /// 渠道名称
-    /// </summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 图标
-    /// </summary>
-    public string? Icon { get; set; }
-
-    /// <summary>
-    /// 排序顺序
-    /// </summary>
-    public int SortOrder { get; set; }
-}
-
-/// <summary>
-/// 更新支付渠道请求
-/// </summary>
-public class UpdatePaymentChannelRequest
+public class PaymentChannelRequest
 {
     /// <summary>
     /// 渠道名称
