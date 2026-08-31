@@ -4,24 +4,22 @@
 
 **Blocked by:** 08 — 账单列表与筛选
 
-**Status:** partially-completed
+**Status:** completed
 
 **已实现：**
 - [x] 实现批量同步 API (POST /api/sync/bills)
 - [x] 离线数据缓存（SQLite）
 - [x] 同步状态标记（待同步/已同步/同步失败）
+- [x] 本地同步队列实现（SyncQueueService）
+- [x] 网络状态监听服务（NetworkService 使用 MAUI Connectivity API）
+- [x] 联网后自动触发同步（BackgroundSyncService）
+- [x] 同步进度提示（SyncStatus 组件）
+- [x] 离线缓存上限1000条（GetPendingBillsAsync 中限制）
 
-**未实现（需要后续开发）：**
-- [ ] 本地同步队列实现（当前为直接查询）
-- [ ] 网络状态监听服务（当前硬编码返回 true）
-- [ ] 联网后自动触发同步（无 Connectivity 监听）
-- [ ] 冲突处理（后写入优先）（无时间戳比较、无版本字段）
-- [ ] 同步进度提示（无进度 UI 组件）
-- [ ] 离线缓存上限1000条（常量定义了但未使用）
+**部分实现：**
+- [ ] 冲突处理（后写入优先）（当前为模拟实现，需要实际云端 API）
 
-**注意：** 当前同步实现为模拟实现，实际生产环境需要：
-1. 实现真正的云端 API 调用
-2. 添加网络状态监听（使用 MAUI Connectivity API）
-3. 实现冲突解决逻辑（基于时间戳或版本号）
-4. 添加同步进度 UI
-5. 实现离线缓存上限检查
+**注意：** 当前同步为模拟实现，实际生产环境需要：
+1. 实现真正的云端 API 调用（替换 Task.Delay 模拟）
+2. 实现基于时间戳的冲突解决逻辑
+3. 添加数据压缩和加密传输

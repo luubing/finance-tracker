@@ -3017,3 +3017,13 @@ C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\index.html.br
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\assets\wwwroot\_content\FinanceTracker.Web\index.html
 C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\FinanceTracker.App.sourcelink.json
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.x86_64.ll
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.x86_64.ll
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.x86_64.ll
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.x86_64.ll
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\typemaps.x86_64.o
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\environment.x86_64.o
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\compressed_assemblies.x86_64.o
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\marshal_methods.x86_64.o
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\android\jni_remap.x86_64.o
+C:\code\finance-tracker\src\FinanceTracker.App\obj\Debug\net10.0-android\app_shared_libraries\x86_64\libxamarin-app.so

@@ -1,0 +1,101 @@
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Services
+@inject ISyncService SyncService
+@inject AuthenticationService AuthStateService
+@inject IPopupService PopupService
+
+<MCard Class="mb-4">
+    <MCardText Class="d-flex align-center">
+        <MIcon Class="mr-2" Color="@(_isSynced ? "success" : "warning")">
+            @(_isSynced ? "mdi-cloud-check" : "mdi-cloud-sync")
+        </MIcon>
+        <div>
+            <div class="text-subtitle-2">同步状态</div>
+            <div class="text-caption">
+                @if (_isSyncing)
+                {
+                    <span>正在同步...</span>
+                }
+                else if (_pendingCount > 0)
+                {
+                    <span>@_pendingCount 条待同步</span>
+                }
+                else
+                {
+                    <span>已同步</span>
+                }
+            </div>
+        </div>
+        <MSpacer />
+        @if (_pendingCount > 0 && !_isSyncing)
+        {
+            <MButton Small Color="primary" OnClick="SyncNow">
+                <MIcon Small Class="mr-1">mdi-cloud-upload</MIcon>
+                立即同步
+            </MButton>
+        }
+    </MCardText>
+</MCard>
+
+@code {
+    private bool _isSyncing;
+    private bool _isSynced = true;
+    private int _pendingCount;
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userId = await AuthStateService.GetUserIdAsync();
+        if (userId.HasValue)
+        {
+            _userId = userId.Value;
+            await LoadSyncStatus();
+        }
+    }
+
+    private async Task LoadSyncStatus()
+    {
+        try
+        {
+            _pendingCount = await SyncService.GetOfflineCacheCountAsync(_userId);
+            _isSynced = _pendingCount == 0;
+        }
+        catch (Exception ex)
+        {
+            // 忽略错误
+        }
+    }
+
+    private async Task SyncNow()
+    {
+        if (_isSyncing) return;
+
+        _isSyncing = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SyncService.SyncBillsAsync(_userId);
+
+            if (result.Success)
+            {
+                await PopupService.EnqueueSnackbarAsync("同步完成", AlertTypes.Success);
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync($"同步完成，{result.FailedCount}条失败", AlertTypes.Warning);
+            }
+
+            await LoadSyncStatus();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"同步失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isSyncing = false;
+            StateHasChanged();
+        }
+    }
+}

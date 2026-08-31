@@ -12,12 +12,21 @@ namespace FinanceTracker.Core.Services;
 public class SyncService : ISyncService
 {
     private readonly IApplicationDbContext _context;
+    private readonly INetworkService _networkService;
+    private readonly ISyncQueueService _syncQueueService;
     private readonly ILogger<SyncService> _logger;
     private const int MaxOfflineCacheCount = 1000;
+    private const int BatchSize = 10;
 
-    public SyncService(IApplicationDbContext context, ILogger<SyncService> logger)
+    public SyncService(
+        IApplicationDbContext context,
+        INetworkService networkService,
+        ISyncQueueService syncQueueService,
+        ILogger<SyncService> logger)
     {
         _context = context;
+        _networkService = networkService;
+        _syncQueueService = syncQueueService;
         _logger = logger;
     }
 
@@ -27,17 +36,45 @@ public class SyncService : ISyncService
 
         try
         {
-            // 获取待同步的账单
-            var pendingBills = await GetPendingBillsAsync(userId);
+            // 检查网络连接
+            if (!_networkService.IsConnected())
+            {
+                result.Success = false;
+                result.ErrorMessage = "无网络连接";
+                return result;
+            }
 
-            if (!pendingBills.Any())
+            // 从队列中获取待同步的账单
+            var pendingBillIds = await _syncQueueService.DequeueAsync(BatchSize);
+
+            if (!pendingBillIds.Any())
+            {
+                // 如果队列为空，从数据库获取待同步的账单
+                var pendingBills = await GetPendingBillsAsync(userId);
+                pendingBillIds = pendingBills.Select(b => b.Id).ToList();
+
+                // 将账单添加到队列
+                foreach (var billId in pendingBillIds)
+                {
+                    await _syncQueueService.EnqueueAsync(billId);
+                }
+
+                pendingBillIds = await _syncQueueService.DequeueAsync(BatchSize);
+            }
+
+            if (!pendingBillIds.Any())
             {
                 result.Success = true;
                 return result;
             }
 
+            // 获取账单详情
+            var bills = await _context.Bills
+                .Where(b => pendingBillIds.Contains(b.Id))
+                .ToListAsync();
+
             // 模拟同步到云端（实际实现中应该调用云端API）
-            foreach (var bill in pendingBills)
+            foreach (var bill in bills)
             {
                 try
                 {
@@ -75,6 +112,7 @@ public class SyncService : ISyncService
         return await _context.Bills
             .Where(b => b.UserId == userId && b.SyncStatus == SyncStatus.Pending)
             .OrderBy(b => b.CreatedAt)
+            .Take(MaxOfflineCacheCount)
             .ToListAsync();
     }
 
@@ -110,9 +148,7 @@ public class SyncService : ISyncService
 
     public async Task<bool> CanSyncAsync()
     {
-        // 检查网络状态（简化实现）
-        // 实际实现中应该检查网络连接
-        return await Task.FromResult(true);
+        return await Task.FromResult(_networkService.IsConnected());
     }
 
     public async Task<int> GetOfflineCacheCountAsync(Guid userId)

@@ -1,3 +1,4 @@
+using FinanceTracker.App.Services;
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
@@ -40,10 +41,15 @@ public static class MauiProgram
         builder.Services.AddScoped<IBillService, BillService>();
         builder.Services.AddScoped<IStatisticsService, StatisticsService>();
         builder.Services.AddScoped<ISyncService, SyncService>();
+        builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
+
+        // 注册平台服务
+        builder.Services.AddSingleton<INetworkService, NetworkService>();
 
         // 注册应用服务
         builder.Services.AddScoped<AuthenticationService>();
         builder.Services.AddScoped<HttpService>();
+        builder.Services.AddSingleton<BackgroundSyncService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
