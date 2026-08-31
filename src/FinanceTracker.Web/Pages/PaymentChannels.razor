@@ -1,0 +1,236 @@
+@page "/payment-channels"
+@using FinanceTracker.Core.Interfaces
+@inject IPaymentChannelService PaymentChannelService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IPopupService PopupService
+
+<MContainer>
+    <MRow>
+        <MCol Cols="12">
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-credit-card-multiple</MIcon>
+                    支付渠道管理
+                    <MSpacer />
+                    <MButton Color="primary" OnClick="ShowCreateDialog">
+                        <MIcon Class="mr-2">mdi-plus</MIcon>
+                        添加渠道
+                    </MButton>
+                </MCardTitle>
+
+                <MCardText>
+                    <MList>
+                        @foreach (var channel in _channels)
+                        {
+                            <MListItem>
+                                <MListItemIcon>
+                                    <MIcon>@channel.Icon</MIcon>
+                                </MListItemIcon>
+                                <MListItemContent>
+                                    <MListItemTitle>@channel.Name</MListItemTitle>
+                                </MListItemContent>
+                                <MListItemAction>
+                                    @if (!channel.IsPreset)
+                                    {
+                                        <MButton Icon OnClick="() => ShowEditDialog(channel)">
+                                            <MIcon>mdi-pencil</MIcon>
+                                        </MButton>
+                                        <MButton Icon OnClick="() => DeleteChannel(channel)">
+                                            <MIcon Color="error">mdi-delete</MIcon>
+                                        </MButton>
+                                    }
+                                    else
+                                    {
+                                        <MChip Small Outlined>预设</MChip>
+                                    }
+                                </MListItemAction>
+                            </MListItem>
+                        }
+                    </MList>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+</MContainer>
+
+<!-- 创建/编辑对话框 -->
+<MDialog @bind-Value="_showDialog" MaxWidth="500">
+    <MCard>
+        <MCardTitle>
+            @(_isEditing ? "编辑支付渠道" : "创建支付渠道")
+        </MCardTitle>
+
+        <MCardText>
+            <MForm @ref="_form" Model="_channelModel" OnValidSubmit="SaveChannel">
+                <MTextField @bind-Value="_channelModel.Name"
+                            Label="渠道名称"
+                            Outlined
+                            Dense
+                            Required />
+
+                <MTextField @bind-Value="_channelModel.Icon"
+                            Label="图标（mdi-xxx）"
+                            Outlined
+                            Dense
+                            Placeholder="mdi-credit-card" />
+
+                <MTextField @bind-Value="_channelModel.SortOrder"
+                            Label="排序顺序"
+                            Outlined
+                            Dense
+                            Type="number" />
+            </MForm>
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CloseDialog">取消</MButton>
+            <MButton Color="primary" OnClick="SaveChannel">保存</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    private List<ChannelModel> _channels = new();
+    private bool _showDialog;
+    private bool _isEditing;
+    private ChannelModel _channelModel = new();
+    private MForm? _form;
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadChannels();
+    }
+
+    private async Task LoadChannels()
+    {
+        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+
+        _channels = channels
+            .Select(c => new ChannelModel
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Icon = c.Icon,
+                IsPreset = c.IsPreset,
+                SortOrder = c.SortOrder
+            })
+            .ToList();
+    }
+
+    private void ShowCreateDialog()
+    {
+        _isEditing = false;
+        _channelModel = new ChannelModel
+        {
+            Icon = "mdi-credit-card"
+        };
+        _showDialog = true;
+    }
+
+    private void ShowEditDialog(ChannelModel channel)
+    {
+        _isEditing = true;
+        _channelModel = new ChannelModel
+        {
+            Id = channel.Id,
+            Name = channel.Name,
+            Icon = channel.Icon,
+            SortOrder = channel.SortOrder
+        };
+        _showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        _showDialog = false;
+    }
+
+    private async Task SaveChannel()
+    {
+        try
+        {
+            if (_isEditing)
+            {
+                var channel = new Core.Entities.PaymentChannel
+                {
+                    Id = _channelModel.Id,
+                    UserId = _userId,
+                    Name = _channelModel.Name,
+                    Icon = _channelModel.Icon ?? "mdi-credit-card",
+                    SortOrder = _channelModel.SortOrder
+                };
+
+                await PaymentChannelService.UpdatePaymentChannelAsync(channel);
+                await PopupService.EnqueueSnackbarAsync("支付渠道更新成功", AlertTypes.Success);
+            }
+            else
+            {
+                var channel = new Core.Entities.PaymentChannel
+                {
+                    UserId = _userId,
+                    Name = _channelModel.Name,
+                    Icon = _channelModel.Icon ?? "mdi-credit-card",
+                    SortOrder = _channelModel.SortOrder
+                };
+
+                await PaymentChannelService.CreatePaymentChannelAsync(channel);
+                await PopupService.EnqueueSnackbarAsync("支付渠道创建成功", AlertTypes.Success);
+            }
+
+            CloseDialog();
+            await LoadChannels();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task DeleteChannel(ChannelModel channel)
+    {
+        try
+        {
+            var result = await PaymentChannelService.DeletePaymentChannelAsync(channel.Id, _userId);
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync("支付渠道删除成功", AlertTypes.Success);
+                await LoadChannels();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("支付渠道不存在", AlertTypes.Warning);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private class ChannelModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? Icon { get; set; }
+        public bool IsPreset { get; set; }
+        public int SortOrder { get; set; }
+    }
+}

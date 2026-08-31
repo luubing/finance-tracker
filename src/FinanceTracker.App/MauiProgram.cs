@@ -34,6 +34,11 @@ public static class MauiProgram
         // 注册业务服务
         builder.Services.AddScoped<IAuthService, AuthService>();
         builder.Services.AddScoped<IPresetDataService, PresetDataService>();
+        builder.Services.AddScoped<ICategoryService, CategoryService>();
+        builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
+        builder.Services.AddScoped<IBillService, BillService>();
+        builder.Services.AddScoped<IStatisticsService, StatisticsService>();
+        builder.Services.AddScoped<ISyncService, SyncService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

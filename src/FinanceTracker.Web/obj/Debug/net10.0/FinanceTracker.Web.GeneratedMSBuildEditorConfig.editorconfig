@@ -27,12 +27,36 @@ build_property.EnableCodeStyleSeverity =
 build_metadata.AdditionalFiles.TargetPath = TWFpbi5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/AddBill.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQWRkQmlsbC5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Bills.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQmlsbHMucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Categories.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQ2F0ZWdvcmllcy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Index.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcSW5kZXgucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/LoginPage.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcTG9naW5QYWdlLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/MonthlyStatistics.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcTW9udGhseVN0YXRpc3RpY3MucmF6b3I=
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/PaymentChannels.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcUGF5bWVudENoYW5uZWxzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/TrendAnalysis.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcVHJlbmRBbmFseXNpcy5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/_Imports.razor]

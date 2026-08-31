@@ -1,0 +1,314 @@
+@page "/categories"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@inject ICategoryService CategoryService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IPopupService PopupService
+
+<MContainer>
+    <MRow>
+        <MCol Cols="12">
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-tag-multiple</MIcon>
+                    分类管理
+                    <MSpacer />
+                    <MButton Color="primary" OnClick="ShowCreateDialog">
+                        <MIcon Class="mr-2">mdi-plus</MIcon>
+                        添加分类
+                    </MButton>
+                </MCardTitle>
+
+                <MCardText>
+                    <MTabs @bind-Value="_activeTab">
+                        <MTab Value="0">支出分类</MTab>
+                        <MTab Value="1">收入分类</MTab>
+                    </MTabs>
+
+                    <MTabsItems Value="_activeTab">
+                        <MTabItem Value="0">
+                            <MList>
+                                @foreach (var category in _expenseCategories)
+                                {
+                                    <MListItem>
+                                        <MListItemIcon>
+                                            <MIcon>@category.Icon</MIcon>
+                                        </MListItemIcon>
+                                        <MListItemContent>
+                                            <MListItemTitle>@category.Name</MListItemTitle>
+                                        </MListItemContent>
+                                        <MListItemAction>
+                                            @if (!category.IsPreset)
+                                            {
+                                                <MButton Icon OnClick="() => ShowEditDialog(category)">
+                                                    <MIcon>mdi-pencil</MIcon>
+                                                </MButton>
+                                                <MButton Icon OnClick="() => DeleteCategory(category)">
+                                                    <MIcon Color="error">mdi-delete</MIcon>
+                                                </MButton>
+                                            }
+                                            else
+                                            {
+                                                <MChip Small Outlined>预设</MChip>
+                                            }
+                                        </MListItemAction>
+                                    </MListItem>
+                                }
+                            </MList>
+                        </MTabItem>
+
+                        <MTabItem Value="1">
+                            <MList>
+                                @foreach (var category in _incomeCategories)
+                                {
+                                    <MListItem>
+                                        <MListItemIcon>
+                                            <MIcon>@category.Icon</MIcon>
+                                        </MListItemIcon>
+                                        <MListItemContent>
+                                            <MListItemTitle>@category.Name</MListItemTitle>
+                                        </MListItemContent>
+                                        <MListItemAction>
+                                            @if (!category.IsPreset)
+                                            {
+                                                <MButton Icon OnClick="() => ShowEditDialog(category)">
+                                                    <MIcon>mdi-pencil</MIcon>
+                                                </MButton>
+                                                <MButton Icon OnClick="() => DeleteCategory(category)">
+                                                    <MIcon Color="error">mdi-delete</MIcon>
+                                                </MButton>
+                                            }
+                                            else
+                                            {
+                                                <MChip Small Outlined>预设</MChip>
+                                            }
+                                        </MListItemAction>
+                                    </MListItem>
+                                }
+                            </MList>
+                        </MTabItem>
+                    </MTabsItems>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+</MContainer>
+
+<!-- 创建/编辑对话框 -->
+<MDialog @bind-Value="_showDialog" MaxWidth="500">
+    <MCard>
+        <MCardTitle>
+            @(_isEditing ? "编辑分类" : "创建分类")
+        </MCardTitle>
+
+        <MCardText>
+            <MForm @ref="_form" Model="_categoryModel" OnValidSubmit="SaveCategory">
+                <MTextField @bind-Value="_categoryModel.Name"
+                            Label="分类名称"
+                            Outlined
+                            Dense
+                            Required />
+
+                <MTextField @bind-Value="_categoryModel.Icon"
+                            Label="图标（mdi-xxx）"
+                            Outlined
+                            Dense
+                            Placeholder="mdi-tag" />
+
+                <MSelect @bind-Value="_categoryModel.Type"
+                         Items="_typeItems"
+                         ItemText="i => i.Text"
+                         ItemValue="i => i.Value"
+                         Label="分类类型"
+                         Outlined
+                         Dense />
+
+                <MTextField @bind-Value="_categoryModel.SortOrder"
+                            Label="排序顺序"
+                            Outlined
+                            Dense
+                            Type="number" />
+            </MForm>
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CloseDialog">取消</MButton>
+            <MButton Color="primary" OnClick="SaveCategory">保存</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    private StringNumber _activeTab = "0";
+    private List<CategoryModel> _expenseCategories = new();
+    private List<CategoryModel> _incomeCategories = new();
+    private bool _showDialog;
+    private bool _isEditing;
+    private CategoryModel _categoryModel = new();
+    private MForm? _form;
+    private Guid _userId;
+
+    private List<(string Text, BillType Value)> _typeItems = new()
+    {
+        ("支出", BillType.Expense),
+        ("收入", BillType.Income)
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadCategories();
+    }
+
+    private async Task LoadCategories()
+    {
+        var categories = await CategoryService.GetCategoriesAsync(_userId);
+
+        _expenseCategories = categories
+            .Where(c => c.Type == BillType.Expense)
+            .Select(c => new CategoryModel
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Icon = c.Icon,
+                Type = c.Type,
+                IsPreset = c.IsPreset,
+                SortOrder = c.SortOrder
+            })
+            .ToList();
+
+        _incomeCategories = categories
+            .Where(c => c.Type == BillType.Income)
+            .Select(c => new CategoryModel
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Icon = c.Icon,
+                Type = c.Type,
+                IsPreset = c.IsPreset,
+                SortOrder = c.SortOrder
+            })
+            .ToList();
+    }
+
+    private void ShowCreateDialog()
+    {
+        _isEditing = false;
+        var type = _activeTab?.ToString() == "1" ? BillType.Income : BillType.Expense;
+        _categoryModel = new CategoryModel
+        {
+            Type = type,
+            Icon = "mdi-tag"
+        };
+        _showDialog = true;
+    }
+
+    private void ShowEditDialog(CategoryModel category)
+    {
+        _isEditing = true;
+        _categoryModel = new CategoryModel
+        {
+            Id = category.Id,
+            Name = category.Name,
+            Icon = category.Icon,
+            Type = category.Type,
+            SortOrder = category.SortOrder
+        };
+        _showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        _showDialog = false;
+    }
+
+    private async Task SaveCategory()
+    {
+        try
+        {
+            if (_isEditing)
+            {
+                var category = new Core.Entities.Category
+                {
+                    Id = _categoryModel.Id,
+                    UserId = _userId,
+                    Name = _categoryModel.Name,
+                    Icon = _categoryModel.Icon ?? "mdi-tag",
+                    Type = _categoryModel.Type,
+                    SortOrder = _categoryModel.SortOrder
+                };
+
+                await CategoryService.UpdateCategoryAsync(category);
+                await PopupService.EnqueueSnackbarAsync("分类更新成功", AlertTypes.Success);
+            }
+            else
+            {
+                var category = new Core.Entities.Category
+                {
+                    UserId = _userId,
+                    Name = _categoryModel.Name,
+                    Icon = _categoryModel.Icon ?? "mdi-tag",
+                    Type = _categoryModel.Type,
+                    SortOrder = _categoryModel.SortOrder
+                };
+
+                await CategoryService.CreateCategoryAsync(category);
+                await PopupService.EnqueueSnackbarAsync("分类创建成功", AlertTypes.Success);
+            }
+
+            CloseDialog();
+            await LoadCategories();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task DeleteCategory(CategoryModel category)
+    {
+        try
+        {
+            var result = await CategoryService.DeleteCategoryAsync(category.Id, _userId);
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync("分类删除成功", AlertTypes.Success);
+                await LoadCategories();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("分类不存在", AlertTypes.Warning);
+            }
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private class CategoryModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? Icon { get; set; }
+        public BillType Type { get; set; }
+        public bool IsPreset { get; set; }
+        public int SortOrder { get; set; }
+    }
+}

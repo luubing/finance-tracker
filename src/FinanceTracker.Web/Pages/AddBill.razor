@@ -1,0 +1,334 @@
+@page "/add-bill"
+@page "/add-bill/{BillId}"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@inject IBillService BillService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IPopupService PopupService
+
+<MContainer>
+    <MRow>
+        <MCol Cols="12">
+            <MCard>
+                <MCardTitle>
+                    <MButton Icon OnClick="GoBack">
+                        <MIcon>mdi-arrow-left</MIcon>
+                    </MButton>
+                    <span class="ml-2">@(IsEditing ? "编辑账单" : "记一笔")</span>
+                </MCardTitle>
+
+                <MCardText>
+                    <MForm @ref="_form" Model="_model" OnValidSubmit="SaveBill">
+                        <!-- 支出/收入切换 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MButtonGroup Value="_model.Type.ToString()" ValueChanged="OnTypeChanged">
+                                    <MButton Value="@("Expense")" Color="@(_model.Type == BillType.Expense ? "error" : "default")">
+                                        <MIcon Class="mr-2">mdi-minus-circle</MIcon>
+                                        支出
+                                    </MButton>
+                                    <MButton Value="@("Income")" Color="@(_model.Type == BillType.Income ? "success" : "default")">
+                                        <MIcon Class="mr-2">mdi-plus-circle</MIcon>
+                                        收入
+                                    </MButton>
+                                </MButtonGroup>
+                            </MCol>
+                        </MRow>
+
+                        <!-- 金额输入 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MTextField @bind-Value="_model.Amount"
+                                            Label="金额"
+                                            Outlined
+                                            Dense
+                                            Type="number"
+                                            Prefix="¥"
+                                            Required
+                                            Min="0.01"
+                                            Step="0.01" />
+                            </MCol>
+                        </MRow>
+
+                        <!-- 分类选择 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <div class="text-subtitle-2 mb-2">选择分类</div>
+                                <MCard Outlined>
+                                    <MCardText>
+                                        <MRow Dense>
+                                            @foreach (var category in _categories.Where(c => c.Type == _model.Type))
+                                            {
+                                                <MCol Cols="4" Sm="3">
+                                                    <MButton Block
+                                                             Outlined
+                                                             Class="@(_model.CategoryId == category.Id ? "selected-category" : "")"
+                                                             OnClick="() => _model.CategoryId = category.Id">
+                                                        <MIcon Class="mr-1">@category.Icon</MIcon>
+                                                        <span class="text-caption">@category.Name</span>
+                                                    </MButton>
+                                                </MCol>
+                                            }
+                                        </MRow>
+                                    </MCardText>
+                                </MCard>
+                            </MCol>
+                        </MRow>
+
+                        <!-- 支付渠道选择 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MSelect @bind-Value="_model.PaymentChannelId"
+                                         Items="_paymentChannels"
+                                         ItemText="c => c.Name"
+                                         ItemValue="c => c.Id"
+                                         Label="支付渠道"
+                                         Outlined
+                                         Dense
+                                         Required>
+                                    <SelectionContent Context="item">
+                                        <MIcon Class="mr-2">@item.Item.Icon</MIcon>
+                                        @item.Item.Name
+                                    </SelectionContent>
+                                </MSelect>
+                            </MCol>
+                        </MRow>
+
+                        <!-- 交易时间 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MTextField @bind-Value="_model.TransactionTime"
+                                            Label="交易时间"
+                                            Outlined
+                                            Dense
+                                            Type="datetime-local" />
+                            </MCol>
+                        </MRow>
+
+                        <!-- 备注 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MTextField @bind-Value="_model.Note"
+                                            Label="备注（可选）"
+                                            Outlined
+                                            Dense
+                                            Placeholder="添加备注..." />
+                            </MCol>
+                        </MRow>
+
+                        <!-- 提交按钮 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MButton Type="submit"
+                                         Color="primary"
+                                         Block
+                                         Large
+                                         Loading="_loading"
+                                         Disabled="_loading">
+                                    @(IsEditing ? "保存修改" : "保存")
+                                </MButton>
+                            </MCol>
+                        </MRow>
+                    </MForm>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+</MContainer>
+
+<style>
+    .selected-category {
+        border-color: var(--m-theme-primary) !important;
+        background-color: var(--m-theme-primary-lighten-4) !important;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public string? BillId { get; set; }
+
+    private bool IsEditing => !string.IsNullOrEmpty(BillId);
+
+    private MForm? _form;
+    private BillModel _model = new();
+    private List<CategoryModel> _categories = new();
+    private List<PaymentChannelModel> _paymentChannels = new();
+    private bool _loading;
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadData();
+
+        if (IsEditing && Guid.TryParse(BillId, out var billId))
+        {
+            await LoadBill(billId);
+        }
+        else
+        {
+            _model.TransactionTime = DateTime.Now.ToString("yyyy-MM-ddTHH:mm");
+        }
+    }
+
+    private async Task LoadData()
+    {
+        var categories = await CategoryService.GetCategoriesAsync(_userId);
+        _categories = categories.Select(c => new CategoryModel
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Icon = c.Icon,
+            Type = c.Type
+        }).ToList();
+
+        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+        _paymentChannels = channels.Select(c => new PaymentChannelModel
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Icon = c.Icon
+        }).ToList();
+    }
+
+    private async Task LoadBill(Guid billId)
+    {
+        var bill = await BillService.GetBillByIdAsync(billId);
+        if (bill != null && bill.UserId == _userId)
+        {
+            _model = new BillModel
+            {
+                Amount = bill.Amount,
+                Type = bill.Type,
+                CategoryId = bill.CategoryId,
+                PaymentChannelId = bill.PaymentChannelId,
+                TransactionTime = bill.TransactionTime.ToString("yyyy-MM-ddTHH:mm"),
+                Note = bill.Note
+            };
+        }
+        else
+        {
+            await PopupService.EnqueueSnackbarAsync("账单不存在", AlertTypes.Warning);
+            Navigation.NavigateTo("/bills");
+        }
+    }
+
+    private void OnTypeChanged(StringNumber value)
+    {
+        if (value?.ToString() == "Income")
+        {
+            _model.Type = BillType.Income;
+        }
+        else
+        {
+            _model.Type = BillType.Expense;
+        }
+        _model.CategoryId = Guid.Empty;
+    }
+
+    private async Task SaveBill()
+    {
+        if (_loading) return;
+
+        if (_model.CategoryId == Guid.Empty)
+        {
+            await PopupService.EnqueueSnackbarAsync("请选择分类", AlertTypes.Warning);
+            return;
+        }
+
+        if (_model.PaymentChannelId == Guid.Empty)
+        {
+            await PopupService.EnqueueSnackbarAsync("请选择支付渠道", AlertTypes.Warning);
+            return;
+        }
+
+        _loading = true;
+
+        try
+        {
+            var transactionTime = DateTime.TryParse(_model.TransactionTime, out var time) ? time : DateTime.UtcNow;
+
+            if (IsEditing && Guid.TryParse(BillId, out var billId))
+            {
+                var bill = new Core.Entities.Bill
+                {
+                    Id = billId,
+                    UserId = _userId,
+                    Amount = _model.Amount,
+                    Type = _model.Type,
+                    CategoryId = _model.CategoryId,
+                    PaymentChannelId = _model.PaymentChannelId,
+                    TransactionTime = transactionTime,
+                    Note = _model.Note
+                };
+
+                await BillService.UpdateBillAsync(bill);
+                await PopupService.EnqueueSnackbarAsync("账单更新成功", AlertTypes.Success);
+            }
+            else
+            {
+                var bill = new Core.Entities.Bill
+                {
+                    UserId = _userId,
+                    Amount = _model.Amount,
+                    Type = _model.Type,
+                    CategoryId = _model.CategoryId,
+                    PaymentChannelId = _model.PaymentChannelId,
+                    TransactionTime = transactionTime,
+                    Note = _model.Note
+                };
+
+                await BillService.CreateBillAsync(bill);
+                await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
+            }
+
+            Navigation.NavigateTo("/bills");
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"保存失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/bills");
+    }
+
+    private class BillModel
+    {
+        public decimal Amount { get; set; }
+        public BillType Type { get; set; } = BillType.Expense;
+        public Guid CategoryId { get; set; }
+        public Guid PaymentChannelId { get; set; }
+        public string TransactionTime { get; set; } = string.Empty;
+        public string? Note { get; set; }
+    }
+
+    private class CategoryModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+        public BillType Type { get; set; }
+    }
+
+    private class PaymentChannelModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+    }
+}

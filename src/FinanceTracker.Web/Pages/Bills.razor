@@ -1,0 +1,436 @@
+@page "/bills"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@inject IBillService BillService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IPopupService PopupService
+
+<MContainer>
+    <!-- 筛选区域 -->
+    <MRow>
+        <MCol Cols="12">
+            <MCard Class="mb-4">
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-filter</MIcon>
+                    筛选条件
+                    <MSpacer />
+                    <MButton Text Color="primary" OnClick="ResetFilters">
+                        重置
+                    </MButton>
+                </MCardTitle>
+
+                <MCardText>
+                    <MRow>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MTextField @bind-Value="_filter.StartDate"
+                                        Label="开始日期"
+                                        Type="date"
+                                        Outlined
+                                        Dense />
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MTextField @bind-Value="_filter.EndDate"
+                                        Label="结束日期"
+                                        Type="date"
+                                        Outlined
+                                        Dense />
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MSelect @bind-Value="_filter.CategoryId"
+                                     Items="_categories"
+                                     ItemText="c => c.Name"
+                                     ItemValue="c => (Guid?)c.Id"
+                                     Label="分类"
+                                     Outlined
+                                     Dense
+                                     Clearable />
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MSelect @bind-Value="_filter.PaymentChannelId"
+                                     Items="_paymentChannels"
+                                     ItemText="c => c.Name"
+                                     ItemValue="c => (Guid?)c.Id"
+                                     Label="支付渠道"
+                                     Outlined
+                                     Dense
+                                     Clearable />
+                        </MCol>
+                    </MRow>
+                    <MRow>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MButtonGroup Value="_filter.Type?.ToString()" ValueChanged="OnFilterTypeChanged">
+                                <MButton Value="@((string?)null)" Color="default">全部</MButton>
+                                <MButton Value="@("Expense")" Color="error">支出</MButton>
+                                <MButton Value="@("Income")" Color="success">收入</MButton>
+                            </MButtonGroup>
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="3">
+                            <MButton Color="primary" OnClick="LoadBills">
+                                <MIcon Class="mr-2">mdi-magnify</MIcon>
+                                查询
+                            </MButton>
+                        </MCol>
+                    </MRow>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+
+    <!-- 统计卡片 -->
+    <MRow Class="mb-4">
+        <MCol Cols="6">
+            <MCard Color="error" Dark>
+                <MCardText Class="text-center">
+                    <div class="text-h6">总支出</div>
+                    <div class="text-h4">¥@_totalExpense.ToString("N2")</div>
+                </MCardText>
+            </MCard>
+        </MCol>
+        <MCol Cols="6">
+            <MCard Color="success" Dark>
+                <MCardText Class="text-center">
+                    <div class="text-h6">总收入</div>
+                    <div class="text-h4">¥@_totalIncome.ToString("N2")</div>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+
+    <!-- 账单列表 -->
+    <MRow>
+        <MCol Cols="12">
+            @if (_isLoading)
+            {
+                <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+                    <MProgressCircular Indeterminate Size="64" Color="primary" />
+                </MContainer>
+            }
+            else if (!_groupedBills.Any())
+            {
+                <MCard>
+                    <MCardText Class="text-center">
+                        <MIcon Size="64" Color="grey lighten-1">mdi-receipt</MIcon>
+                        <div class="text-h6 grey--text text--lighten-1 mt-4">暂无账单记录</div>
+                        <MButton Color="primary" Class="mt-4" Href="/add-bill">
+                            <MIcon Class="mr-2">mdi-plus</MIcon>
+                            记一笔
+                        </MButton>
+                    </MCardText>
+                </MCard>
+            }
+            else
+            {
+                @foreach (var group in _groupedBills)
+                {
+                    <MCard Class="mb-4">
+                        <MCardTitle Class="pb-0">
+                            <div>
+                                <div class="text-h6">@group.Date.ToString("yyyy年MM月dd日")</div>
+                                <div class="text-caption text--secondary">
+                                    支出: ¥@group.TotalExpense.ToString("N2") | 收入: ¥@group.TotalIncome.ToString("N2")
+                                </div>
+                            </div>
+                        </MCardTitle>
+
+                        <MCardText>
+                            <MList>
+                                @foreach (var bill in group.Bills)
+                                {
+                                    <MListItem OnClick="() => EditBill(bill.Id)">
+                                        <MListItemIcon>
+                                            <MIcon Color="@(bill.Type == "Expense" ? "error" : "success")">
+                                                @(bill.Type == "Expense" ? "mdi-minus" : "mdi-plus")
+                                            </MIcon>
+                                        </MListItemIcon>
+                                        <MListItemContent>
+                                            <MListItemTitle>
+                                                <span>@bill.CategoryName</span>
+                                                @if (!string.IsNullOrEmpty(bill.Note))
+                                                {
+                                                    <span class="text--secondary ml-2">- @bill.Note</span>
+                                                }
+                                            </MListItemTitle>
+                                            <MListItemSubtitle>
+                                                <MIcon Small Class="mr-1">@bill.PaymentChannelIcon</MIcon>
+                                                @bill.PaymentChannelName
+                                                <span class="ml-2">@bill.TransactionTime.ToString("HH:mm")</span>
+                                            </MListItemSubtitle>
+                                        </MListItemContent>
+                                        <MListItemAction>
+                                            <span class="@(bill.Type == "Expense" ? "error--text" : "success--text") text-h6">
+                                                @(bill.Type == "Expense" ? "-" : "+")¥@bill.Amount.ToString("N2")
+                                            </span>
+                                        </MListItemAction>
+                                    </MListItem>
+                                }
+                            </MList>
+                        </MCardText>
+                    </MCard>
+                }
+
+                <!-- 加载更多 -->
+                @if (_hasMore)
+                {
+                    <MContainer Class="d-flex justify-center">
+                        <MButton Outlined Color="primary" OnClick="LoadMore" Loading="_loadingMore">
+                            加载更多
+                        </MButton>
+                    </MContainer>
+                }
+            }
+        </MCol>
+    </MRow>
+</MContainer>
+
+@code {
+    private bool _isLoading = true;
+    private bool _loadingMore;
+    private bool _hasMore = true;
+    private int _currentPage = 1;
+    private const int PageSize = 20;
+
+    private List<CategoryModel> _categories = new();
+    private List<PaymentChannelModel> _paymentChannels = new();
+    private List<BillGroup> _groupedBills = new();
+
+    private decimal _totalExpense;
+    private decimal _totalIncome;
+
+    private FilterModel _filter = new();
+
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadFilterData();
+        await LoadBills();
+    }
+
+    private async Task LoadFilterData()
+    {
+        var categories = await CategoryService.GetCategoriesAsync(_userId);
+        _categories = categories.Select(c => new CategoryModel
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Icon = c.Icon,
+            Type = c.Type
+        }).ToList();
+
+        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+        _paymentChannels = channels.Select(c => new PaymentChannelModel
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Icon = c.Icon
+        }).ToList();
+    }
+
+    private async Task LoadBills()
+    {
+        _isLoading = true;
+        _currentPage = 1;
+        _groupedBills.Clear();
+
+        try
+        {
+            DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
+                ? DateTime.Parse(_filter.StartDate)
+                : null;
+
+            DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
+                ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
+                : null;
+
+            var bills = await BillService.GetBillsAsync(
+                _userId,
+                startDate,
+                endDate,
+                _filter.CategoryId,
+                _filter.PaymentChannelId,
+                _filter.Type,
+                _currentPage,
+                PageSize);
+
+            var billModels = bills.Select(b => new BillModel
+            {
+                Id = b.Id,
+                Amount = b.Amount,
+                Type = b.Type.ToString(),
+                CategoryId = b.CategoryId,
+                CategoryName = b.Category?.Name ?? "未知分类",
+                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
+                PaymentChannelId = b.PaymentChannelId,
+                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
+                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
+                TransactionTime = b.TransactionTime,
+                Note = b.Note
+            }).ToList();
+
+            GroupBills(billModels);
+
+            _hasMore = billModels.Count == PageSize;
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadMore()
+    {
+        if (_loadingMore) return;
+
+        _loadingMore = true;
+        _currentPage++;
+
+        try
+        {
+            DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
+                ? DateTime.Parse(_filter.StartDate)
+                : null;
+
+            DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
+                ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
+                : null;
+
+            var bills = await BillService.GetBillsAsync(
+                _userId,
+                startDate,
+                endDate,
+                _filter.CategoryId,
+                _filter.PaymentChannelId,
+                _filter.Type,
+                _currentPage,
+                PageSize);
+
+            var billModels = bills.Select(b => new BillModel
+            {
+                Id = b.Id,
+                Amount = b.Amount,
+                Type = b.Type.ToString(),
+                CategoryId = b.CategoryId,
+                CategoryName = b.Category?.Name ?? "未知分类",
+                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
+                PaymentChannelId = b.PaymentChannelId,
+                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
+                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
+                TransactionTime = b.TransactionTime,
+                Note = b.Note
+            }).ToList();
+
+            GroupBills(billModels);
+
+            _hasMore = billModels.Count == PageSize;
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _loadingMore = false;
+        }
+    }
+
+    private void GroupBills(List<BillModel> bills)
+    {
+        var groups = bills
+            .GroupBy(b => b.TransactionTime.Date)
+            .OrderByDescending(g => g.Key)
+            .Select(g => new BillGroup
+            {
+                Date = g.Key,
+                Bills = g.OrderByDescending(b => b.TransactionTime).ToList(),
+                TotalExpense = g.Where(b => b.Type == "Expense").Sum(b => b.Amount),
+                TotalIncome = g.Where(b => b.Type == "Income").Sum(b => b.Amount)
+            })
+            .ToList();
+
+        _groupedBills.AddRange(groups);
+
+        _totalExpense = _groupedBills.Sum(g => g.TotalExpense);
+        _totalIncome = _groupedBills.Sum(g => g.TotalIncome);
+    }
+
+    private void OnFilterTypeChanged(StringNumber value)
+    {
+        _filter.Type = value?.ToString() switch
+        {
+            "Expense" => BillType.Expense,
+            "Income" => BillType.Income,
+            _ => null
+        };
+    }
+
+    private async Task ResetFilters()
+    {
+        _filter = new FilterModel();
+        await LoadBills();
+    }
+
+    private void EditBill(Guid billId)
+    {
+        Navigation.NavigateTo($"/add-bill/{billId}");
+    }
+
+    private class FilterModel
+    {
+        public string? StartDate { get; set; }
+        public string? EndDate { get; set; }
+        public Guid? CategoryId { get; set; }
+        public Guid? PaymentChannelId { get; set; }
+        public BillType? Type { get; set; }
+    }
+
+    private class BillModel
+    {
+        public Guid Id { get; set; }
+        public decimal Amount { get; set; }
+        public string Type { get; set; } = string.Empty;
+        public Guid CategoryId { get; set; }
+        public string CategoryName { get; set; } = string.Empty;
+        public string CategoryIcon { get; set; } = string.Empty;
+        public Guid PaymentChannelId { get; set; }
+        public string PaymentChannelName { get; set; } = string.Empty;
+        public string PaymentChannelIcon { get; set; } = string.Empty;
+        public DateTime TransactionTime { get; set; }
+        public string? Note { get; set; }
+    }
+
+    private class BillGroup
+    {
+        public DateTime Date { get; set; }
+        public List<BillModel> Bills { get; set; } = new();
+        public decimal TotalExpense { get; set; }
+        public decimal TotalIncome { get; set; }
+    }
+
+    private class CategoryModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+        public BillType Type { get; set; }
+    }
+
+    private class PaymentChannelModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+    }
+}

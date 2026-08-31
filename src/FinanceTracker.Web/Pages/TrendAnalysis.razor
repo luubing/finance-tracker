@@ -1,0 +1,345 @@
+@page "/trend"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@inject IStatisticsService StatisticsService
+@inject IJSRuntime JSRuntime
+@inject IPopupService PopupService
+
+<MContainer>
+    <!-- 筛选条件 -->
+    <MRow>
+        <MCol Cols="12">
+            <MCard Class="mb-4">
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-chart-line</MIcon>
+                    趋势分析
+                </MCardTitle>
+
+                <MCardText>
+                    <MRow>
+                        <MCol Cols="12" Sm="6" Md="4">
+                            <MSelect Value="_selectedRange"
+                                     ValueChanged="@((StringNumber v) => OnRangeChanged(v))"
+                                     Items="_timeRanges"
+                                     ItemText="r => r.Text"
+                                     ItemValue="r => r.Value"
+                                     Label="时间范围"
+                                     Outlined
+                                     Dense />
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="4">
+                            <MButtonGroup Value="_selectedDimension">
+                                <MButton Value="@("day")" OnClick="@(() => ChangeDimension("day"))">按日</MButton>
+                                <MButton Value="@("week")" OnClick="@(() => ChangeDimension("week"))">按周</MButton>
+                                <MButton Value="@("month")" OnClick="@(() => ChangeDimension("month"))">按月</MButton>
+                            </MButtonGroup>
+                        </MCol>
+                    </MRow>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else
+    {
+        <!-- 统计卡片 -->
+        <MRow Class="mb-4">
+            <MCol Cols="4">
+                <MCard Color="error" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总支出</div>
+                        <div class="text-h5">¥@_totalExpense.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="success" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总收入</div>
+                        <div class="text-h5">¥@_totalIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="@(_totalNetIncome >= 0 ? "success" : "error")" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">净收支</div>
+                        <div class="text-h5">¥@_totalNetIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 趋势图表 -->
+        <MRow Class="mb-4">
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-line</MIcon>
+                        支出趋势
+                    </MCardTitle>
+                    <MCardText>
+                        @if (_trendData.Any())
+                        {
+                            <MLineChart Data="@_expenseChartData" Height="300" />
+                        }
+                        else
+                        {
+                            <div class="text-center text--secondary py-4">暂无支出数据</div>
+                        }
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <MRow Class="mb-4">
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-line</MIcon>
+                        收入趋势
+                    </MCardTitle>
+                    <MCardText>
+                        @if (_trendData.Any())
+                        {
+                            <MLineChart Data="@_incomeChartData" Height="300" />
+                        }
+                        else
+                        {
+                            <div class="text-center text--secondary py-4">暂无收入数据</div>
+                        }
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <MRow>
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-line</MIcon>
+                        净收支趋势
+                    </MCardTitle>
+                    <MCardText>
+                        @if (_trendData.Any())
+                        {
+                            <MLineChart Data="@_netIncomeChartData" Height="300" />
+                        }
+                        else
+                        {
+                            <div class="text-center text--secondary py-4">暂无数据</div>
+                        }
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 趋势数据表格 -->
+        <MRow>
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-table</MIcon>
+                        趋势数据明细
+                    </MCardTitle>
+                    <MCardText>
+                        <MDataTable Headers="_tableHeaders"
+                                    Items="_trendData"
+                                    Dense
+                                    Hover>
+                            <ItemColContent>
+                                @if (context.Header.Value == "date")
+                                {
+                                    @context.Item.Date.ToString("yyyy-MM-dd")
+                                }
+                                else if (context.Header.Value == "expense")
+                                {
+                                    <span class="error--text">¥@context.Item.Expense.ToString("N2")</span>
+                                }
+                                else if (context.Header.Value == "income")
+                                {
+                                    <span class="success--text">¥@context.Item.Income.ToString("N2")</span>
+                                }
+                                else if (context.Header.Value == "netIncome")
+                                {
+                                    <span class="@(context.Item.NetIncome >= 0 ? "success--text" : "error--text")">
+                                        ¥@context.Item.NetIncome.ToString("N2")
+                                    </span>
+                                }
+                            </ItemColContent>
+                        </MDataTable>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
+</MContainer>
+
+@code {
+    private bool _isLoading = true;
+    private string _selectedRange = "7days";
+    private string _selectedDimension = "day";
+
+    private List<TrendDataModel> _trendData = new();
+    private List<LineChartData> _expenseChartData = new();
+    private List<LineChartData> _incomeChartData = new();
+    private List<LineChartData> _netIncomeChartData = new();
+
+    private decimal _totalExpense;
+    private decimal _totalIncome;
+    private decimal _totalNetIncome;
+
+    private Guid _userId;
+
+    private List<(string Text, string Value)> _timeRanges = new()
+    {
+        ("最近7天", "7days"),
+        ("最近30天", "30days"),
+        ("最近90天", "90days"),
+        ("最近12个月", "12months")
+    };
+
+    private List<DataTableHeader<TrendDataModel>> _tableHeaders = new()
+    {
+        new() { Text = "日期", Value = "date", Sortable = true },
+        new() { Text = "支出", Value = "expense", Sortable = true },
+        new() { Text = "收入", Value = "income", Sortable = true },
+        new() { Text = "净收支", Value = "netIncome", Sortable = true }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadTrendData();
+    }
+
+    private async Task LoadTrendData()
+    {
+        _isLoading = true;
+
+        try
+        {
+            var (startDate, endDate) = GetDateRange(_selectedRange);
+
+            var trendData = await StatisticsService.GetTrendDataAsync(_userId, startDate, endDate, _selectedDimension);
+
+            _trendData = trendData.Select(t => new TrendDataModel
+            {
+                Date = t.Date,
+                Expense = t.Expense,
+                Income = t.Income,
+                NetIncome = t.NetIncome
+            }).ToList();
+
+            _totalExpense = _trendData.Sum(t => t.Expense);
+            _totalIncome = _trendData.Sum(t => t.Income);
+            _totalNetIncome = _trendData.Sum(t => t.NetIncome);
+
+            // 准备图表数据
+            _expenseChartData = new List<LineChartData>
+            {
+                new()
+                {
+                    Name = "支出",
+                    Data = _trendData.Select(t => new LineChartPoint
+                    {
+                        X = t.Date.ToString("MM-dd"),
+                        Y = t.Expense
+                    }).ToList()
+                }
+            };
+
+            _incomeChartData = new List<LineChartData>
+            {
+                new()
+                {
+                    Name = "收入",
+                    Data = _trendData.Select(t => new LineChartPoint
+                    {
+                        X = t.Date.ToString("MM-dd"),
+                        Y = t.Income
+                    }).ToList()
+                }
+            };
+
+            _netIncomeChartData = new List<LineChartData>
+            {
+                new()
+                {
+                    Name = "净收支",
+                    Data = _trendData.Select(t => new LineChartPoint
+                    {
+                        X = t.Date.ToString("MM-dd"),
+                        Y = t.NetIncome
+                    }).ToList()
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private (DateTime startDate, DateTime endDate) GetDateRange(string range)
+    {
+        var endDate = DateTime.Now;
+        var startDate = range switch
+        {
+            "7days" => endDate.AddDays(-7),
+            "30days" => endDate.AddDays(-30),
+            "90days" => endDate.AddDays(-90),
+            "12months" => endDate.AddMonths(-12),
+            _ => endDate.AddDays(-7)
+        };
+
+        return (startDate, endDate);
+    }
+
+    private async Task OnRangeChanged(StringNumber value)
+    {
+        _selectedRange = value?.ToString() ?? "7days";
+        await LoadTrendData();
+    }
+
+    private async Task ChangeDimension(string dimension)
+    {
+        _selectedDimension = dimension;
+        await LoadTrendData();
+    }
+
+    private class TrendDataModel
+    {
+        public DateTime Date { get; set; }
+        public decimal Expense { get; set; }
+        public decimal Income { get; set; }
+        public decimal NetIncome { get; set; }
+    }
+
+    private class LineChartData
+    {
+        public string Name { get; set; } = string.Empty;
+        public List<LineChartPoint> Data { get; set; } = new();
+    }
+
+    private class LineChartPoint
+    {
+        public string X { get; set; } = string.Empty;
+        public decimal Y { get; set; }
+    }
+}

@@ -1,0 +1,293 @@
+@page "/statistics"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@inject IStatisticsService StatisticsService
+@inject IJSRuntime JSRuntime
+@inject IPopupService PopupService
+
+<MContainer>
+    <!-- 月份选择器 -->
+    <MRow>
+        <MCol Cols="12">
+            <MCard Class="mb-4">
+                <MCardText>
+                    <MRow Align="AlignTypes.Center">
+                        <MCol Cols="4">
+                            <MButton Icon OnClick="PreviousMonth">
+                                <MIcon>mdi-chevron-left</MIcon>
+                            </MButton>
+                        </MCol>
+                        <MCol Cols="4" Class="text-center">
+                            <div class="text-h5">@_currentYear 年 @_currentMonth 月</div>
+                        </MCol>
+                        <MCol Cols="4" Class="text-right">
+                            <MButton Icon OnClick="NextMonth">
+                                <MIcon>mdi-chevron-right</MIcon>
+                            </MButton>
+                        </MCol>
+                    </MRow>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else
+    {
+        <!-- 统计卡片 -->
+        <MRow Class="mb-4">
+            <MCol Cols="4">
+                <MCard Color="error" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总支出</div>
+                        <div class="text-h5">¥@_monthlyStats?.TotalExpense.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="success" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总收入</div>
+                        <div class="text-h5">¥@_monthlyStats?.TotalIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="@(_monthlyStats?.NetIncome >= 0 ? "success" : "error")" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">净收支</div>
+                        <div class="text-h5">¥@_monthlyStats?.NetIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 支出分类饼图 -->
+        <MRow Class="mb-4">
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-pie</MIcon>
+                        支出分类统计
+                    </MCardTitle>
+                    <MCardText>
+                        @if (_expenseCategories.Any())
+                        {
+                            <MRow>
+                                <MCol Cols="12" Md="6">
+                                    <MPieChart Data="@_expenseChartData" Height="300" />
+                                </MCol>
+                                <MCol Cols="12" Md="6">
+                                    <MList>
+                                        @foreach (var category in _expenseCategories)
+                                        {
+                                            <MListItem>
+                                                <MListItemIcon>
+                                                    <MIcon>@category.CategoryIcon</MIcon>
+                                                </MListItemIcon>
+                                                <MListItemContent>
+                                                    <MListItemTitle>@category.CategoryName</MListItemTitle>
+                                                    <MListItemSubtitle>@category.Percentage% (@category.Count 笔)</MListItemSubtitle>
+                                                </MListItemContent>
+                                                <MListItemAction>
+                                                    <span class="error--text">¥@category.Amount.ToString("N2")</span>
+                                                </MListItemAction>
+                                            </MListItem>
+                                        }
+                                    </MList>
+                                </MCol>
+                            </MRow>
+                        }
+                        else
+                        {
+                            <div class="text-center text--secondary py-4">暂无支出数据</div>
+                        }
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 收入分类饼图 -->
+        <MRow>
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-pie</MIcon>
+                        收入分类统计
+                    </MCardTitle>
+                    <MCardText>
+                        @if (_incomeCategories.Any())
+                        {
+                            <MRow>
+                                <MCol Cols="12" Md="6">
+                                    <MPieChart Data="@_incomeChartData" Height="300" />
+                                </MCol>
+                                <MCol Cols="12" Md="6">
+                                    <MList>
+                                        @foreach (var category in _incomeCategories)
+                                        {
+                                            <MListItem>
+                                                <MListItemIcon>
+                                                    <MIcon>@category.CategoryIcon</MIcon>
+                                                </MListItemIcon>
+                                                <MListItemContent>
+                                                    <MListItemTitle>@category.CategoryName</MListItemTitle>
+                                                    <MListItemSubtitle>@category.Percentage% (@category.Count 笔)</MListItemSubtitle>
+                                                </MListItemContent>
+                                                <MListItemAction>
+                                                    <span class="success--text">¥@category.Amount.ToString("N2")</span>
+                                                </MListItemAction>
+                                            </MListItem>
+                                        }
+                                    </MList>
+                                </MCol>
+                            </MRow>
+                        }
+                        else
+                        {
+                            <div class="text-center text--secondary py-4">暂无收入数据</div>
+                        }
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
+</MContainer>
+
+@code {
+    private int _currentYear = DateTime.Now.Year;
+    private int _currentMonth = DateTime.Now.Month;
+    private bool _isLoading = true;
+
+    private MonthlyStatisticsModel? _monthlyStats;
+    private List<CategoryStatisticsModel> _expenseCategories = new();
+    private List<CategoryStatisticsModel> _incomeCategories = new();
+    private List<PieChartData> _expenseChartData = new();
+    private List<PieChartData> _incomeChartData = new();
+
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadStatistics();
+    }
+
+    private async Task LoadStatistics()
+    {
+        _isLoading = true;
+
+        try
+        {
+            // 加载月度统计
+            var stats = await StatisticsService.GetMonthlyStatisticsAsync(_userId, _currentYear, _currentMonth);
+            _monthlyStats = new MonthlyStatisticsModel
+            {
+                TotalExpense = stats.TotalExpense,
+                TotalIncome = stats.TotalIncome,
+                NetIncome = stats.NetIncome,
+                BillCount = stats.BillCount
+            };
+
+            // 加载支出分类统计
+            var expenseStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Expense);
+            _expenseCategories = expenseStats.Select(s => new CategoryStatisticsModel
+            {
+                CategoryId = s.CategoryId,
+                CategoryName = s.CategoryName,
+                CategoryIcon = s.CategoryIcon,
+                Amount = s.Amount,
+                Percentage = s.Percentage,
+                Count = s.Count
+            }).ToList();
+
+            _expenseChartData = _expenseCategories.Select(c => new PieChartData
+            {
+                Name = c.CategoryName,
+                Value = c.Amount
+            }).ToList();
+
+            // 加载收入分类统计
+            var incomeStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Income);
+            _incomeCategories = incomeStats.Select(s => new CategoryStatisticsModel
+            {
+                CategoryId = s.CategoryId,
+                CategoryName = s.CategoryName,
+                CategoryIcon = s.CategoryIcon,
+                Amount = s.Amount,
+                Percentage = s.Percentage,
+                Count = s.Count
+            }).ToList();
+
+            _incomeChartData = _incomeCategories.Select(c => new PieChartData
+            {
+                Name = c.CategoryName,
+                Value = c.Amount
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task PreviousMonth()
+    {
+        _currentMonth--;
+        if (_currentMonth < 1)
+        {
+            _currentMonth = 12;
+            _currentYear--;
+        }
+        await LoadStatistics();
+    }
+
+    private async Task NextMonth()
+    {
+        _currentMonth++;
+        if (_currentMonth > 12)
+        {
+            _currentMonth = 1;
+            _currentYear++;
+        }
+        await LoadStatistics();
+    }
+
+    private class MonthlyStatisticsModel
+    {
+        public decimal TotalExpense { get; set; }
+        public decimal TotalIncome { get; set; }
+        public decimal NetIncome { get; set; }
+        public int BillCount { get; set; }
+    }
+
+    private class CategoryStatisticsModel
+    {
+        public Guid CategoryId { get; set; }
+        public string CategoryName { get; set; } = string.Empty;
+        public string CategoryIcon { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public decimal Percentage { get; set; }
+        public int Count { get; set; }
+    }
+
+    private class PieChartData
+    {
+        public string Name { get; set; } = string.Empty;
+        public decimal Value { get; set; }
+    }
+}
