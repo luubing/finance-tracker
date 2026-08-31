@@ -125,4 +125,84 @@ public class StatisticsController : BaseApiController
             netIncome = t.NetIncome
         }));
     }
+
+    /// <summary>
+    /// 获取年度统计数据
+    /// </summary>
+    /// <param name="year">年份</param>
+    /// <returns>年度统计数据</returns>
+    [HttpGet("annual")]
+    public async Task<IActionResult> GetAnnualStatistics([FromQuery] int year)
+    {
+        var userId = GetUserId();
+
+        if (year < 2000 || year > 2100)
+        {
+            return BadRequest(new { message = "年份不正确" });
+        }
+
+        var statistics = await _statisticsService.GetAnnualStatisticsAsync(userId, year);
+
+        return Ok(new
+        {
+            year = statistics.Year,
+            totalExpense = statistics.TotalExpense,
+            totalIncome = statistics.TotalIncome,
+            netIncome = statistics.NetIncome,
+            billCount = statistics.BillCount,
+            monthlyData = statistics.MonthlyData.Select(m => new
+            {
+                month = m.Month,
+                totalExpense = m.TotalExpense,
+                totalIncome = m.TotalIncome,
+                netIncome = m.NetIncome,
+                billCount = m.BillCount
+            }),
+            categoryStats = statistics.CategoryStats.Select(c => new
+            {
+                categoryId = c.CategoryId,
+                categoryName = c.CategoryName,
+                categoryIcon = c.CategoryIcon,
+                amount = c.Amount,
+                percentage = c.Percentage,
+                count = c.Count
+            })
+        });
+    }
+
+    /// <summary>
+    /// 获取同比数据
+    /// </summary>
+    /// <param name="year">当前年份</param>
+    /// <param name="month">当前月份</param>
+    /// <returns>同比数据</returns>
+    [HttpGet("year-over-year")]
+    public async Task<IActionResult> GetYearOverYearData([FromQuery] int year, [FromQuery] int month)
+    {
+        var userId = GetUserId();
+
+        if (year < 2000 || year > 2100)
+        {
+            return BadRequest(new { message = "年份不正确" });
+        }
+
+        if (month < 1 || month > 12)
+        {
+            return BadRequest(new { message = "月份不正确" });
+        }
+
+        var data = await _statisticsService.GetYearOverYearDataAsync(userId, year, month);
+
+        return Ok(new
+        {
+            currentYear = data.CurrentYear,
+            currentMonth = data.CurrentMonth,
+            currentExpense = data.CurrentExpense,
+            currentIncome = data.CurrentIncome,
+            previousYearExpense = data.PreviousYearExpense,
+            previousYearIncome = data.PreviousYearIncome,
+            expenseChangeRate = data.ExpenseChangeRate,
+            incomeChangeRate = data.IncomeChangeRate
+        });
+    }
 }

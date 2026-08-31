@@ -35,12 +35,20 @@ build_metadata.AdditionalFiles.CssScope =
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQWRkQmlsbC5yYXpvcg==
 build_metadata.AdditionalFiles.CssScope = 
 
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/AnnualReport.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQW5udWFsUmVwb3J0LnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Bills.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQmlsbHMucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Categories.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcQ2F0ZWdvcmllcy5yYXpvcg==
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Import.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcSW1wb3J0LnJhem9y
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/Index.razor]
@@ -57,6 +65,10 @@ build_metadata.AdditionalFiles.CssScope =
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/PaymentChannels.razor]
 build_metadata.AdditionalFiles.TargetPath = UGFnZXNcUGF5bWVudENoYW5uZWxzLnJhem9y
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/code/finance-tracker/src/FinanceTracker.Web/Pages/SmsRecognition.razor]
+build_metadata.AdditionalFiles.TargetPath = UGFnZXNcU21zUmVjb2duaXRpb24ucmF6b3I=
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/code/finance-tracker/src/FinanceTracker.Web/Pages/TrendAnalysis.razor]

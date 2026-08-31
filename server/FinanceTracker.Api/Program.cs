@@ -72,6 +72,7 @@ builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<ICsvParserService, CsvParserService>();
 
 builder.Services.AddControllers();
 

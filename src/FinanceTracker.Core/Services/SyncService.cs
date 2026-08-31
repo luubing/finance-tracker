@@ -73,16 +73,27 @@ public class SyncService : ISyncService
                 .Where(b => pendingBillIds.Contains(b.Id))
                 .ToListAsync();
 
-            // 模拟同步到云端（实际实现中应该调用云端API）
+            // 同步到云端（模拟实现）
             foreach (var bill in bills)
             {
                 try
                 {
-                    // 模拟网络延迟
-                    await Task.Delay(100);
+                    // 模拟云端同步
+                    var cloudVersion = await SimulateCloudSyncAsync(bill);
 
-                    // 标记为已同步
-                    bill.SyncStatus = SyncStatus.Synced;
+                    // 冲突解决：后写入优先
+                    if (cloudVersion > bill.UpdatedAt)
+                    {
+                        // 云端版本更新，本地需要更新
+                        _logger.LogInformation("账单 {BillId} 云端版本更新，跳过", bill.Id);
+                        bill.SyncStatus = SyncStatus.Synced;
+                    }
+                    else
+                    {
+                        // 本地版本更新或相同，同步成功
+                        bill.SyncStatus = SyncStatus.Synced;
+                    }
+
                     result.SyncedCount++;
                 }
                 catch (Exception ex)
@@ -155,5 +166,17 @@ public class SyncService : ISyncService
     {
         return await _context.Bills
             .CountAsync(b => b.UserId == userId && b.SyncStatus == SyncStatus.Pending);
+    }
+
+    /// <summary>
+    /// 模拟云端同步（实际实现中应该调用真正的云端 API）
+    /// </summary>
+    private async Task<DateTime> SimulateCloudSyncAsync(Bill bill)
+    {
+        // 模拟网络延迟
+        await Task.Delay(100);
+
+        // 模拟云端返回的时间戳（实际应该从云端获取）
+        return DateTime.UtcNow.AddSeconds(-new Random().Next(0, 60));
     }
 }

@@ -132,4 +132,93 @@ public class StatisticsService : IStatisticsService
         var diff = (7 + (date.DayOfWeek - DayOfWeek.Monday)) % 7;
         return date.AddDays(-1 * diff).Date;
     }
+
+    public async Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year)
+    {
+        var startDate = new DateTime(year, 1, 1);
+        var endDate = startDate.AddYears(1).AddSeconds(-1);
+
+        var bills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= startDate &&
+                       b.TransactionTime <= endDate)
+            .Include(b => b.Category)
+            .ToListAsync();
+
+        var monthlyData = new List<MonthlyStatistics>();
+        for (int month = 1; month <= 12; month++)
+        {
+            var monthBills = bills.Where(b => b.TransactionTime.Month == month).ToList();
+            monthlyData.Add(new MonthlyStatistics
+            {
+                Year = year,
+                Month = month,
+                TotalExpense = monthBills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+                TotalIncome = monthBills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount),
+                BillCount = monthBills.Count
+            });
+        }
+
+        var categoryStats = bills
+            .GroupBy(b => new { b.CategoryId, b.Category.Name, b.Category.Icon })
+            .Select(g => new CategoryStatistics
+            {
+                CategoryId = g.Key.CategoryId,
+                CategoryName = g.Key.Name,
+                CategoryIcon = g.Key.Icon,
+                Amount = g.Sum(b => b.Amount),
+                Count = g.Count()
+            })
+            .OrderByDescending(c => c.Amount)
+            .ToList();
+
+        var totalAmount = categoryStats.Sum(c => c.Amount);
+        if (totalAmount > 0)
+        {
+            foreach (var stat in categoryStats)
+            {
+                stat.Percentage = Math.Round(stat.Amount / totalAmount * 100, 2);
+            }
+        }
+
+        return new AnnualStatistics
+        {
+            Year = year,
+            TotalExpense = bills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+            TotalIncome = bills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount),
+            BillCount = bills.Count,
+            MonthlyData = monthlyData,
+            CategoryStats = categoryStats
+        };
+    }
+
+    public async Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month)
+    {
+        var currentStartDate = new DateTime(year, month, 1);
+        var currentEndDate = currentStartDate.AddMonths(1).AddSeconds(-1);
+        var previousStartDate = currentStartDate.AddYears(-1);
+        var previousEndDate = currentEndDate.AddYears(-1);
+
+        var currentBills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= currentStartDate &&
+                       b.TransactionTime <= currentEndDate)
+            .ToListAsync();
+
+        var previousBills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= previousStartDate &&
+                       b.TransactionTime <= previousEndDate)
+            .ToListAsync();
+
+        return new YearOverYearData
+        {
+            CurrentYear = year,
+            CurrentMonth = month,
+            CurrentExpense = currentBills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+            CurrentIncome = currentBills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount),
+            PreviousYearExpense = previousBills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+            PreviousYearIncome = previousBills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount)
+        };
+    }
 }

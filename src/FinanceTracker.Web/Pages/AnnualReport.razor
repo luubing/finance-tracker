@@ -1,0 +1,307 @@
+@page "/annual-report"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Services
+@inject IStatisticsService StatisticsService
+@inject AuthenticationService AuthStateService
+@inject IPopupService PopupService
+
+<MContainer>
+    <!-- 年份选择器 -->
+    <MRow>
+        <MCol Cols="12">
+            <MCard Class="mb-4">
+                <MCardText>
+                    <MRow Align="AlignTypes.Center">
+                        <MCol Cols="4">
+                            <MButton Icon OnClick="PreviousYear">
+                                <MIcon>mdi-chevron-left</MIcon>
+                            </MButton>
+                        </MCol>
+                        <MCol Cols="4" Class="text-center">
+                            <div class="text-h5">@_currentYear 年</div>
+                        </MCol>
+                        <MCol Cols="4" Class="text-right">
+                            <MButton Icon OnClick="NextYear">
+                                <MIcon>mdi-chevron-right</MIcon>
+                            </MButton>
+                        </MCol>
+                    </MRow>
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else if (_annualStats != null)
+    {
+        <!-- 年度总览卡片 -->
+        <MRow Class="mb-4">
+            <MCol Cols="4">
+                <MCard Color="error" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总支出</div>
+                        <div class="text-h5">¥@_annualStats.TotalExpense.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="success" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">总收入</div>
+                        <div class="text-h5">¥@_annualStats.TotalIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4">
+                <MCard Color="@(_annualStats.NetIncome >= 0 ? "success" : "error")" Dark>
+                    <MCardText Class="text-center">
+                        <div class="text-subtitle-2">净收支</div>
+                        <div class="text-h5">¥@_annualStats.NetIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 同比分析 -->
+        @if (_yoyData != null)
+        {
+            <MRow Class="mb-4">
+                <MCol Cols="12">
+                    <MCard>
+                        <MCardTitle>
+                            <MIcon Class="mr-2">mdi-compare</MIcon>
+                            同比分析（与去年同期对比）
+                        </MCardTitle>
+                        <MCardText>
+                            <MRow>
+                                <MCol Cols="6">
+                                    <div class="text-center">
+                                        <div class="text-subtitle-2">支出同比</div>
+                                        <div class="text-h4 @(_yoyData.ExpenseChangeRate > 0 ? "error--text" : "success--text")">
+                                            @(_yoyData.ExpenseChangeRate > 0 ? "+" : "")@_yoyData.ExpenseChangeRate.ToString("F1")%
+                                        </div>
+                                        <div class="text-caption text--secondary">
+                                            去年: ¥@_yoyData.PreviousYearExpense.ToString("N2")
+                                        </div>
+                                    </div>
+                                </MCol>
+                                <MCol Cols="6">
+                                    <div class="text-center">
+                                        <div class="text-subtitle-2">收入同比</div>
+                                        <div class="text-h4 @(_yoyData.IncomeChangeRate > 0 ? "success--text" : "error--text")">
+                                            @(_yoyData.IncomeChangeRate > 0 ? "+" : "")@_yoyData.IncomeChangeRate.ToString("F1")%
+                                        </div>
+                                        <div class="text-caption text--secondary">
+                                            去年: ¥@_yoyData.PreviousYearIncome.ToString("N2")
+                                        </div>
+                                    </div>
+                                </MCol>
+                            </MRow>
+                        </MCardText>
+                    </MCard>
+                </MCol>
+            </MRow>
+        }
+
+        <!-- 月度趋势图 -->
+        <MRow Class="mb-4">
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-line</MIcon>
+                        月度趋势
+                    </MCardTitle>
+                    <MCardText>
+                        <MECharts Option="@_monthlyTrendOption" Height="300" />
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <!-- 分类统计 -->
+        <MRow>
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-pie</MIcon>
+                        分类统计
+                    </MCardTitle>
+                    <MCardText>
+                        <MRow>
+                            <MCol Cols="12" Md="6">
+                                <MECharts Option="@_categoryPieOption" Height="300" />
+                            </MCol>
+                            <MCol Cols="12" Md="6">
+                                <MList>
+                                    @foreach (var category in _annualStats.CategoryStats)
+                                    {
+                                        <MListItem>
+                                            <MListItemIcon>
+                                                <MIcon>@category.CategoryIcon</MIcon>
+                                            </MListItemIcon>
+                                            <MListItemContent>
+                                                <MListItemTitle>@category.CategoryName</MListItemTitle>
+                                                <MListItemSubtitle>@category.Percentage% (@category.Count 笔)</MListItemSubtitle>
+                                            </MListItemContent>
+                                            <MListItemAction>
+                                                <span>¥@category.Amount.ToString("N2")</span>
+                                            </MListItemAction>
+                                        </MListItem>
+                                    }
+                                </MList>
+                            </MCol>
+                        </MRow>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
+</MContainer>
+
+@code {
+    private int _currentYear = DateTime.Now.Year;
+    private bool _isLoading = true;
+
+    private AnnualStatisticsModel? _annualStats;
+    private YearOverYearModel? _yoyData;
+    private object? _monthlyTrendOption;
+    private object? _categoryPieOption;
+
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userId = await AuthStateService.GetUserIdAsync();
+        if (userId.HasValue)
+        {
+            _userId = userId.Value;
+        }
+
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _isLoading = true;
+
+        try
+        {
+            // 加载年度统计
+            var annualStats = await StatisticsService.GetAnnualStatisticsAsync(_userId, _currentYear);
+            _annualStats = new AnnualStatisticsModel
+            {
+                Year = annualStats.Year,
+                TotalExpense = annualStats.TotalExpense,
+                TotalIncome = annualStats.TotalIncome,
+                NetIncome = annualStats.NetIncome,
+                BillCount = annualStats.BillCount,
+                MonthlyData = annualStats.MonthlyData,
+                CategoryStats = annualStats.CategoryStats
+            };
+
+            // 加载同比数据
+            var yoyData = await StatisticsService.GetYearOverYearDataAsync(_userId, _currentYear, DateTime.Now.Month);
+            _yoyData = new YearOverYearModel
+            {
+                CurrentYear = yoyData.CurrentYear,
+                CurrentMonth = yoyData.CurrentMonth,
+                CurrentExpense = yoyData.CurrentExpense,
+                CurrentIncome = yoyData.CurrentIncome,
+                PreviousYearExpense = yoyData.PreviousYearExpense,
+                PreviousYearIncome = yoyData.PreviousYearIncome,
+                ExpenseChangeRate = yoyData.ExpenseChangeRate,
+                IncomeChangeRate = yoyData.IncomeChangeRate
+            };
+
+            // 构建月度趋势图
+            var months = annualStats.MonthlyData.Select(m => $"{m.Month}月").ToArray();
+            _monthlyTrendOption = new
+            {
+                tooltip = new { trigger = "axis" },
+                legend = new { data = new[] { "支出", "收入", "净收支" }, bottom = "0" },
+                xAxis = new { type = "category", data = months },
+                yAxis = new { type = "value", axisLabel = new { formatter = "¥{value}" } },
+                series = new[]
+                {
+                    new { name = "支出", type = "line", data = annualStats.MonthlyData.Select(m => (double)m.TotalExpense).ToArray() },
+                    new { name = "收入", type = "line", data = annualStats.MonthlyData.Select(m => (double)m.TotalIncome).ToArray() },
+                    new { name = "净收支", type = "line", data = annualStats.MonthlyData.Select(m => (double)m.NetIncome).ToArray() }
+                }
+            };
+
+            // 构建分类饼图
+            _categoryPieOption = new
+            {
+                tooltip = new { trigger = "item", formatter = "{b}: ¥{c} ({d}%)" },
+                legend = new { orient = "vertical", left = "left" },
+                series = new[]
+                {
+                    new
+                    {
+                        name = "分类统计",
+                        type = "pie",
+                        radius = "50%",
+                        data = annualStats.CategoryStats.Select(c => new { name = c.CategoryName, value = c.Amount }).ToArray(),
+                        emphasis = new
+                        {
+                            itemStyle = new
+                            {
+                                shadowBlur = 10,
+                                shadowOffsetX = 0,
+                                shadowColor = "rgba(0, 0, 0, 0.5)"
+                            }
+                        }
+                    }
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task PreviousYear()
+    {
+        _currentYear--;
+        await LoadData();
+    }
+
+    private async Task NextYear()
+    {
+        _currentYear++;
+        await LoadData();
+    }
+
+    private class AnnualStatisticsModel
+    {
+        public int Year { get; set; }
+        public decimal TotalExpense { get; set; }
+        public decimal TotalIncome { get; set; }
+        public decimal NetIncome { get; set; }
+        public int BillCount { get; set; }
+        public List<Core.Interfaces.MonthlyStatistics> MonthlyData { get; set; } = new();
+        public List<Core.Interfaces.CategoryStatistics> CategoryStats { get; set; } = new();
+    }
+
+    private class YearOverYearModel
+    {
+        public int CurrentYear { get; set; }
+        public int CurrentMonth { get; set; }
+        public decimal CurrentExpense { get; set; }
+        public decimal CurrentIncome { get; set; }
+        public decimal PreviousYearExpense { get; set; }
+        public decimal PreviousYearIncome { get; set; }
+        public decimal ExpenseChangeRate { get; set; }
+        public decimal IncomeChangeRate { get; set; }
+    }
+}

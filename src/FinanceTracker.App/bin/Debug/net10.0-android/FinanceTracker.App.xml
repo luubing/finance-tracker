@@ -4,6 +4,11 @@
         <name>FinanceTracker.App</name>
     </assembly>
     <members>
+        <member name="T:FinanceTracker.App.Platforms.Android.Services.SmsService">
+            <summary>
+            Android 短信服务实现
+            </summary>
+        </member>
         <member name="T:FinanceTracker.App.Services.BackgroundSyncService">
             <summary>
             后台同步服务

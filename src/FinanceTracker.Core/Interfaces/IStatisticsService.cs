@@ -35,6 +35,23 @@ public interface IStatisticsService
     /// <param name="dimension">维度（day/week/month）</param>
     /// <returns>趋势数据</returns>
     Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, string dimension);
+
+    /// <summary>
+    /// 获取年度统计数据
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="year">年份</param>
+    /// <returns>年度统计数据</returns>
+    Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year);
+
+    /// <summary>
+    /// 获取同比数据
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="year">当前年份</param>
+    /// <param name="month">当前月份</param>
+    /// <returns>同比数据</returns>
+    Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month);
 }
 
 /// <summary>
@@ -133,4 +150,95 @@ public class TrendData
     /// 净收支
     /// </summary>
     public decimal NetIncome => Income - Expense;
+}
+
+/// <summary>
+/// 年度统计数据
+/// </summary>
+public class AnnualStatistics
+{
+    /// <summary>
+    /// 年份
+    /// </summary>
+    public int Year { get; set; }
+
+    /// <summary>
+    /// 总支出
+    /// </summary>
+    public decimal TotalExpense { get; set; }
+
+    /// <summary>
+    /// 总收入
+    /// </summary>
+    public decimal TotalIncome { get; set; }
+
+    /// <summary>
+    /// 净收支
+    /// </summary>
+    public decimal NetIncome => TotalIncome - TotalExpense;
+
+    /// <summary>
+    /// 账单数量
+    /// </summary>
+    public int BillCount { get; set; }
+
+    /// <summary>
+    /// 月度数据
+    /// </summary>
+    public List<MonthlyStatistics> MonthlyData { get; set; } = new();
+
+    /// <summary>
+    /// 分类统计
+    /// </summary>
+    public List<CategoryStatistics> CategoryStats { get; set; } = new();
+}
+
+/// <summary>
+/// 同比数据
+/// </summary>
+public class YearOverYearData
+{
+    /// <summary>
+    /// 当前年份
+    /// </summary>
+    public int CurrentYear { get; set; }
+
+    /// <summary>
+    /// 当前月份
+    /// </summary>
+    public int CurrentMonth { get; set; }
+
+    /// <summary>
+    /// 当前期间支出
+    /// </summary>
+    public decimal CurrentExpense { get; set; }
+
+    /// <summary>
+    /// 当前期间收入
+    /// </summary>
+    public decimal CurrentIncome { get; set; }
+
+    /// <summary>
+    /// 去年同期支出
+    /// </summary>
+    public decimal PreviousYearExpense { get; set; }
+
+    /// <summary>
+    /// 去年同期收入
+    /// </summary>
+    public decimal PreviousYearIncome { get; set; }
+
+    /// <summary>
+    /// 支出同比变化率
+    /// </summary>
+    public decimal ExpenseChangeRate => PreviousYearExpense > 0
+        ? (CurrentExpense - PreviousYearExpense) / PreviousYearExpense * 100
+        : 0;
+
+    /// <summary>
+    /// 收入同比变化率
+    /// </summary>
+    public decimal IncomeChangeRate => PreviousYearIncome > 0
+        ? (CurrentIncome - PreviousYearIncome) / PreviousYearIncome * 100
+        : 0;
 }

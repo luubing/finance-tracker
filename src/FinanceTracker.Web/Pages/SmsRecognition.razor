@@ -1,0 +1,223 @@
+@page "/sms-recognition"
+@using FinanceTracker.Core.Interfaces
+@inject ISmsService SmsService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject IBillService BillService
+@inject IJSRuntime JSRuntime
+@inject IPopupService PopupService
+@inject NavigationManager Navigation
+
+<MContainer>
+    <MRow>
+        <MCol Cols="12">
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-message-text</MIcon>
+                    短信识别
+                </MCardTitle>
+
+                <MCardText>
+                    @if (!_hasPermission)
+                    {
+                        <MAlert Type="AlertTypes.Warning" Dense>
+                            需要短信读取权限才能使用此功能
+                            <MButton Color="warning" Small Class="ml-2" OnClick="RequestPermission">
+                                授权
+                            </MButton>
+                        </MAlert>
+                    }
+                    else
+                    {
+                        <MRow>
+                            <MCol Cols="12" Sm="6">
+                                <MTextField @bind-Value="_fromDate"
+                                            Label="开始日期"
+                                            Type="date"
+                                            Outlined
+                                            Dense />
+                            </MCol>
+                            <MCol Cols="12" Sm="6">
+                                <MButton Color="primary" OnClick="ReadSms" Loading="_loading">
+                                    <MIcon Class="mr-2">mdi-magnify</MIcon>
+                                    读取短信
+                                </MButton>
+                            </MCol>
+                        </MRow>
+
+                        @if (_smsMessages.Any())
+                        {
+                            <MDivider Class="my-4" />
+
+                            <div class="text-h6 mb-4">识别到 @_smsMessages.Count 条支付短信</div>
+
+                            @foreach (var sms in _smsMessages)
+                            {
+                                <MCard Outlined Class="mb-2">
+                                    <MCardText>
+                                        <MRow>
+                                            <MCol Cols="12" Sm="8">
+                                                <div class="text-body-2">@sms.Body</div>
+                                                <div class="text-caption text--secondary">
+                                                    来自: @sms.Address | 时间: @sms.Date.ToString("yyyy-MM-dd HH:mm")
+                                                </div>
+                                            </MCol>
+                                            <MCol Cols="12" Sm="4" Class="d-flex align-center justify-end">
+                                                <MButton Small Color="primary" OnClick="() => CreateBillFromSms(sms)">
+                                                    创建账单
+                                                </MButton>
+                                            </MCol>
+                                        </MRow>
+                                    </MCardText>
+                                </MCard>
+                            }
+                        }
+                        else if (_loading)
+                        {
+                            <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+                                <MProgressCircular Indeterminate Size="64" Color="primary" />
+                            </MContainer>
+                        }
+                        else if (!_loading && _hasSearched)
+                        {
+                            <MAlert Type="AlertTypes.Info" Dense>
+                                未找到支付类短信
+                            </MAlert>
+                        }
+                    }
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+</MContainer>
+
+@code {
+    private bool _hasPermission;
+    private bool _loading;
+    private bool _hasSearched;
+    private string _fromDate = DateTime.Now.AddDays(-30).ToString("yyyy-MM-dd");
+    private List<Core.Interfaces.SmsMessage> _smsMessages = new();
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        _hasPermission = await SmsService.HasPermissionAsync();
+    }
+
+    private async Task RequestPermission()
+    {
+        _hasPermission = await SmsService.RequestPermissionAsync();
+        if (_hasPermission)
+        {
+            await PopupService.EnqueueSnackbarAsync("权限已授予", AlertTypes.Success);
+        }
+    }
+
+    private async Task ReadSms()
+    {
+        if (_loading) return;
+
+        _loading = true;
+        _hasSearched = true;
+
+        try
+        {
+            var fromDate = DateTime.Parse(_fromDate);
+            _smsMessages = await SmsService.ReadPaymentSmsAsync(fromDate);
+
+            if (!_smsMessages.Any())
+            {
+                await PopupService.EnqueueSnackbarAsync("未找到支付类短信", AlertTypes.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"读取短信失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task CreateBillFromSms(Core.Interfaces.SmsMessage sms)
+    {
+        try
+        {
+            // 解析短信内容
+            var (amount, isIncome, description, channel) = ParseSmsContent(sms.Body);
+
+            // 获取分类和渠道
+            var categories = await CategoryService.GetCategoriesAsync(_userId);
+            var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+
+            var category = categories.FirstOrDefault(c => c.Name == "其他支出") ??
+                           categories.FirstOrDefault(c => c.Type == (isIncome ? Core.Enums.BillType.Income : Core.Enums.BillType.Expense));
+
+            var paymentChannel = channels.FirstOrDefault(c => c.Name.Contains(channel)) ??
+                                 channels.FirstOrDefault(c => c.Name == "其他");
+
+            var bill = new Core.Entities.Bill
+            {
+                UserId = _userId,
+                Amount = amount,
+                Type = isIncome ? Core.Enums.BillType.Income : Core.Enums.BillType.Expense,
+                CategoryId = category?.Id ?? Guid.Empty,
+                PaymentChannelId = paymentChannel?.Id ?? Guid.Empty,
+                TransactionTime = sms.Date,
+                Note = description,
+                Source = Core.Enums.BillSource.SmsRecognition,
+                SyncStatus = Core.Enums.SyncStatus.Pending
+            };
+
+            await BillService.CreateBillAsync(bill);
+
+            // 从列表中移除已处理的短信
+            _smsMessages.Remove(sms);
+
+            await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private (decimal amount, bool isIncome, string description, string channel) ParseSmsContent(string body)
+    {
+        var amount = 0m;
+        var isIncome = false;
+        var description = body;
+        var channel = "";
+
+        // 提取金额
+        var amountMatch = System.Text.RegularExpressions.Regex.Match(body, @"(\d+\.?\d*)\s*元");
+        if (amountMatch.Success)
+        {
+            amount = decimal.Parse(amountMatch.Groups[1].Value);
+        }
+
+        // 判断收入/支出
+        isIncome = body.Contains("收入") || body.Contains("到账") || body.Contains("转入");
+
+        // 识别渠道
+        if (body.Contains("微信"))
+            channel = "微信支付";
+        else if (body.Contains("支付宝"))
+            channel = "支付宝";
+        else if (body.Contains("京东"))
+            channel = "京东支付";
+        else if (body.Contains("美团"))
+            channel = "美团支付";
+        else
+            channel = "银行卡";
+
+        return (amount, isIncome, description, channel);
+    }
+}
