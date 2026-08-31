@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/server/">
+    <Project Path="server/FinanceTracker.Api/FinanceTracker.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/FinanceTracker.App/FinanceTracker.App.csproj" />
+    <Project Path="src/FinanceTracker.Core/FinanceTracker.Core.csproj" />
+    <Project Path="src/FinanceTracker.Infrastructure/FinanceTracker.Infrastructure.csproj" />
+    <Project Path="src/FinanceTracker.Shared/FinanceTracker.Shared.csproj" />
+    <Project Path="src/FinanceTracker.Web/FinanceTracker.Web.csproj" />
+  </Folder>
+</Solution>

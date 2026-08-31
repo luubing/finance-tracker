@@ -1,0 +1,10 @@
+<api type="debug" assembly-name="FinanceTracker.App" mvid="7ee23d41d84a4806b12ade04de699084">
+  <java-to-managed>
+    <entry java-name="crc64b478ddc5c2b788e8/MainActivity" managed-name="FinanceTracker.App.MainActivity, FinanceTracker.App" managed-type-token-id="33554442" />
+    <entry java-name="crc64b478ddc5c2b788e8/MainApplication" managed-name="FinanceTracker.App.MainApplication, FinanceTracker.App" managed-type-token-id="33554443" />
+  </java-to-managed>
+  <managed-to-java>
+    <entry java-name="crc64b478ddc5c2b788e8/MainActivity" managed-name="FinanceTracker.App.MainActivity, FinanceTracker.App" managed-type-token-id="33554442" />
+    <entry java-name="crc64b478ddc5c2b788e8/MainApplication" managed-name="FinanceTracker.App.MainApplication, FinanceTracker.App" managed-type-token-id="33554443" />
+  </managed-to-java>
+</api>

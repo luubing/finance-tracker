@@ -1,0 +1,93 @@
+@page "/login"
+@using FinanceTracker.Core.Interfaces
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<MContainer Style="max-width: 400px; margin-top: 100px;">
+    <MCard>
+        <MCardTitle Class="text-center">
+            <MIcon Large Color="primary" Class="mb-2">mdi-wallet</MIcon>
+            <div class="text-h4 font-weight-bold">记账本</div>
+        </MCardTitle>
+
+        <MCardText>
+            <MForm @ref="_form" Model="_model" OnValidSubmit="HandleLogin">
+                <MTextField @bind-Value="_model.PhoneNumber"
+                            Label="手机号"
+                            Placeholder="请输入手机号"
+                            Outlined
+                            Dense
+                            Rules="PhoneNumberRules"
+                            Type="tel"
+                            maxlength="11">
+                    <PrependInnerContent>
+                        <MIcon>mdi-phone</MIcon>
+                    </PrependInnerContent>
+                </MTextField>
+
+                <MButton Type="submit"
+                         Color="primary"
+                         Block
+                         Large
+                         Loading="_loading"
+                         Disabled="_loading">
+                    登录/注册
+                </MButton>
+            </MForm>
+        </MCardText>
+
+        <MCardActions Class="px-4 pb-4">
+            <MAlert Type="AlertTypes.Info" Dense Text Class="mb-0">
+                首次使用手机号将自动注册
+            </MAlert>
+        </MCardActions>
+    </MCard>
+</MContainer>
+
+@code {
+    private MForm? _form;
+    private LoginModel _model = new();
+    private bool _loading;
+
+    private List<Func<string, StringBoolean>> PhoneNumberRules => new()
+    {
+        value => string.IsNullOrWhiteSpace(value) ? "请输入手机号" : true,
+        value => value.Length != 11 ? "手机号必须是11位" : true,
+        value => !value.StartsWith("1") ? "手机号格式不正确" : true
+    };
+
+    private async Task HandleLogin()
+    {
+        if (_loading) return;
+
+        _loading = true;
+
+        try
+        {
+            // 调用API进行登录
+            var user = await AuthService.RegisterOrLoginAsync(_model.PhoneNumber);
+
+            // 保存用户信息到本地存储
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "userId", user.Id.ToString());
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "phoneNumber", user.PhoneNumber);
+
+            // 跳转到主页
+            Navigation.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            // 显示错误信息
+            await JSRuntime.InvokeVoidAsync("alert", $"登录失败: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private class LoginModel
+    {
+        public string PhoneNumber { get; set; } = string.Empty;
+    }
+}

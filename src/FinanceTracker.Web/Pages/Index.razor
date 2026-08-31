@@ -1,0 +1,103 @@
+@page "/"
+@using FinanceTracker.Core.Interfaces
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+@if (_isLoading)
+{
+    <MContainer Class="d-flex justify-center align-center" Style="height: 100vh;">
+        <MProgressCircular Indeterminate Size="64" Color="primary" />
+    </MContainer>
+}
+else if (_user == null)
+{
+    <LoginPage />
+}
+else
+{
+    <MContainer>
+        <MRow>
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-account</MIcon>
+                        欢迎回来
+                    </MCardTitle>
+                    <MCardText>
+                        <div class="text-h6">手机号: @_user.PhoneNumber</div>
+                        <div class="text-body-2 text--secondary">注册时间: @_user.CreatedAt.ToString("yyyy-MM-dd HH:mm")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+
+        <MRow Class="mt-4">
+            <MCol Cols="12">
+                <MCard>
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-chart-pie</MIcon>
+                        快捷操作
+                    </MCardTitle>
+                    <MCardText>
+                        <MRow>
+                            <MCol Cols="6">
+                                <MButton Block Large Color="primary" OnClick="NavigateToAddBill">
+                                    <MIcon Class="mr-2">mdi-plus</MIcon>
+                                    记一笔
+                                </MButton>
+                            </MCol>
+                            <MCol Cols="6">
+                                <MButton Block Large Outlined Color="primary" OnClick="NavigateToBills">
+                                    <MIcon Class="mr-2">mdi-format-list-bulleted</MIcon>
+                                    账单列表
+                                </MButton>
+                            </MCol>
+                        </MRow>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    </MContainer>
+}
+
+@code {
+    private Core.Entities.User? _user;
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUser();
+    }
+
+    private async Task LoadUser()
+    {
+        try
+        {
+            var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            {
+                _user = await AuthService.GetUserByIdAsync(userId);
+            }
+        }
+        catch
+        {
+            // 忽略错误，显示登录页面
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void NavigateToAddBill()
+    {
+        Navigation.NavigateTo("/add-bill");
+    }
+
+    private void NavigateToBills()
+    {
+        Navigation.NavigateTo("/bills");
+    }
+}
