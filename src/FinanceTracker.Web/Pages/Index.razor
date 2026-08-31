@@ -1,9 +1,10 @@
 @page "/"
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Services
 @using Microsoft.Extensions.Logging
 @inject IAuthService AuthService
+@inject AuthenticationService AuthStateService
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject ILogger<Index> Logger
 
 @if (_isLoading)
@@ -76,16 +77,15 @@ else
     {
         try
         {
-            var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+            var userId = await AuthStateService.GetUserIdAsync();
 
-            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            if (userId.HasValue)
             {
-                _user = await AuthService.GetUserByIdAsync(userId);
+                _user = await AuthService.GetUserByIdAsync(userId.Value);
             }
         }
         catch (Exception ex)
         {
-            // 记录异常，但不影响用户体验
             Logger.LogWarning(ex, "加载用户信息失败，将显示登录页面");
         }
         finally

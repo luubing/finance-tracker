@@ -1,6 +1,7 @@
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
+using FinanceTracker.Web.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -39,6 +40,10 @@ public static class MauiProgram
         builder.Services.AddScoped<IBillService, BillService>();
         builder.Services.AddScoped<IStatisticsService, StatisticsService>();
         builder.Services.AddScoped<ISyncService, SyncService>();
+
+        // 注册应用服务
+        builder.Services.AddScoped<AuthenticationService>();
+        builder.Services.AddScoped<HttpService>();
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();

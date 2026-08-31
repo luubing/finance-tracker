@@ -1,9 +1,10 @@
 @page "/login"
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Shared.Validators
+@using FinanceTracker.Web.Services
 @inject IAuthService AuthService
+@inject AuthenticationService AuthStateService
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
 
 <MContainer Style="max-width: 400px; margin-top: 100px;">
@@ -69,19 +70,17 @@
 
         try
         {
-            // 调用API进行登录
+            // 调用本地服务进行登录
             var user = await AuthService.RegisterOrLoginAsync(_model.PhoneNumber);
 
-            // 保存用户信息到本地存储
-            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "userId", user.Id.ToString());
-            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "phoneNumber", user.PhoneNumber);
+            // 保存用户信息
+            await AuthStateService.SaveUserInfoAsync(user.Id, user.PhoneNumber);
 
             // 跳转到主页
             Navigation.NavigateTo("/");
         }
         catch (Exception ex)
         {
-            // 使用 MASA Blazor 的 PopupService 显示错误信息
             await PopupService.EnqueueSnackbarAsync($"登录失败: {ex.Message}", AlertTypes.Error);
         }
         finally
