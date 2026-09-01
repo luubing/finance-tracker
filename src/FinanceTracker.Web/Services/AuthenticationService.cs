@@ -10,11 +10,17 @@ public class AuthenticationService
     private readonly IJSRuntime _jsRuntime;
     private string? _cachedToken;
     private Guid? _cachedUserId;
+    private bool _isInitialized;
 
     public AuthenticationService(IJSRuntime jsRuntime)
     {
         _jsRuntime = jsRuntime;
     }
+
+    /// <summary>
+    /// 检查是否在预渲染模式
+    /// </summary>
+    private bool IsPrerendering => _jsRuntime is not IJSInProcessRuntime;
 
     /// <summary>
     /// 获取 JWT Token
@@ -26,8 +32,20 @@ public class AuthenticationService
             return _cachedToken;
         }
 
-        _cachedToken = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", "authToken");
-        return _cachedToken;
+        if (IsPrerendering)
+        {
+            return null;
+        }
+
+        try
+        {
+            _cachedToken = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", "authToken");
+            return _cachedToken;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -36,7 +54,11 @@ public class AuthenticationService
     public async Task SaveTokenAsync(string token)
     {
         _cachedToken = token;
-        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", token);
+
+        if (!IsPrerendering)
+        {
+            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", token);
+        }
     }
 
     /// <summary>
@@ -49,11 +71,23 @@ public class AuthenticationService
             return _cachedUserId;
         }
 
-        var userIdStr = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        if (IsPrerendering)
         {
-            _cachedUserId = userId;
-            return userId;
+            return null;
+        }
+
+        try
+        {
+            var userIdStr = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            {
+                _cachedUserId = userId;
+                return userId;
+            }
+        }
+        catch
+        {
+            // 忽略错误
         }
 
         return null;
@@ -65,8 +99,12 @@ public class AuthenticationService
     public async Task SaveUserInfoAsync(Guid userId, string phoneNumber)
     {
         _cachedUserId = userId;
-        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "userId", userId.ToString());
-        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "phoneNumber", phoneNumber);
+
+        if (!IsPrerendering)
+        {
+            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "userId", userId.ToString());
+            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "phoneNumber", phoneNumber);
+        }
     }
 
     /// <summary>
@@ -85,8 +123,12 @@ public class AuthenticationService
     {
         _cachedToken = null;
         _cachedUserId = null;
-        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "authToken");
-        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "userId");
-        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "phoneNumber");
+
+        if (!IsPrerendering)
+        {
+            await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "authToken");
+            await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "userId");
+            await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "phoneNumber");
+        }
     }
 }

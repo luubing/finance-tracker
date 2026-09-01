@@ -67,10 +67,16 @@ else
 @code {
     private Core.Entities.User? _user;
     private bool _isLoading = true;
+    private bool _firstRender = true;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await LoadUser();
+        if (firstRender)
+        {
+            _firstRender = false;
+            await LoadUser();
+            StateHasChanged();
+        }
     }
 
     private async Task LoadUser()
