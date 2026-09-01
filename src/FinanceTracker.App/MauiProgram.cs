@@ -29,9 +29,11 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
 
         // 配置 EF Core + SQLite (本地数据库)
+        // 迁移程序集指向 SQLite 专用项目（与 API 的 Npgsql 迁移分离）
         var dbPath = Path.Combine(FileSystem.AppDataDirectory, "finance_tracker.db");
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseSqlite($"Data Source={dbPath}"));
+            options.UseSqlite($"Data Source={dbPath}", b =>
+                b.MigrationsAssembly("FinanceTracker.Infrastructure.Sqlite")));
 
         // 注册 DbContext 接口
         builder.Services.AddScoped<IApplicationDbContext>(provider =>

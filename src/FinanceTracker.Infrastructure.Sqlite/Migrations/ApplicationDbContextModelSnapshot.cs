@@ -3,19 +3,16 @@ using System;
 using FinanceTracker.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace FinanceTracker.Infrastructure.Migrations
+namespace FinanceTracker.Infrastructure.Sqlite.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260901012042_UpdateModel")]
-    partial class UpdateModel
+    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     {
-        /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");

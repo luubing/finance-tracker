@@ -53,6 +53,7 @@
 		<ProjectReference Include="..\FinanceTracker.Core\FinanceTracker.Core.csproj" />
 		<ProjectReference Include="..\FinanceTracker.Shared\FinanceTracker.Shared.csproj" />
 		<ProjectReference Include="..\FinanceTracker.Infrastructure\FinanceTracker.Infrastructure.csproj" />
+		<ProjectReference Include="..\FinanceTracker.Infrastructure.Sqlite\FinanceTracker.Infrastructure.Sqlite.csproj" />
 		<ProjectReference Include="..\FinanceTracker.Web\FinanceTracker.Web.csproj" />
 	</ItemGroup>
 
