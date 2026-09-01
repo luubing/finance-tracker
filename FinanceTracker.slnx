@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/server/">
     <Project Path="server/FinanceTracker.Api/FinanceTracker.Api.csproj" />
+    <Project Path="server/FinanceTracker.Web.Server/FinanceTracker.Web.Server.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/FinanceTracker.App/FinanceTracker.App.csproj" />
