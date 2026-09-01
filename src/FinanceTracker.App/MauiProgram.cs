@@ -6,6 +6,10 @@ using FinanceTracker.Web.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
+#if ANDROID
+using FinanceTracker.App.Platforms.Android.Services;
+#endif
+
 namespace FinanceTracker.App;
 
 public static class MauiProgram
@@ -45,6 +49,10 @@ public static class MauiProgram
 
         // 注册平台服务
         builder.Services.AddSingleton<INetworkService, NetworkService>();
+
+#if ANDROID
+        builder.Services.AddSingleton<ISmsService, SmsService>();
+#endif
 
         // 注册应用服务
         builder.Services.AddScoped<AuthenticationService>();

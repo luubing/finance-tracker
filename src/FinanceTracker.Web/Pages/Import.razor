@@ -2,7 +2,6 @@
 @using FinanceTracker.Web.Services
 @inject HttpService HttpService
 @inject IPopupService PopupService
-@inject NavigationManager Navigation
 
 <MContainer>
     <MRow>
@@ -38,9 +37,9 @@
 
                                     <MButton Color="success"
                                              Block
-                                             OnClick="ImportWeChat"
-                                             Loading="_importingWechat"
-                                             Disabled="_importingWechat || _wechatFile == null">
+                                             OnClick="() => ImportFile(_wechatFile, ImportPlatform.WeChat)"
+                                             Loading="_importing"
+                                             Disabled="_importing || _wechatFile == null">
                                         <MIcon Class="mr-2">mdi-upload</MIcon>
                                         导入微信账单
                                     </MButton>
@@ -71,9 +70,9 @@
 
                                     <MButton Color="primary"
                                              Block
-                                             OnClick="ImportAlipay"
-                                             Loading="_importingAlipay"
-                                             Disabled="_importingAlipay || _alipayFile == null">
+                                             OnClick="() => ImportFile(_alipayFile, ImportPlatform.Alipay)"
+                                             Loading="_importing"
+                                             Disabled="_importing || _alipayFile == null">
                                         <MIcon Class="mr-2">mdi-upload</MIcon>
                                         导入支付宝账单
                                     </MButton>
@@ -120,80 +119,45 @@
 @code {
     private IBrowserFile? _wechatFile;
     private IBrowserFile? _alipayFile;
-    private bool _importingWechat;
-    private bool _importingAlipay;
+    private bool _importing;
     private ImportResult? _importResult;
 
-    private async Task ImportWeChat()
+    private enum ImportPlatform
     {
-        if (_wechatFile == null) return;
-
-        _importingWechat = true;
-        _importResult = null;
-
-        try
-        {
-            var content = new MultipartFormDataContent();
-            var fileContent = new StreamContent(_wechatFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
-            content.Add(fileContent, "file", _wechatFile.Name);
-
-            var httpClient = new HttpClient { BaseAddress = new Uri(Navigation.BaseUri) };
-            var response = await httpClient.PostAsync("api/import/wechat", content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadAsStringAsync();
-                _importResult = System.Text.Json.JsonSerializer.Deserialize<ImportResult>(result, new System.Text.Json.JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
-                await PopupService.EnqueueSnackbarAsync("微信账单导入完成", AlertTypes.Success);
-            }
-            else
-            {
-                var error = await response.Content.ReadAsStringAsync();
-                await PopupService.EnqueueSnackbarAsync($"导入失败: {error}", AlertTypes.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"导入失败: {ex.Message}", AlertTypes.Error);
-        }
-        finally
-        {
-            _importingWechat = false;
-        }
+        WeChat,
+        Alipay
     }
 
-    private async Task ImportAlipay()
+    private async Task ImportFile(IBrowserFile? file, ImportPlatform platform)
     {
-        if (_alipayFile == null) return;
+        if (file == null) return;
 
-        _importingAlipay = true;
+        _importing = true;
         _importResult = null;
 
         try
         {
-            var content = new MultipartFormDataContent();
-            var fileContent = new StreamContent(_alipayFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
-            content.Add(fileContent, "file", _alipayFile.Name);
+            var endpoint = platform == ImportPlatform.WeChat ? "api/import/wechat" : "api/import/alipay";
 
-            var httpClient = new HttpClient { BaseAddress = new Uri(Navigation.BaseUri) };
-            var response = await httpClient.PostAsync("api/import/alipay", content);
+            // 读取文件内容
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            using var reader = new System.IO.StreamReader(stream);
+            var csvContent = await reader.ReadToEndAsync();
 
-            if (response.IsSuccessStatusCode)
+            // 调用导入 API
+            var request = new { CsvContent = csvContent };
+            var result = await HttpService.PostAsync<ImportResult>(endpoint, request);
+
+            if (result != null)
             {
-                var result = await response.Content.ReadAsStringAsync();
-                _importResult = System.Text.Json.JsonSerializer.Deserialize<ImportResult>(result, new System.Text.Json.JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
-                await PopupService.EnqueueSnackbarAsync("支付宝账单导入完成", AlertTypes.Success);
+                _importResult = result;
+                await PopupService.EnqueueSnackbarAsync(
+                    $"{(platform == ImportPlatform.WeChat ? "微信" : "支付宝")}账单导入完成",
+                    AlertTypes.Success);
             }
             else
             {
-                var error = await response.Content.ReadAsStringAsync();
-                await PopupService.EnqueueSnackbarAsync($"导入失败: {error}", AlertTypes.Error);
+                await PopupService.EnqueueSnackbarAsync("导入失败：服务器返回空结果", AlertTypes.Error);
             }
         }
         catch (Exception ex)
@@ -202,7 +166,7 @@
         }
         finally
         {
-            _importingAlipay = false;
+            _importing = false;
         }
     }
 

@@ -70,12 +70,15 @@ public class SmsService : ISmsService
                     // 过滤支付类短信
                     if (IsPaymentSms(address, body))
                     {
+                        // Android SMS 的 date 是毫秒级 Unix 时间戳
+                        var dateTime = DateTimeOffset.FromUnixTimeMilliseconds(date).LocalDateTime;
+
                         messages.Add(new Core.Interfaces.SmsMessage
                         {
                             Id = cursor.GetLong(cursor.GetColumnIndex("_id")),
                             Address = address,
                             Body = body,
-                            Date = new DateTime(date * 10000) // 转换为 .NET ticks
+                            Date = dateTime
                         });
                     }
                 }

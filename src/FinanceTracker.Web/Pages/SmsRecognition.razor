@@ -1,12 +1,13 @@
 @page "/sms-recognition"
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Enums
+@using FinanceTracker.Web.Services
 @inject ISmsService SmsService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject IBillService BillService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthService
 @inject IPopupService PopupService
-@inject NavigationManager Navigation
 
 <MContainer>
     <MRow>
@@ -101,10 +102,10 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        var userId = await AuthService.GetUserIdAsync();
+        if (userId.HasValue)
         {
-            _userId = userId;
+            _userId = userId.Value;
         }
 
         _hasPermission = await SmsService.HasPermissionAsync();
@@ -153,27 +154,39 @@
             // 解析短信内容
             var (amount, isIncome, description, channel) = ParseSmsContent(sms.Body);
 
+            if (amount <= 0)
+            {
+                await PopupService.EnqueueSnackbarAsync("无法识别金额，请手动输入", AlertTypes.Warning);
+                return;
+            }
+
             // 获取分类和渠道
             var categories = await CategoryService.GetCategoriesAsync(_userId);
             var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
 
             var category = categories.FirstOrDefault(c => c.Name == "其他支出") ??
-                           categories.FirstOrDefault(c => c.Type == (isIncome ? Core.Enums.BillType.Income : Core.Enums.BillType.Expense));
+                           categories.FirstOrDefault(c => c.Type == (isIncome ? BillType.Income : BillType.Expense));
 
             var paymentChannel = channels.FirstOrDefault(c => c.Name.Contains(channel)) ??
                                  channels.FirstOrDefault(c => c.Name == "其他");
+
+            if (category == null || paymentChannel == null)
+            {
+                await PopupService.EnqueueSnackbarAsync("无法匹配分类或渠道，请手动选择", AlertTypes.Warning);
+                return;
+            }
 
             var bill = new Core.Entities.Bill
             {
                 UserId = _userId,
                 Amount = amount,
-                Type = isIncome ? Core.Enums.BillType.Income : Core.Enums.BillType.Expense,
-                CategoryId = category?.Id ?? Guid.Empty,
-                PaymentChannelId = paymentChannel?.Id ?? Guid.Empty,
+                Type = isIncome ? BillType.Income : BillType.Expense,
+                CategoryId = category.Id,
+                PaymentChannelId = paymentChannel.Id,
                 TransactionTime = sms.Date,
                 Note = description,
-                Source = Core.Enums.BillSource.SmsRecognition,
-                SyncStatus = Core.Enums.SyncStatus.Pending
+                Source = BillSource.SmsRecognition,
+                SyncStatus = SyncStatus.Pending
             };
 
             await BillService.CreateBillAsync(bill);
@@ -196,25 +209,39 @@
         var description = body;
         var channel = "";
 
-        // 提取金额
-        var amountMatch = System.Text.RegularExpressions.Regex.Match(body, @"(\d+\.?\d*)\s*元");
-        if (amountMatch.Success)
+        // 提取金额 - 支持多种格式
+        var amountPatterns = new[]
         {
-            amount = decimal.Parse(amountMatch.Groups[1].Value);
+            @"(\d+\.?\d*)\s*元",
+            @"人民币\s*(\d+\.?\d*)",
+            @"¥\s*(\d+\.?\d*)",
+            @"金额\s*(\d+\.?\d*)"
+        };
+
+        foreach (var pattern in amountPatterns)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(body, pattern);
+            if (match.Success)
+            {
+                amount = decimal.Parse(match.Groups[1].Value);
+                break;
+            }
         }
 
         // 判断收入/支出
-        isIncome = body.Contains("收入") || body.Contains("到账") || body.Contains("转入");
+        isIncome = body.Contains("收入") || body.Contains("到账") || body.Contains("转入") || body.Contains("退款");
 
         // 识别渠道
         if (body.Contains("微信"))
             channel = "微信支付";
-        else if (body.Contains("支付宝"))
+        else if (body.Contains("支付宝") || body.Contains("花呗") || body.Contains("余额宝"))
             channel = "支付宝";
-        else if (body.Contains("京东"))
+        else if (body.Contains("京东") || body.Contains("白条"))
             channel = "京东支付";
         else if (body.Contains("美团"))
             channel = "美团支付";
+        else if (body.Contains("云闪付") || body.Contains("银联"))
+            channel = "云闪付";
         else
             channel = "银行卡";
 

@@ -78,19 +78,24 @@ public class SyncService : ISyncService
             {
                 try
                 {
-                    // 模拟云端同步
+                    // 模拟云端同步，返回云端版本时间
                     var cloudVersion = await SimulateCloudSyncAsync(bill);
 
                     // 冲突解决：后写入优先
                     if (cloudVersion > bill.UpdatedAt)
                     {
-                        // 云端版本更新，本地需要更新
-                        _logger.LogInformation("账单 {BillId} 云端版本更新，跳过", bill.Id);
+                        // 云端版本更新，需要拉取云端数据更新本地
+                        _logger.LogInformation("账单 {BillId} 云端版本更新，拉取云端数据", bill.Id);
+
+                        // 模拟从云端获取最新数据并更新本地
+                        // 实际实现中应该调用云端 API 获取最新数据
+                        bill.UpdatedAt = cloudVersion;
                         bill.SyncStatus = SyncStatus.Synced;
                     }
                     else
                     {
-                        // 本地版本更新或相同，同步成功
+                        // 本地版本更新或相同，推送到云端成功
+                        _logger.LogInformation("账单 {BillId} 本地版本更新，推送成功", bill.Id);
                         bill.SyncStatus = SyncStatus.Synced;
                     }
 
