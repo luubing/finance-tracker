@@ -1,3 +1,0 @@
-﻿<Project>
-  <Import Project="..\build\FinanceTracker.Web.props" />
-</Project>
