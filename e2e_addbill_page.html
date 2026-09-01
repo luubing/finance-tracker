@@ -1,0 +1,426 @@
+<!DOCTYPE html><html lang="zh-CN"><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <base href="/">
+    <link href="_content/Masa.Blazor/css/masa-blazor.min.css" rel="stylesheet">
+    <style>
+        /* Blazor 错误提示条：默认隐藏，仅在运行时发生未处理异常时由 blazor.server.js 显示 */
+        #blazor-error-ui {
+            background: lightyellow;
+            bottom: 0;
+            box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+            display: none;
+            left: 0;
+            padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+            position: fixed;
+            width: 100%;
+            z-index: 1000;
+        }
+
+        #blazor-error-ui .dismiss {
+            cursor: pointer;
+            position: absolute;
+            right: 0.75rem;
+            top: 0.5rem;
+        }
+    </style>
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
+    <!--!--><!--!--><!--!--><title>记账本</title><!--!--><!--!--><!--!-->
+<style id="masa-blazor-theme-stylesheet" type="text/css">:root {
+  color-scheme: normal;
+  --m-theme-primary: 67, 24, 255;
+  --m-theme-primary-text: 67, 24, 255;
+  --m-theme-on-primary: 255, 255, 255;
+  --m-theme-secondary: 92, 90, 133;
+  --m-theme-secondary-text: 92, 90, 133;
+  --m-theme-on-secondary: 255, 255, 255;
+  --m-theme-accent: 143, 69, 111;
+  --m-theme-accent-text: 143, 69, 111;
+  --m-theme-on-accent: 255, 255, 255;
+  --m-theme-info: 33, 150, 243;
+  --m-theme-info-text: 33, 150, 243;
+  --m-theme-on-info: 255, 255, 255;
+  --m-theme-success: 76, 175, 80;
+  --m-theme-success-text: 76, 175, 80;
+  --m-theme-on-success: 255, 255, 255;
+  --m-theme-warning: 251, 140, 0;
+  --m-theme-warning-text: 251, 140, 0;
+  --m-theme-on-warning: 255, 255, 255;
+  --m-theme-error: 255, 84, 73;
+  --m-theme-error-text: 255, 84, 73;
+  --m-theme-on-error: 255, 255, 255;
+
+
+  --m-theme-surface-dim: 255, 255, 255;
+  --m-theme-surface: 255, 255, 255;
+  --m-theme-surface-bright: 255, 255, 255;
+  --m-theme-surface-container-lowest: 255, 255, 255;
+  --m-theme-surface-container-low: 255, 255, 255;
+  --m-theme-surface-container: 255, 255, 255;
+  --m-theme-surface-container-high: 245, 245, 245;
+  --m-theme-surface-container-highest: 224, 224, 224;
+  --m-theme-on-surface: 0, 0, 0;
+  --m-theme-inverse-surface: 48, 47, 59;
+  --m-theme-inverse-on-surface: 243, 238, 255;
+  --m-theme-inverse-primary: 197, 192, 255;
+  --m-theme-stripe: 235, 235, 235;
+
+  --m-border-opacity: 0.12;
+  --m-idle-opacity: 0.04;
+  --m-hover-opacity: 0.04;
+  --m-focus-opacity: 0.12;
+  --m-disabled-opacity: 0.38;
+  --m-activated-opacity: 0.12;
+  --m-highlight-opacity: 0.16;
+  --m-high-emphasis-opacity: 0.87;
+  --m-medium-emphasis-opacity: 0.6;
+  --m-low-emphasis-opacity: 0.38;
+
+  --m-theme-outline: var(--m-theme-on-surface), var(--m-low-emphasis-opacity);
+  --m-theme-outline-variant: var(--m-theme-on-surface), var(--m-border-opacity);
+}
+.theme--light {
+  color-scheme: normal;
+  --m-theme-primary: 67, 24, 255;
+  --m-theme-primary-text: 67, 24, 255;
+  --m-theme-on-primary: 255, 255, 255;
+  --m-theme-secondary: 92, 90, 133;
+  --m-theme-secondary-text: 92, 90, 133;
+  --m-theme-on-secondary: 255, 255, 255;
+  --m-theme-accent: 143, 69, 111;
+  --m-theme-accent-text: 143, 69, 111;
+  --m-theme-on-accent: 255, 255, 255;
+  --m-theme-info: 33, 150, 243;
+  --m-theme-info-text: 33, 150, 243;
+  --m-theme-on-info: 255, 255, 255;
+  --m-theme-success: 76, 175, 80;
+  --m-theme-success-text: 76, 175, 80;
+  --m-theme-on-success: 255, 255, 255;
+  --m-theme-warning: 251, 140, 0;
+  --m-theme-warning-text: 251, 140, 0;
+  --m-theme-on-warning: 255, 255, 255;
+  --m-theme-error: 255, 84, 73;
+  --m-theme-error-text: 255, 84, 73;
+  --m-theme-on-error: 255, 255, 255;
+
+
+  --m-theme-surface-dim: 255, 255, 255;
+  --m-theme-surface: 255, 255, 255;
+  --m-theme-surface-bright: 255, 255, 255;
+  --m-theme-surface-container-lowest: 255, 255, 255;
+  --m-theme-surface-container-low: 255, 255, 255;
+  --m-theme-surface-container: 255, 255, 255;
+  --m-theme-surface-container-high: 245, 245, 245;
+  --m-theme-surface-container-highest: 224, 224, 224;
+  --m-theme-on-surface: 0, 0, 0;
+  --m-theme-inverse-surface: 48, 47, 59;
+  --m-theme-inverse-on-surface: 243, 238, 255;
+  --m-theme-inverse-primary: 197, 192, 255;
+  --m-theme-stripe: 235, 235, 235;
+
+  --m-border-opacity: 0.12;
+  --m-idle-opacity: 0.04;
+  --m-hover-opacity: 0.04;
+  --m-focus-opacity: 0.12;
+  --m-disabled-opacity: 0.38;
+  --m-activated-opacity: 0.12;
+  --m-highlight-opacity: 0.16;
+  --m-high-emphasis-opacity: 0.87;
+  --m-medium-emphasis-opacity: 0.6;
+  --m-low-emphasis-opacity: 0.38;
+
+  --m-theme-outline: var(--m-theme-on-surface), var(--m-low-emphasis-opacity);
+  --m-theme-outline-variant: var(--m-theme-on-surface), var(--m-border-opacity);
+} 
+.theme--dark {
+  color-scheme: dark;
+  --m-theme-primary: 197, 192, 255;
+  --m-theme-primary-text: 197, 192, 255;
+  --m-theme-on-primary: 36, 0, 162;
+  --m-theme-secondary: 146, 143, 159;
+  --m-theme-secondary-text: 146, 143, 159;
+  --m-theme-on-secondary: 48, 47, 60;
+  --m-theme-accent: 169, 136, 151;
+  --m-theme-accent-text: 169, 136, 151;
+  --m-theme-on-accent: 65, 41, 53;
+  --m-theme-info: 33, 150, 243;
+  --m-theme-info-text: 33, 150, 243;
+  --m-theme-on-info: 255, 255, 255;
+  --m-theme-success: 76, 175, 80;
+  --m-theme-success-text: 76, 175, 80;
+  --m-theme-on-success: 255, 255, 255;
+  --m-theme-warning: 251, 140, 0;
+  --m-theme-warning-text: 251, 140, 0;
+  --m-theme-on-warning: 255, 255, 255;
+  --m-theme-error: 255, 180, 171;
+  --m-theme-error-text: 255, 180, 171;
+  --m-theme-on-error: 105, 0, 5;
+
+
+  --m-theme-surface-dim: 18, 18, 18;
+  --m-theme-surface: 18, 18, 18;
+  --m-theme-surface-bright: 18, 18, 18;
+  --m-theme-surface-container-lowest: 17, 17, 17;
+  --m-theme-surface-container-low: 30, 30, 30;
+  --m-theme-surface-container: 43, 43, 43;
+  --m-theme-surface-container-high: 56, 56, 56;
+  --m-theme-surface-container-highest: 69, 69, 69;
+  --m-theme-on-surface: 255, 255, 255;
+  --m-theme-inverse-surface: 228, 224, 240;
+  --m-theme-inverse-on-surface: 48, 47, 59;
+  --m-theme-inverse-primary: 79, 51, 255;
+  --m-theme-stripe: 66, 66, 66;
+
+  --m-border-opacity: 0.12;
+  --m-idle-opacity: 0.04;
+  --m-hover-opacity: 0.04;
+  --m-focus-opacity: 0.12;
+  --m-disabled-opacity: 0.38;
+  --m-activated-opacity: 0.12;
+  --m-highlight-opacity: 0.16;
+  --m-high-emphasis-opacity: 0.87;
+  --m-medium-emphasis-opacity: 0.6;
+  --m-low-emphasis-opacity: 0.38;
+
+  --m-theme-outline: var(--m-theme-on-surface), var(--m-low-emphasis-opacity);
+  --m-theme-outline-variant: var(--m-theme-on-surface), var(--m-border-opacity);
+} 
+
+.m-application .surface-dim {
+    background-color: rgba(var(--m-theme-surface-dim)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface {
+    background-color: rgba(var(--m-theme-surface)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-bright {
+    background-color: rgba(var(--m-theme-surface-bright)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-container-lowest {
+    background-color: rgba(var(--m-theme-surface-container-lowest)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-container-low {
+    background-color: rgba(var(--m-theme-surface-container-low)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-container {
+    background-color: rgba(var(--m-theme-surface-container)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-container-high {
+    background-color: rgba(var(--m-theme-surface-container-high)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .surface-container-highest {
+    background-color: rgba(var(--m-theme-surface-container-highest)) !important;
+    color: rgba(var(--m-theme-on-surface)) !important;
+}
+.m-application .inverse-surface {
+    background-color: rgba(var(--m-theme-inverse-surface)) !important;
+    color: rgba(var(--m-theme-inverse-on-surface)) !important;
+}
+.m-application .primary {
+    background-color: rgba(var(--m-theme-primary)) !important;
+    color: rgba(var(--m-theme-on-primary)) !important;
+}
+.m-application .secondary {
+    background-color: rgba(var(--m-theme-secondary)) !important;
+    color: rgba(var(--m-theme-on-secondary)) !important;
+}
+.m-application .accent {
+    background-color: rgba(var(--m-theme-accent)) !important;
+    color: rgba(var(--m-theme-on-accent)) !important;
+}
+.m-application .tertiary {
+    background-color: rgba(var(--m-theme-tertiary)) !important;
+    color: rgba(var(--m-theme-on-tertiary)) !important;
+}
+.m-application .info {
+    background-color: rgba(var(--m-theme-info)) !important;
+    color: rgba(var(--m-theme-on-info)) !important;
+}
+.m-application .success {
+    background-color: rgba(var(--m-theme-success)) !important;
+    color: rgba(var(--m-theme-on-success)) !important;
+}
+.m-application .warning {
+    background-color: rgba(var(--m-theme-warning)) !important;
+    color: rgba(var(--m-theme-on-warning)) !important;
+}
+.m-application .error {
+    background-color: rgba(var(--m-theme-error)) !important;
+    color: rgba(var(--m-theme-on-error)) !important;
+}
+.m-application .primary--text {
+    color: rgba(var(--m-theme-primary)) !important;
+    caret-color: rgba(var(--m-theme-primary)) !important;
+}
+.m-application .secondary--text {
+    color: rgba(var(--m-theme-secondary)) !important;
+    caret-color: rgba(var(--m-theme-secondary)) !important;
+}
+.m-application .accent--text {
+    color: rgba(var(--m-theme-accent)) !important;
+    caret-color: rgba(var(--m-theme-accent)) !important;
+}
+.m-application .tertiary--text {
+    color: rgba(var(--m-theme-tertiary)) !important;
+    caret-color: rgba(var(--m-theme-tertiary)) !important;
+}
+.m-application .info--text {
+    color: rgba(var(--m-theme-info)) !important;
+    caret-color: rgba(var(--m-theme-info)) !important;
+}
+.m-application .success--text {
+    color: rgba(var(--m-theme-success)) !important;
+    caret-color: rgba(var(--m-theme-success)) !important;
+}
+.m-application .warning--text {
+    color: rgba(var(--m-theme-warning)) !important;
+    caret-color: rgba(var(--m-theme-warning)) !important;
+}
+.m-application .error--text {
+    color: rgba(var(--m-theme-error)) !important;
+    caret-color: rgba(var(--m-theme-error)) !important;
+}
+.m-application .inverse-primary--text {
+    color: rgba(var(--m-theme-inverse-primary)) !important;
+    caret-color: rgba(var(--m-theme-inverse-primary)) !important;
+}
+.m-application .outline {
+    border-color: rgba(var(--m-theme-outline)) !important;
+}
+.m-application .outline-variant {
+    border-color: rgba(var(--m-theme-outline-variant)) !important;
+}</style></head>
+<body>
+    
+<!--!--><!--!--><!--!--><!--!--><div class="m-application m-application--is-ltr theme--light" data-app="" _bl_b56480ac-d0e9-4d8e-97c5-92e6d20b3d71=""><div class="m-application__wrap"><!--!--><!--!--><!--!--><!--!--><!--!--><!--!--><!--!--><div class="container" _bl_051e0882-3097-466a-853c-b3691aa80e13=""><!--!--><div class="row" _bl_c2cca381-3e3a-4dac-883b-e2e5b10f1ee5=""><!--!--><div class="col col-12" _bl_0948ffc8-21bb-4cf0-97c7-d30c7454f082=""><!--!--><!--!--><!--!--><div class="m-sheet theme--light m-card" _bl_2ea49c86-0da2-4c13-8efc-518ff4e18dd4=""><!--!--><div class="m-card__title" _bl_c16b76f2-16b3-416d-9c31-159de6c9f0e1=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--icon m-btn--round m-size--default theme--light" _bl_1fe57d3a-a835-42a8-8199-4c773e1effe6=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-arrow-left" _bl_ac540d52-9c0f-4f1f-9f21-8714380d5516=""></i><!--!-->
+            </span></button><!--!-->
+                    <span class="ml-2">记一笔</span></div><!--!-->
+
+                <!--!--><div class="m-card__text" _bl_dbcbb961-f2c9-46cb-8c2e-c8041648e028=""><!--!--><!--!--><!--!--><form class="m-form"><!--!--><div class="row" _bl_a3b33637-cab9-4254-b544-29ad322de067=""><!--!--><div class="col col-12" _bl_776333c7-d08b-4a35-ac8f-18e054d2828c=""><!--!--><!--!--><!--!--><!--!--><!--!--><div class="m-item-group theme--light m-btn-toggle" _bl_bb755c1c-5008-4a5d-950c-ddeca971f169=""><!--!--><!--!--><!--!--><button type="button" class="m-btn m-btn--is-elevated m-btn--has-bg m-btn--active m-item--active m-size--default theme--light error" _bl_da358eb2-ee62-4e10-8c50-81aafa77f58a="" ripple=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-minus-circle mr-2" _bl_d8d19f5b-ae12-4965-bfa0-d52222654491=""></i><!--!-->
+                                        支出
+                                    <!--!-->
+            </span></button><!--!-->
+                                    <!--!--><!--!--><!--!--><button type="button" class="m-btn m-btn--is-elevated m-btn--has-bg m-size--default theme--light default" _bl_a920cc89-1e00-47d5-b75f-d855a11ee7cb="" ripple=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-plus-circle mr-2" _bl_e8652d3b-3017-433d-b6ba-c63a24ec7bbc=""></i><!--!-->
+                                        收入
+                                    <!--!-->
+            </span></button></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_3816c4bb-10d2-4ab8-ba49-61f3aea69cf0=""><!--!--><div class="col col-12" _bl_db3f569c-4af7-4b12-8ce3-6462e1ac2889=""><!--!--><!--!--><!--!--><div class="m-input m-input--is-label-active m-input--is-dirty m-input--dense theme--light m-text-field m-text-field--prefix m-text-field--is-booted m-text-field--enclosed m-text-field--outlined" _bl_ebf154a9-e496-4028-b179-215b61b2f8e5=""><div class="m-input__control"><div class="m-input__slot" _bl_97b25405-1a6e-4d38-ae78-7c37d2c88c69=""><!--!-->
+            <fieldset><legend style="width: 30px;"><span class="notranslate"><!--!-->​</span></legend></fieldset><div class="m-text-field__slot"><!--!--><!--!--><label class="m-label m-label--active theme--light" style="left: 0px;right: auto;position: absolute;" for="input-7dd2cf61174943b7a00f01badb905413" _bl_6379fda1-4728-4999-9789-e5e808c1d855="">金额</label><!--!-->
+            <div class="m-text-field__prefix" _bl_bd5fd2ef-88c1-469f-bd5b-2d9e0198f083="">¥</div><!--!-->
+            <!--!--><input id="input-7dd2cf61174943b7a00f01badb905413" min="0.01" type="number" step="1" _bl_abfa8407-d852-4805-8c32-4ecba5b56d63=""><!--!-->
+            </div><div class="m-text-field__number"><div class="m-input__append-inner"><div class="m-input__icon m-input__icon--increase"><!--!--><!--!--><!--!--><button type="button" tabindex="-1" ripple="" class="m-icon m-icon--link theme--light mdi mdi-chevron-up" _bl_939e9685-dc35-460f-b28f-68082fab90f2=""></button></div></div><!--!-->
+                <div class="m-input__append-inner"><div class="m-input__icon m-input__icon--decrease"><!--!--><!--!--><!--!--><button type="button" tabindex="-1" ripple="" class="m-icon m-icon--link theme--light mdi mdi-chevron-down" _bl_be069f42-474a-4f38-b275-531c8e0e0680=""></button></div></div></div></div><div class="m-text-field__details"><!--!--><!--!--><div class="m-messages theme--light" _bl_1083f260-38ef-42b0-824b-ee7695f03778=""><!--!--><!--!--><!--!--></div></div></div></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_e3dd80e4-45a4-47c1-a1b5-db7229539a3b=""><!--!--><div class="col col-12" _bl_f241ced8-8035-4abf-97bd-8e7412d4b802=""><!--!--><div class="text-subtitle-2 mb-2">选择分类</div>
+                                <!--!--><!--!--><!--!--><div class="m-sheet m-sheet--outlined theme--light m-card" _bl_a87c3b90-7f17-477b-b255-cd53e776689b=""><!--!--><div class="m-card__text" _bl_2149243d-2192-4590-a8e7-72f8d7068de1=""><!--!--><div class="row row--dense" _bl_67c035d5-896a-46b8-967f-ed4cc429d2db=""><!--!--><div class="col-4 col-sm-3" _bl_02b7e2bc-a29d-4c7a-94b6-547917070577=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_0e5cc92e-0baa-44f6-8c25-4345d1d3d102=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-food mr-1" _bl_fbc892e1-bca4-4993-9463-d0edf6793cc8=""></i><!--!-->
+                                                        <span class="text-caption">餐饮美食</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_3886651e-754d-4df1-b7c6-3b56d2e816a5=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_38fd6ed9-7bb3-4e87-a205-809898efc81a=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-car mr-1" _bl_bfe7de27-5787-4797-86f4-27ace2bd96f8=""></i><!--!-->
+                                                        <span class="text-caption">交通出行</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_5761a82c-14e7-4e06-aa45-33b41ca66bee=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_929d4237-b16e-4bbd-8c14-2130e22d6924=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-shopping mr-1" _bl_b3a43e61-bf36-43ad-8e88-a5aebbc27de3=""></i><!--!-->
+                                                        <span class="text-caption">日用百货</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_8e6b6a4d-fb84-4d37-ac78-2a1f3e48b819=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_e7e8d1ce-895d-4a0a-9138-542438db5065=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-cart mr-1" _bl_359b08cc-b047-4b60-b682-9613ba1ec18c=""></i><!--!-->
+                                                        <span class="text-caption">购物消费</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_739f7b5a-26c7-4633-8159-e64cc9b862c4=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_bec54205-a01d-4b7d-95dc-3619aa71660e=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-gamepad-variant mr-1" _bl_99c93beb-c850-450b-ba98-ececdaba0d28=""></i><!--!-->
+                                                        <span class="text-caption">娱乐休闲</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_2ce4cb88-1980-483e-91cf-54dceb836f5b=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_57141ea0-c512-4499-adf7-29c338febfa2=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-hospital-box mr-1" _bl_659fd1c1-3e1c-4770-b33c-b9a975cab3c8=""></i><!--!-->
+                                                        <span class="text-caption">医疗健康</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_bf0d610d-e5c5-483b-8a2e-a0ecaa1116c1=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_b233ae73-c4af-40a1-96dc-75dbd4ff8631=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-school mr-1" _bl_9503edd0-2861-4600-b279-19060e25761d=""></i><!--!-->
+                                                        <span class="text-caption">教育培训</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_32026a5a-bd8d-4a3c-ab69-faab681b88e2=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_c4108621-8a1f-4f5d-b7a3-ccceb9fd4ad6=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-home mr-1" _bl_e91fd128-ce99-4e4c-ac62-f710001dfcaa=""></i><!--!-->
+                                                        <span class="text-caption">居住生活</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_5b71c463-ea3a-488c-80c7-1f55f2e383a1=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_9e92fe17-3bfe-4a93-bfaf-785d97fa5d5e=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-phone mr-1" _bl_2fe523c5-0cf1-421e-b63b-6b98069ad59a=""></i><!--!-->
+                                                        <span class="text-caption">通讯物流</span><!--!-->
+            </span></button></div><!--!--><div class="col-4 col-sm-3" _bl_d03f1799-7584-4d9f-a829-9c784eeaaeca=""><!--!--><!--!--><!--!--><button type="button" ripple="" class="m-btn m-btn--block m-btn--outlined m-size--default theme--light" _bl_e201bdbb-be32-4a9d-970f-9c3d52167cc0=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            <!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-dots-horizontal mr-1" _bl_1281aaa7-5e57-47eb-9cb9-99329ae27c08=""></i><!--!-->
+                                                        <span class="text-caption">其他支出</span><!--!-->
+            </span></button></div></div></div></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_3d1f740b-0e16-454c-bc93-86f0a6f57fcc=""><!--!--><div class="col col-12" _bl_43814e33-bea4-4336-933d-1be5fcd3cdb3=""><!--!--><!--!--><!--!--><div class="m-input m-input--dense theme--light m-text-field m-text-field--is-booted m-text-field--enclosed m-text-field--outlined m-select" _bl_1646d785-a8ba-41c8-89b7-84a924c1debc=""><div class="m-input__control"><div class="m-input__slot" _bl_ebae886d-231a-4265-8a88-43c5fecb1992="" _activator_a78c3570-5603-4fea-8eac-6a016373c324="" aria-haspopup=""><!--!-->
+            <fieldset><legend style="width: 0px;"><span class="notranslate"><!--!-->​</span></legend></fieldset><div class="m-select__slot"><!--!--><!--!--><label class="m-label theme--light" style="left: 0px;right: auto;position: absolute;" for="input-0906f2368ba54d1c971409a3dbcee785" _bl_a806e935-5956-47cb-877b-f5e8dc87255d="">支付渠道</label><!--!-->
+            <!--!-->
+            <div class="m-select__selections"><!--!--><input id="input-0906f2368ba54d1c971409a3dbcee785" type="text" readonly="" _bl_7a3230dc-b313-44d4-b4f6-e6e19b401f6e=""></div><!--!-->
+            <!--!-->
+            <!--!-->
+            <div class="m-input__append-inner" _bl_1058032e-99e7-4b77-baf4-0d2fbdfd7279=""><div class="m-input__icon m-input__icon--append-inner"><!--!--><!--!--><!--!--><i class="m-icon theme--light mdi mdi-menu-down" _bl_2ec4831e-0ed7-4f01-b3ef-daf5680044b0=""></i></div></div><!--!-->
+            <input type="hidden" value="00000000-0000-0000-0000-000000000000"></div><!--!--><div class="m-menu" _bl_a4461da5-17f5-4893-887b-e40615f3f11c=""></div><!--!-->
+
+</div><div class="m-text-field__details"><!--!--><!--!--><div class="m-messages theme--light" _bl_a51f006f-0a23-4ed1-9ee0-df014e1d6052=""><!--!--><!--!--><!--!--></div></div></div></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_f42b0172-b924-4a5f-b37a-1df57d0e758b=""><!--!--><div class="col col-12" _bl_d46a613a-b4f0-49bf-afa7-3a952f7e25bc=""><!--!--><!--!--><!--!--><div class="m-input m-input--is-label-active m-input--is-dirty m-input--dense theme--light m-text-field m-text-field--is-booted m-text-field--enclosed m-text-field--outlined" _bl_95bd79b1-cffe-4d1c-91ea-4bfd1788a644=""><div class="m-input__control"><div class="m-input__slot" _bl_69520f95-e6da-41f2-8cf2-c7d1431a9359=""><!--!-->
+            <fieldset><legend style="width: 54px;"><span class="notranslate"><!--!-->​</span></legend></fieldset><div class="m-text-field__slot"><!--!--><!--!--><label class="m-label m-label--active theme--light" style="left: 0px;right: auto;position: absolute;" for="input-644617186a59429b8db81f119e07ad54" _bl_2034d95d-e814-4e5e-b0ca-6779f01e6bc3="">交易时间</label><!--!-->
+            <!--!-->
+            <!--!--><input id="input-644617186a59429b8db81f119e07ad54" type="datetime-local" _bl_00e226e4-61e6-400e-95c0-38e17969acac=""><!--!-->
+            </div></div><div class="m-text-field__details"><!--!--><!--!--><div class="m-messages theme--light" _bl_d94c35bb-1e75-4dad-9840-c813ebf3ab68=""><!--!--><!--!--><!--!--></div></div></div></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_d23c8304-ca46-412a-989e-4e53f2d823fb=""><!--!--><div class="col col-12" _bl_0248c879-148c-42d5-82e2-6e5551cafbbd=""><!--!--><!--!--><!--!--><div class="m-input m-input--dense theme--light m-text-field m-text-field--is-booted m-text-field--enclosed m-text-field--outlined m-text-field--placeholder" _bl_4354c74a-cb09-40c5-8408-64366250b11b=""><div class="m-input__control"><div class="m-input__slot" _bl_fd487d28-ef1b-479c-b63f-c035ecfab19e=""><!--!-->
+            <fieldset><legend style="width: 0px;"><span class="notranslate"><!--!-->​</span></legend></fieldset><div class="m-text-field__slot"><!--!--><!--!--><label class="m-label theme--light" style="left: 0px;right: auto;position: absolute;" for="input-198281a0204d47e097d8454f24147ac3" _bl_e05b9de9-6f10-49fa-a05d-b52a82ed3586="">备注（可选）</label><!--!-->
+            <!--!-->
+            <!--!--><input id="input-198281a0204d47e097d8454f24147ac3" type="text" _bl_2d66ad6e-596f-477d-8af6-da869126f8b9=""><!--!-->
+            </div></div><div class="m-text-field__details"><!--!--><!--!--><div class="m-messages theme--light" _bl_36f1dbbd-fcc0-4308-be1e-cc9256cebd0d=""><!--!--><!--!--><!--!--></div></div></div></div></div></div><!--!-->
+
+                        
+                        <!--!--><div class="row" _bl_d815140c-d5bc-4428-9c83-d273ae40fe3f=""><!--!--><div class="col col-12" _bl_420258f5-265e-4804-8d78-7d24df3876a4=""><!--!--><!--!--><!--!--><button type="submit" ripple="" class="m-btn m-btn--block m-btn--is-elevated m-btn--has-bg m-size--large theme--light primary" _bl_0ee97128-422f-414c-9ae4-f5a7770b3cf0=""><span class="m-btn__content"><!--!-->
+            <!--!-->
+            保存<!--!-->
+            </span></button></div></div><!--!--><!--!--></form></div></div></div></div></div><!--!-->
+
+<!--!--><style>
+    .selected-category {
+        border-color: var(--m-theme-primary) !important;
+        background-color: var(--m-theme-primary-lighten-4) !important;
+    }
+</style></div><!--!--><!--!--><!--!--><!--!--><div class="m-enqueued-snackbars m-enqueued-snackbars--bottom m-enqueued-snackbars--center" style="max-width: 576px;bottom: 0px;" _bl_539c9827-2992-4022-bc80-af463b2d030a=""><!--!--><!--!--></div><!--!--><div data-permanent="" class="m-application__permanent"></div></div>
+
+
+    <div id="blazor-error-ui">
+        
+        
+            发生了未处理的异常。请查看浏览器开发工具了解详细信息。
+        
+        <a href="" class="reload">重新加载</a>
+        <a class="dismiss">🗙</a>
+    </div>
+
+    <script src="_framework/blazor.server.js"></script>
+    <script src="_content/Masa.Blazor/js/masa-blazor.js"></script>
+
+
+</body></html>

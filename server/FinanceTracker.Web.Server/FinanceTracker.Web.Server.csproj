@@ -4,6 +4,14 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      必须显式开启：SDK 仅在项目包含 .razor 文件时才自动注入 Blazor 框架静态资源
+      (Microsoft.AspNetCore.App.Internal.Assets → _framework/blazor.server.js)。
+      本项目只有 _Host.cshtml（Razor 页面），缺少该开关会导致 blazor.server.js 404、
+      SignalR 电路无法连接（页面一直转圈）。
+    -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +28,10 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <!-- Blazor Server 框架静态资源 (blazor.server.js)。SDK 未隐式注入，需显式引用，否则 _framework/blazor.server.js 404，电路无法连接 -->
+    <!--<PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" Version="10.0.11">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>-->
   </ItemGroup>
 
 </Project>

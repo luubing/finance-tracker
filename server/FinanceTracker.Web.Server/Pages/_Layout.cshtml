@@ -10,6 +10,27 @@
     <title>记账本</title>
     <base href="~/" />
     <link href="_content/Masa.Blazor/css/masa-blazor.min.css" rel="stylesheet" />
+    <style>
+        /* Blazor 错误提示条：默认隐藏，仅在运行时发生未处理异常时由 blazor.server.js 显示 */
+        #blazor-error-ui {
+            background: lightyellow;
+            bottom: 0;
+            box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+            display: none;
+            left: 0;
+            padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+            position: fixed;
+            width: 100%;
+            z-index: 1000;
+        }
+
+        #blazor-error-ui .dismiss {
+            cursor: pointer;
+            position: absolute;
+            right: 0.75rem;
+            top: 0.5rem;
+        }
+    </style>
     <link href="https://cdn.jsdelivr.net/npm/@@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
     <component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
 </head>
@@ -28,6 +49,6 @@
     </div>
 
     <script src="_framework/blazor.server.js"></script>
-    <script src="_content/BlazorComponent/js/blazor-component.js"></script>
+    <script src="_content/Masa.Blazor/js/masa-blazor.js"></script>
 </body>
 </html>

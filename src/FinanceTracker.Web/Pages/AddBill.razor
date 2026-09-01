@@ -2,9 +2,11 @@
 @page "/add-bill/{BillId}"
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Web.Services
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
+@inject AuthenticationService AuthStateService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
@@ -161,10 +163,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        // 优先使用认证服务的缓存用户 ID（同一电路内可靠），localStorage 作为兜底
+        var userId = await AuthStateService.GetUserIdAsync();
+        if (userId.HasValue)
         {
-            _userId = userId;
+            _userId = userId.Value;
         }
 
         await LoadData();
@@ -237,6 +240,13 @@
     private async Task SaveBill()
     {
         if (_loading) return;
+
+        if (_userId == Guid.Empty)
+        {
+            await PopupService.EnqueueSnackbarAsync("请先登录", AlertTypes.Warning);
+            Navigation.NavigateTo("/login");
+            return;
+        }
 
         if (_model.CategoryId == Guid.Empty)
         {

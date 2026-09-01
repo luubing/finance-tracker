@@ -2,6 +2,7 @@
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Web.Services
 @using Microsoft.Extensions.Logging
+@implements IDisposable
 @inject IAuthService AuthService
 @inject AuthenticationService AuthStateService
 @inject NavigationManager Navigation
@@ -68,6 +69,12 @@ else
     private Core.Entities.User? _user;
     private bool _isLoading = true;
 
+    protected override void OnInitialized()
+    {
+        // 订阅认证状态变化：登录/登出后立即刷新用户信息（无需整页刷新）
+        AuthStateService.AuthStateChanged += OnAuthStateChanged;
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -75,6 +82,25 @@ else
             await LoadUser();
             StateHasChanged();
         }
+    }
+
+    private async void OnAuthStateChanged()
+    {
+        try
+        {
+            await LoadUser();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            // 电路可能已关闭，忽略刷新失败
+            Logger.LogWarning(ex, "认证状态变化后刷新用户信息失败");
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthStateService.AuthStateChanged -= OnAuthStateChanged;
     }
 
     private async Task LoadUser()

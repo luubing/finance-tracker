@@ -70,6 +70,9 @@ builder.Services.AddScoped<IApplicationDbContext>(provider =>
 // 注册网络服务
 builder.Services.AddSingleton<INetworkService, ApiNetworkService>();
 
+// 注册同步队列服务（内存队列，需全局共享，注册为单例）
+builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
+
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
