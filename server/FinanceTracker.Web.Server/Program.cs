@@ -22,6 +22,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
     provider.GetRequiredService<ApplicationDbContext>());
 
+// 注册网络服务（Web 端使用简单实现）- 必须在 SyncService 之前注册
+builder.Services.AddSingleton<INetworkService, WebNetworkService>();
+
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
@@ -31,9 +34,6 @@ builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
-
-// 注册网络服务（Web 端使用简单实现）
-builder.Services.AddSingleton<INetworkService, WebNetworkService>();
 
 // 注册应用服务
 builder.Services.AddScoped<AuthenticationService>();
