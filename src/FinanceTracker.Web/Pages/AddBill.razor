@@ -90,8 +90,8 @@
                                          Dense
                                          Required>
                                     <SelectionContent Context="item">
-                                        <MIcon Class="mr-2">@item.Item.Icon</MIcon>
-                                        @item.Item.Name
+                                        <MIcon Class="mr-2">@(item.Item?.Icon ?? "mdi-credit-card")</MIcon>
+                                        @(item.Item?.Name ?? "未知渠道")
                                     </SelectionContent>
                                 </MSelect>
                             </MCol>

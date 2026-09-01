@@ -10,7 +10,6 @@ public class AuthenticationService
     private readonly IJSRuntime _jsRuntime;
     private string? _cachedToken;
     private Guid? _cachedUserId;
-    private bool _isInitialized;
 
     public AuthenticationService(IJSRuntime jsRuntime)
     {

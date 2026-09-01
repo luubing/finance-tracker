@@ -60,7 +60,7 @@
             _pendingCount = await SyncService.GetOfflineCacheCountAsync(_userId);
             _isSynced = _pendingCount == 0;
         }
-        catch (Exception ex)
+        catch
         {
             // 忽略错误
         }
