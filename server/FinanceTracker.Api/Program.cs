@@ -63,6 +63,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
     provider.GetRequiredService<ApplicationDbContext>());
 
+// 注册网络服务
+builder.Services.AddSingleton<INetworkService, ApiNetworkService>();
+
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
@@ -104,3 +107,17 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+/// <summary>
+/// API 端网络服务实现
+/// </summary>
+public class ApiNetworkService : INetworkService
+{
+    public event EventHandler<bool>? ConnectivityChanged;
+
+    public bool IsConnected()
+    {
+        // API 端始终认为有网络
+        return true;
+    }
+}
