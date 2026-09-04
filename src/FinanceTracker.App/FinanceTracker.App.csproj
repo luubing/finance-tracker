@@ -15,7 +15,7 @@
 		<ApplicationTitle>记账本</ApplicationTitle>
 
 		<!-- App Identifier -->
-		<ApplicationId>com.financetracker.app</ApplicationId>
+		<ApplicationId>com.finance.tracker.app</ApplicationId>
 		<ApplicationIdGuid>04A24970-5FD1-4AF0-A3A4-F098A7C3D005</ApplicationIdGuid>
 
 		<!-- Versions -->
@@ -40,7 +40,7 @@
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 
 		<!-- App Icon -->
-		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#512BD4" />
 	</ItemGroup>
 
 	<ItemGroup>
