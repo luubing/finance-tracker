@@ -40,9 +40,9 @@ jobs:
       - name: Get current version
         id: version
         run: |
-          # 从 csproj 读取版本号
-          VERSION=$(grep -oP '<ApplicationDisplayVersion>\K[^<]+' ${{ env.PROJECT_PATH }})
-          BUILD=$(grep -oP '<ApplicationVersion>\K[^<]+' ${{ env.PROJECT_PATH }})
+          # 从 csproj 读取版本号 (兼容 macOS)
+          VERSION=$(sed -n 's/.*<ApplicationDisplayVersion>\(.*\)<\/ApplicationDisplayVersion>.*/\1/p' ${{ env.PROJECT_PATH }})
+          BUILD=$(sed -n 's/.*<ApplicationVersion>\(.*\)<\/ApplicationVersion>.*/\1/p' ${{ env.PROJECT_PATH }})
 
           # 使用输入的版本号或当前版本号
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -105,11 +105,13 @@ jobs:
           echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_PATH"
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          UUID=$(grep -aA1 UUID "$PROFILE_PATH" | xmllint --xpath '//string/text()' - 2>/dev/null || \
-                 /usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$PROFILE_PATH") 2>/dev/null || \
-                 echo "temp-profile")
+
+          # 提取 UUID
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$PROFILE_PATH") 2>/dev/null || \
+                 openssl rand -hex 16 | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\)/\1-\2-\3-\4-\5/')
 
           cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
+          echo "✅ Installed provisioning profile: $UUID"
 
       # 7. 还原依赖
       - name: Restore dependencies
