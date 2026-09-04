@@ -1,36 +1,37 @@
 @page "/statistics"
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Web.Services
+@implements IDisposable
 @inject IStatisticsService StatisticsService
 @inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
+@inject BillEventService BillEventService
 
-<MContainer>
+<PStackPageBar Title="月度统计"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 月份选择器 -->
-    <MRow>
-        <MCol Cols="12">
-            <MCard Class="mb-4">
-                <MCardText>
-                    <MRow Align="AlignTypes.Center">
-                        <MCol Cols="4">
-                            <MButton Icon OnClick="PreviousMonth">
-                                <MIcon>mdi-chevron-left</MIcon>
-                            </MButton>
-                        </MCol>
-                        <MCol Cols="4" Class="text-center">
-                            <div class="text-h5">@_currentYear 年 @_currentMonth 月</div>
-                        </MCol>
-                        <MCol Cols="4" Class="text-right">
-                            <MButton Icon OnClick="NextMonth">
-                                <MIcon>mdi-chevron-right</MIcon>
-                            </MButton>
-                        </MCol>
-                    </MRow>
-                </MCardText>
-            </MCard>
+    <MRow Align="AlignTypes.Center">
+        <MCol Cols="4">
+            <MButton Icon OnClick="PreviousMonth">
+                <MIcon>mdi-chevron-left</MIcon>
+            </MButton>
+        </MCol>
+        <MCol Cols="4" Class="text-center">
+            <div class="text-subtitle-1 text-no-wrap">@_currentYear 年 @_currentMonth 月</div>
+        </MCol>
+        <MCol Cols="4" Class="text-right">
+            <MButton Icon OnClick="NextMonth">
+                <MIcon>mdi-chevron-right</MIcon>
+            </MButton>
         </MCol>
     </MRow>
 
+      
     @if (_isLoading)
     {
         <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
@@ -40,35 +41,35 @@
     else
     {
         <!-- 统计卡片 -->
-        <MRow Class="mb-4">
-            <MCol Cols="4">
-                <MCard Color="error" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总支出</div>
-                        <div class="text-h5">¥@_monthlyStats?.TotalExpense.ToString("N2")</div>
+        <MRow Dense Class="mb-0">
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="error" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总支出</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_monthlyStats?.TotalExpense.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="success" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总收入</div>
-                        <div class="text-h5">¥@_monthlyStats?.TotalIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="success" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总收入</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_monthlyStats?.TotalIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="@(_monthlyStats?.NetIncome >= 0 ? "success" : "error")" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">净收支</div>
-                        <div class="text-h5">¥@_monthlyStats?.NetIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="@(_monthlyStats?.NetIncome >= 0 ? "success" : "error")" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">净收支</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_monthlyStats?.NetIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
         </MRow>
 
         <!-- 支出分类饼图 -->
-        <MRow Class="mb-4">
+        <MRow Class="mt-0 mb-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -113,7 +114,7 @@
         </MRow>
 
         <!-- 收入分类饼图 -->
-        <MRow>
+        <MRow Class="mb-0 mt-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -172,6 +173,11 @@
 
     private Guid _userId;
 
+    protected override void OnInitialized()
+    {
+        BillEventService.BillChanged += OnBillChanged;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
@@ -181,6 +187,24 @@
         }
 
         await LoadStatistics();
+    }
+
+    private async void OnBillChanged()
+    {
+        try
+        {
+            await LoadStatistics();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            // 静默处理，避免事件回调中的异常影响其他组件
+        }
+    }
+
+    public void Dispose()
+    {
+        BillEventService.BillChanged -= OnBillChanged;
     }
 
     private async Task LoadStatistics()

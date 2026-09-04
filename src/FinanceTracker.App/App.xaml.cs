@@ -11,6 +11,7 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		return new Window(new AppShell());
+		// 直接使用 MainPage 而不是 AppShell，避免双重导航
+		return new Window(new MainPage());
 	}
 }

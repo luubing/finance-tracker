@@ -36,7 +36,7 @@ public class CsvParserService : ICsvParserService
                         TransactionTime = DateTime.ParseExact(fields[0], "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                         Description = fields[2],
                         MerchantName = fields[3],
-                        Amount = decimal.Parse(fields[4].Replace("¥", "").Trim()),
+                        Amount = decimal.Parse(fields[4].Replace("¥", "").Trim(), CultureInfo.InvariantCulture),
                         IsIncome = fields[5].Contains("收入"),
                         PaymentChannel = "微信支付",
                         TransactionId = fields.Length > 6 ? fields[6] : ""
@@ -81,7 +81,8 @@ public class CsvParserService : ICsvParserService
                         TransactionTime = DateTime.ParseExact(fields[0], "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                         Description = fields[4],
                         MerchantName = fields[5],
-                        Amount = Math.Abs(decimal.Parse(fields[6].Replace("¥", "").Trim())),
+                        // 金额列可能带 +/- 符号（支付宝格式）：先取绝对值，再依据符号/收支柱判断收支方向
+                        Amount = Math.Abs(decimal.Parse(fields[6].Replace("¥", "").Trim().TrimStart('+', '-'), CultureInfo.InvariantCulture)),
                         IsIncome = fields[6].Contains("+") || fields[3].Contains("收入"),
                         PaymentChannel = "支付宝",
                         TransactionId = fields.Length > 8 ? fields[8] : ""

@@ -17,6 +17,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Bill> Bills => Set<Bill>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<PaymentChannel> PaymentChannels => Set<PaymentChannel>();
+    public DbSet<PendingBill> PendingBills => Set<PendingBill>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -89,6 +90,16 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 待确认账单配置（通知栏/短信自动捕获的本地数据，不参与云同步，无外键关系）
+        modelBuilder.Entity<PendingBill>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.Source, e.TransactionTime });
+            entity.Property(e => e.Amount).HasPrecision(18, 2);
+            entity.Property(e => e.Channel).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Note).HasMaxLength(500);
         });
     }
 

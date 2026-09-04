@@ -6,7 +6,12 @@
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="分类管理"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <MRow>
         <MCol Cols="12">
             <MCard>
@@ -141,7 +146,7 @@
 </MDialog>
 
 @code {
-    private StringNumber _activeTab = "0";
+    private StringNumber _activeTab = 0;
     private List<CategoryModel> _expenseCategories = new();
     private List<CategoryModel> _incomeCategories = new();
     private bool _showDialog;

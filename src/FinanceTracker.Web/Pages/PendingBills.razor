@@ -1,0 +1,284 @@
+@page "/pending-bills"
+@using FinanceTracker.Core.Entities
+@using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Services
+@implements IDisposable
+@inject IPendingBillService PendingBillService
+@inject INotificationListenerPermissionService NotificationPermissionService
+@inject ISmsService SmsService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject IBillService BillService
+@inject AuthenticationService AuthService
+@inject IPopupService PopupService
+
+<PStackPageBar Title="待确认账单"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    @if (!_notificationPermission)
+    {
+        <MAlert Type="AlertTypes.Info" Dense Class="mb-2">
+            开启"通知使用权"后，微信/支付宝的支付通知会自动填入待确认账单
+            <MButton Color="primary" Small Class="ml-2" OnClick="OpenNotificationSettings">
+                去开启
+            </MButton>
+        </MAlert>
+    }
+    @if (!_smsPermission)
+    {
+        <MAlert Type="AlertTypes.Info" Dense Class="mb-2">
+            授予短信权限后，银行扣款短信会自动填入待确认账单
+            <MButton Color="primary" Small Class="ml-2" OnClick="RequestSmsPermission">
+                去授权
+            </MButton>
+        </MAlert>
+    }
+
+    @if (_pendingBills.Count == 0)
+    {
+        <MCard>
+            <MCardText Class="text-center py-8">
+                <MIcon Size="48" Color="grey lighten-1">mdi-bell-check</MIcon>
+                <div class="mt-2 text--secondary">暂无待确认账单</div>
+                <div class="text-caption text--secondary mt-1">
+                    支付后，微信/支付宝通知与银行扣款短信会自动出现在这里
+                </div>
+            </MCardText>
+        </MCard>
+    }
+    else
+    {
+        <div class="d-flex justify-end mb-2">
+            <MButton Small Text Color="error" OnClick="ClearAll">
+                全部忽略
+            </MButton>
+        </div>
+
+        @foreach (var bill in _pendingBills)
+        {
+            <MCard Outlined Class="mb-2">
+                <MCardText Class="d-flex align-center pa-3">
+                    <MIcon Size="36"
+                           Color="@(bill.Type == BillType.Expense ? "error" : "success")"
+                           Class="mr-3">
+                        @(bill.Type == BillType.Income ? "mdi-arrow-down-circle" : "mdi-arrow-up-circle")
+                    </MIcon>
+                    <div class="flex-grow-1 min-width-0">
+                        <div class="text-subtitle-1">
+                            @(bill.Type == BillType.Expense ? "支出" : "收入") ¥@bill.Amount.ToString("N2")
+                        </div>
+                        <div class="text-caption text--secondary">
+                            @bill.Channel | @bill.TransactionTime.ToString("MM-dd HH:mm")
+                            <MIcon Size="14">@(bill.Source == BillSource.Notification ? "mdi-bell" : "mdi-message-text")</MIcon>
+                            @(bill.Source == BillSource.Notification ? "通知栏" : "短信")
+                        </div>
+                        @if (!string.IsNullOrEmpty(bill.Note))
+                        {
+                            <div class="text-caption text--secondary text-truncate">
+                                @(bill.Note.Length > 40 ? bill.Note[..40] + "…" : bill.Note)
+                            </div>
+                        }
+                    </div>
+                    <MButton Small Color="primary" Class="ml-2" OnClick="() => ConfirmBill(bill)">
+                        确认
+                    </MButton>
+                    <MButton Small Text Color="error" OnClick="() => IgnoreBill(bill)">
+                        忽略
+                    </MButton>
+                </MCardText>
+            </MCard>
+        }
+    }
+</MContainer>
+
+<!-- 确认对话框：用户可修正金额/类型/渠道后入库 -->
+@if (_confirmingBill != null)
+{
+    <MDialog Value="true" Persistent MaxWidth="480">
+        <ChildContent>
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-check-circle</MIcon>
+                    确认账单
+                </MCardTitle>
+                <MCardText>
+                    <MTextField @bind-Value="_amountText"
+                                Label="金额"
+                                Type="number"
+                                Prefix="¥"
+                                Outlined
+                                Dense />
+
+                    <MSwitch @bind-Value="_isIncome"
+                             Label="收入"
+                             Class="mt-4" />
+
+                    <MSelect TItem="string" TItemValue="string" TValue="string"
+                             @bind-Value="_channel"
+                             Items="@_channelNames"
+                             ItemText="@(item => item)"
+                             ItemValue="@(item => item)"
+                             Label="支付渠道"
+                             Outlined
+                             Dense />
+                </MCardText>
+                <MCardActions>
+                    <MSpacer />
+                    <MButton Text OnClick="CancelConfirm">取消</MButton>
+                    <MButton Color="primary" OnClick="ConfirmCreateBill">创建账单</MButton>
+                </MCardActions>
+            </MCard>
+        </ChildContent>
+    </MDialog>
+}
+
+@code {
+    private List<PendingBill> _pendingBills = new();
+    private bool _notificationPermission;
+    private bool _smsPermission;
+    private Guid _userId;
+    private List<string> _channelNames = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userId = await AuthService.GetUserIdAsync();
+        if (userId.HasValue)
+        {
+            _userId = userId.Value;
+        }
+
+        _pendingBills = await PendingBillService.GetPendingBillsAsync();
+        _notificationPermission = await NotificationPermissionService.HasPermissionAsync();
+        _smsPermission = await SmsService.HasPermissionAsync();
+
+        // 加载支付渠道名称列表，供确认对话框下拉选择
+        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+        _channelNames = channels.Select(c => c.Name).ToList();
+
+        // 后台捕获新支付时实时刷新列表
+        PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
+    }
+
+    public void Dispose()
+    {
+        PendingBillService.PendingBillsChanged -= OnPendingBillsChanged;
+    }
+
+    private async void OnPendingBillsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            _pendingBills = await PendingBillService.GetPendingBillsAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            // 电路可能已关闭，忽略刷新失败
+        }
+    }
+
+    private async Task OpenNotificationSettings()
+    {
+        await NotificationPermissionService.OpenSettingsAsync();
+    }
+
+    private async Task RequestSmsPermission()
+    {
+        _smsPermission = await SmsService.RequestPermissionAsync();
+        if (_smsPermission)
+        {
+            await PopupService.EnqueueSnackbarAsync("短信权限已授予", AlertTypes.Success);
+        }
+    }
+
+    // ===== 确认入库 =====
+    private PendingBill? _confirmingBill;
+    private string _amountText = string.Empty;
+    private bool _isIncome;
+    private string _channel = string.Empty;
+
+    private void ConfirmBill(PendingBill bill)
+    {
+        _confirmingBill = bill;
+        _amountText = bill.Amount.ToString("0.##");
+        _isIncome = bill.Type == BillType.Income;
+        _channel = bill.Channel;
+    }
+
+    private void CancelConfirm()
+    {
+        _confirmingBill = null;
+    }
+
+    private async Task ConfirmCreateBill()
+    {
+        if (_confirmingBill == null) return;
+
+        if (!decimal.TryParse(_amountText.Trim(), out var amount) || amount <= 0)
+        {
+            await PopupService.EnqueueSnackbarAsync("请输入有效的金额", AlertTypes.Warning);
+            return;
+        }
+
+        var bill = _confirmingBill;
+        _confirmingBill = null;
+
+        // 以用户在对话框中修正后的值为准（金额/类型/渠道）
+        var type = _isIncome ? BillType.Income : BillType.Expense;
+
+        try
+        {
+            var categories = await CategoryService.GetCategoriesAsync(_userId);
+            var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+
+            var category = categories.FirstOrDefault(c => c.Type == type && c.Name.Contains("其他"))
+                           ?? categories.FirstOrDefault(c => c.Type == type);
+
+            var paymentChannel = channels.FirstOrDefault(c => c.Name == _channel)
+                                 ?? channels.FirstOrDefault(c => c.Name.Contains(_channel));
+
+            if (category == null || paymentChannel == null)
+            {
+                await PopupService.EnqueueSnackbarAsync("无法匹配分类或支付渠道", AlertTypes.Warning);
+                return;
+            }
+
+            var newBill = new Core.Entities.Bill
+            {
+                UserId = _userId,
+                Amount = amount,
+                Type = type,
+                CategoryId = category.Id,
+                PaymentChannelId = paymentChannel.Id,
+                TransactionTime = bill.TransactionTime,
+                Note = bill.Note,
+                Source = bill.Source,
+                SyncStatus = SyncStatus.Pending
+            };
+
+            await BillService.CreateBillAsync(newBill);
+            await PendingBillService.RemoveAsync(bill.Id);
+
+            await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task IgnoreBill(PendingBill bill)
+    {
+        await PendingBillService.RemoveAsync(bill.Id);
+        await PopupService.EnqueueSnackbarAsync("已忽略", AlertTypes.Info);
+    }
+
+    private async Task ClearAll()
+    {
+        await PendingBillService.ClearAsync();
+    }
+}

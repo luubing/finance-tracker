@@ -15,6 +15,16 @@ public interface ISyncService
     Task<SyncResult> SyncBillsAsync(Guid userId);
 
     /// <summary>
+    /// 同步自定义分类到云端（双向：推送本地变更 + 拉取云端变更）
+    /// </summary>
+    Task SyncCategoriesAsync(Guid userId);
+
+    /// <summary>
+    /// 同步自定义支付渠道到云端（双向）
+    /// </summary>
+    Task SyncPaymentChannelsAsync(Guid userId);
+
+    /// <summary>
     /// 获取待同步的账单
     /// </summary>
     /// <param name="userId">用户ID</param>

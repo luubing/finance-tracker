@@ -3,7 +3,12 @@
 @inject HttpService HttpService
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="导入账单"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <MRow>
         <MCol Cols="12">
             <MCard>
@@ -37,11 +42,11 @@
 
                                     <MButton Color="success"
                                              Block
-                                             OnClick="() => ImportFile(_wechatFile, ImportPlatform.WeChat)"
-                                             Loading="_importing"
-                                             Disabled="_importing || _wechatFile == null">
-                                        <MIcon Class="mr-2">mdi-upload</MIcon>
-                                        导入微信账单
+                                             OnClick="() => PreviewFile(_wechatFile, ImportPlatform.WeChat)"
+                                             Loading="_parsing"
+                                             Disabled="_parsing || _wechatFile == null">
+                                        <MIcon Class="mr-2">mdi-text-box-search</MIcon>
+                                        解析预览
                                     </MButton>
                                 </MCardText>
                             </MCard>
@@ -70,21 +75,86 @@
 
                                     <MButton Color="primary"
                                              Block
-                                             OnClick="() => ImportFile(_alipayFile, ImportPlatform.Alipay)"
-                                             Loading="_importing"
-                                             Disabled="_importing || _alipayFile == null">
-                                        <MIcon Class="mr-2">mdi-upload</MIcon>
-                                        导入支付宝账单
+                                             OnClick="() => PreviewFile(_alipayFile, ImportPlatform.Alipay)"
+                                             Loading="_parsing"
+                                             Disabled="_parsing || _alipayFile == null">
+                                        <MIcon Class="mr-2">mdi-text-box-search</MIcon>
+                                        解析预览
                                     </MButton>
                                 </MCardText>
                             </MCard>
                         </MCol>
                     </MRow>
 
+                    <!-- 预览结果（Issue 13：导入前先解析预览，用户确认后再导入） -->
+                    @if (_previewBills.Any())
+                    {
+                        <MDivider Class="my-4" />
+
+                        <div class="text-h6 mb-2">
+                            解析出 @_previewBills.Count 条账单（@_previewPlatformName），请确认后导入
+                        </div>
+
+                        <div style="max-height: 360px; overflow-y: auto;">
+                            @foreach (var bill in _previewBills)
+                            {
+                                <MCard Outlined Class="mb-2">
+                                    <MCardText Class="py-2">
+                                        <MRow>
+                                            <MCol Cols="4" Sm="3">
+                                                <span class="text-caption text--secondary">时间</span>
+                                                <div class="text-body-2">@bill.TransactionTime.ToString("yyyy-MM-dd HH:mm")</div>
+                                            </MCol>
+                                            <MCol Cols="8" Sm="4">
+                                                <span class="text-caption text--secondary">描述/商户</span>
+                                                <div class="text-body-2">@bill.Description @(string.IsNullOrEmpty(bill.MerchantName) ? "" : $"({bill.MerchantName})")</div>
+                                            </MCol>
+                                            <MCol Cols="4" Sm="2">
+                                                <span class="text-caption text--secondary">金额</span>
+                                                <div class="text-body-2 @(bill.IsIncome ? "success--text" : "error--text")">
+                                                    @(bill.IsIncome ? "+" : "-")¥@bill.Amount.ToString("F2")
+                                                </div>
+                                            </MCol>
+                                            <MCol Cols="8" Sm="3" Class="text-right">
+                                                <span class="text-caption text--secondary">渠道</span>
+                                                <div class="text-body-2">@bill.PaymentChannel</div>
+                                            </MCol>
+                                        </MRow>
+                                    </MCardText>
+                                </MCard>
+                            }
+                        </div>
+
+                        <MRow Class="mt-4">
+                            <MCol Cols="12" Sm="6">
+                                <MButton Color="primary"
+                                         Block
+                                         Large
+                                         OnClick="ConfirmImport"
+                                         Loading="_importing"
+                                         Disabled="_importing || !_previewBills.Any()">
+                                    <MIcon Class="mr-2">mdi-check</MIcon>
+                                    确认导入 @_previewBills.Count 条
+                                </MButton>
+                            </MCol>
+                            <MCol Cols="12" Sm="6">
+                                <MButton Color="secondary"
+                                         Block
+                                         Large
+                                         Outlined
+                                         OnClick="CancelPreview"
+                                         Disabled="_importing">
+                                    <MIcon Class="mr-2">mdi-close</MIcon>
+                                    取消
+                                </MButton>
+                            </MCol>
+                        </MRow>
+                    }
+
                     <!-- 导入结果 -->
                     @if (_importResult != null)
                     {
-                        <MRow Class="mt-4">
+                        <MRow Class="mt-4 pb-4">
                             <MCol Cols="12">
                                 <MCard Color="@(_importResult.FailCount > 0 ? "warning" : "success")" Dark>
                                     <MCardText>
@@ -119,8 +189,15 @@
 @code {
     private IBrowserFile? _wechatFile;
     private IBrowserFile? _alipayFile;
+    private bool _parsing;
     private bool _importing;
     private ImportResult? _importResult;
+
+    // 预览状态（Issue 13：导入前先解析预览，确认后再入库）
+    private List<ImportedBillPreview> _previewBills = new();
+    private string _previewPlatformName = string.Empty;
+    private string? _pendingCsvContent;
+    private string _pendingEndpoint = string.Empty;
 
     private enum ImportPlatform
     {
@@ -128,32 +205,76 @@
         Alipay
     }
 
-    private async Task ImportFile(IBrowserFile? file, ImportPlatform platform)
+    // ===== 第一步：解析预览 =====
+    private async Task PreviewFile(IBrowserFile? file, ImportPlatform platform)
     {
         if (file == null) return;
 
-        _importing = true;
+        _parsing = true;
         _importResult = null;
+        _previewBills = new List<ImportedBillPreview>();
 
         try
         {
-            var endpoint = platform == ImportPlatform.WeChat ? "api/import/wechat" : "api/import/alipay";
+            var endpoint = platform == ImportPlatform.WeChat ? "api/import/wechat/preview" : "api/import/alipay/preview";
 
             // 读取文件内容
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
             using var reader = new System.IO.StreamReader(stream);
             var csvContent = await reader.ReadToEndAsync();
 
-            // 调用导入 API
+            // 调用预览 API（仅解析，不入库）
             var request = new { CsvContent = csvContent };
-            var result = await HttpService.PostAsync<ImportResult>(endpoint, request);
+            var result = await HttpService.PostAsync<PreviewResult>(endpoint, request);
+
+            if (result == null)
+            {
+                await PopupService.EnqueueSnackbarAsync("预览失败：服务器返回空结果", AlertTypes.Error);
+                return;
+            }
+
+            if (result.Bills.Count == 0)
+            {
+                await PopupService.EnqueueSnackbarAsync("未解析出任何账单，请确认文件为对应平台导出的 CSV 账单", AlertTypes.Warning);
+                return;
+            }
+
+            // 暂存 CSV 内容与导入端点，用户确认后提交
+            _pendingCsvContent = csvContent;
+            _pendingEndpoint = platform == ImportPlatform.WeChat ? "api/import/wechat" : "api/import/alipay";
+            _previewPlatformName = platform == ImportPlatform.WeChat ? "微信" : "支付宝";
+            _previewBills = result.Bills;
+
+            await PopupService.EnqueueSnackbarAsync($"解析完成，共 {result.Bills.Count} 条账单，请确认后导入", AlertTypes.Info);
+        }
+        catch (Exception ex)
+        {
+            _pendingCsvContent = null;
+            _pendingEndpoint = string.Empty;
+            await PopupService.EnqueueSnackbarAsync($"解析失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _parsing = false;
+        }
+    }
+
+    // ===== 第二步：确认导入 =====
+    private async Task ConfirmImport()
+    {
+        if (string.IsNullOrEmpty(_pendingCsvContent) || string.IsNullOrEmpty(_pendingEndpoint)) return;
+
+        _importing = true;
+
+        try
+        {
+            var request = new { CsvContent = _pendingCsvContent };
+            var result = await HttpService.PostAsync<ImportResult>(_pendingEndpoint, request);
 
             if (result != null)
             {
                 _importResult = result;
-                await PopupService.EnqueueSnackbarAsync(
-                    $"{(platform == ImportPlatform.WeChat ? "微信" : "支付宝")}账单导入完成",
-                    AlertTypes.Success);
+                await PopupService.EnqueueSnackbarAsync($"{_previewPlatformName}账单导入完成", AlertTypes.Success);
             }
             else
             {
@@ -166,8 +287,37 @@
         }
         finally
         {
+            // 导入完成后清空预览状态
             _importing = false;
+            _previewBills = new List<ImportedBillPreview>();
+            _pendingCsvContent = null;
+            _pendingEndpoint = string.Empty;
         }
+    }
+
+    private void CancelPreview()
+    {
+        _previewBills = new List<ImportedBillPreview>();
+        _pendingCsvContent = null;
+        _pendingEndpoint = string.Empty;
+        _previewPlatformName = string.Empty;
+    }
+
+    private class ImportedBillPreview
+    {
+        public DateTime TransactionTime { get; set; }
+        public decimal Amount { get; set; }
+        public bool IsIncome { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string MerchantName { get; set; } = string.Empty;
+        public string PaymentChannel { get; set; } = string.Empty;
+        public string TransactionId { get; set; } = string.Empty;
+    }
+
+    private class PreviewResult
+    {
+        public int TotalCount { get; set; }
+        public List<ImportedBillPreview> Bills { get; set; } = new();
     }
 
     private class ImportResult

@@ -2,6 +2,7 @@ using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
 using FinanceTracker.Web.Services;
+using Masa.Blazor.Presets;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,7 +12,18 @@ builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
 
 // 配置 MASA Blazor
-builder.Services.AddMasaBlazor();
+builder.Services.AddMasaBlazor(options =>
+{
+    // 配置全局选项
+    options.Defaults = new Dictionary<string, IDictionary<string, object?>?>()
+    {
+        { nameof(PStackPageBar), new Dictionary<string, object?>()
+            {
+                { nameof(PStackPageBar.Height), 44 }
+            }
+        }
+    };
+}).AddMobileComponents();
 
 // 配置 EF Core + SQLite (本地数据库)
 // 迁移程序集指向 SQLite 专用项目（与 API 的 Npgsql 迁移分离）
@@ -27,6 +39,13 @@ builder.Services.AddScoped<IApplicationDbContext>(provider =>
 // 注册网络服务（Web 端使用简单实现）- 必须在 SyncService 之前注册
 builder.Services.AddSingleton<INetworkService, WebNetworkService>();
 
+// 注册短信服务（Web 端不支持短信读取，使用空实现避免页面崩溃）
+builder.Services.AddSingleton<ISmsService, NoOpSmsService>();
+
+// 注册通知使用权服务与待确认账单服务（Web 端不支持自动捕获，使用空实现避免页面崩溃）
+builder.Services.AddSingleton<INotificationListenerPermissionService, NoOpNotificationListenerPermissionService>();
+builder.Services.AddSingleton<IPendingBillService, NoOpPendingBillService>();
+
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
@@ -37,12 +56,16 @@ builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
 
+// 注册 HttpClient - 从配置文件读取 Api 地址
+var apiBaseUrl = builder.Configuration["ApiSettings:BaseUrl"] ?? "http://localhost:5270";
+
 // 注册应用服务
 builder.Services.AddScoped<AuthenticationService>();
+builder.Services.AddScoped<BillEventService>();
 builder.Services.AddScoped<HttpService>();
-
-// 注册 HttpClient
-builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri("https://localhost:5001/") });
+builder.Services.AddScoped<ICloudSyncClient>(sp =>
+    new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), apiBaseUrl));
+builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseUrl) });
 
 var app = builder.Build();
 
@@ -64,10 +87,10 @@ app.MapFallbackToPage("/_Host");
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    context.Database.Migrate();
+    await context.Database.MigrateAsync();
 
     var presetService = scope.ServiceProvider.GetRequiredService<IPresetDataService>();
-    presetService.InitializePresetDataAsync().Wait();
+    await presetService.InitializePresetDataAsync();
 }
 
 app.Run();

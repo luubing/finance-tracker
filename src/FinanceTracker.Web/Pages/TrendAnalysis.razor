@@ -5,7 +5,12 @@
 @inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="趋势分析"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 筛选条件 -->
     <MRow>
         <MCol Cols="12">
@@ -25,7 +30,8 @@
                                      ItemValue="r => r.Value"
                                      Label="时间范围"
                                      Outlined
-                                     Dense />
+                                     Dense
+                                     HideDetails="true" />
                         </MCol>
                         <MCol Cols="12" Sm="6" Md="4">
                             <MButtonGroup Value="_selectedDimension">
@@ -49,35 +55,35 @@
     else
     {
         <!-- 统计卡片 -->
-        <MRow Class="mb-4">
-            <MCol Cols="4">
-                <MCard Color="error" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总支出</div>
-                        <div class="text-h5">¥@_totalExpense.ToString("N2")</div>
+        <MRow Dense Class="mb-0">
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="error" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总支出</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_totalExpense.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="success" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总收入</div>
-                        <div class="text-h5">¥@_totalIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="success" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总收入</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_totalIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="@(_totalNetIncome >= 0 ? "success" : "error")" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">净收支</div>
-                        <div class="text-h5">¥@_totalNetIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="@(_totalNetIncome >= 0 ? "success" : "error")" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">净收支</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_totalNetIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
         </MRow>
 
         <!-- 趋势图表 -->
-        <MRow Class="mb-4">
+        <MRow Class="mb-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -98,7 +104,7 @@
             </MCol>
         </MRow>
 
-        <MRow Class="mb-4">
+        <MRow Class="mb-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -119,7 +125,7 @@
             </MCol>
         </MRow>
 
-        <MRow Class="mb-4">
+        <MRow Class="mb-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -141,7 +147,7 @@
         </MRow>
 
         <!-- 趋势数据表格 -->
-        <MRow>
+        <MRow Class="pb-4">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>

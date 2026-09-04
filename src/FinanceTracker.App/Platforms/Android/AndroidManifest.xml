@@ -1,6 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-	<application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true"></application>
+	<!-- usesCleartextTraffic：允许 http:// 明文流量，否则 Android 9+ 会拦截对 10.0.2.2/API 地址的请求，
+	     导致同步请求失败、远端数据库无数据。生产环境若已启用 HTTPS 可改为 Network Security Config 做精确控制。 -->
+	<application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true" android:usesCleartextTraffic="true"></application>
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 	<uses-permission android:name="android.permission.INTERNET" />
+	<!-- 短信识别功能（Issue 14）：必须声明 READ_SMS，否则运行时权限请求会被系统直接拒绝 -->
+	<uses-permission android:name="android.permission.READ_SMS" />
+	<!-- 短信实时监听（方案二）：接收系统 SMS_RECEIVED 广播必须声明 RECEIVE_SMS -->
+	<uses-permission android:name="android.permission.RECEIVE_SMS" />
+	<!-- 通知栏支付监听（方案一）：声明通知监听器服务所需的绑定权限 -->
+	<uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
 </manifest>

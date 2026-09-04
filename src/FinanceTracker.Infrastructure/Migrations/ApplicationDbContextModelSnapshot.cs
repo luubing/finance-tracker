@@ -166,6 +166,44 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.ToTable("PaymentChannels");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.PendingBill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("TransactionTime")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Source", "TransactionTime");
+
+                    b.ToTable("PendingBills");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")

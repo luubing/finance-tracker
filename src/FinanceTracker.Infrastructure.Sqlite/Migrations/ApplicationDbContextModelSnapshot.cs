@@ -161,6 +161,44 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                     b.ToTable("PaymentChannels");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.PendingBill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CapturedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("TransactionTime")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Source", "TransactionTime");
+
+                    b.ToTable("PendingBills");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")

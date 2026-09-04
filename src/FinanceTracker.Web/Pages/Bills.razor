@@ -1,14 +1,19 @@
 @page "/bills"
-@using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Interfaces
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject IJSRuntime JSRuntime
-@inject NavigationManager Navigation
+@inject PageStackNavController NavController
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="账单列表"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 筛选区域 -->
     <MRow>
         <MCol Cols="12">
@@ -17,7 +22,7 @@
                     <MIcon Class="mr-2">mdi-filter</MIcon>
                     筛选条件
                     <MSpacer />
-                    <MButton Text Color="primary" OnClick="ResetFilters">
+                    <MButton  Color="primary" OnClick="ResetFilters">
                         重置
                     </MButton>
                 </MCardTitle>
@@ -29,14 +34,16 @@
                                         Label="开始日期"
                                         Type="date"
                                         Outlined
-                                        Dense />
+                                        Dense
+                                        HideDetails="true" />
                         </MCol>
                         <MCol Cols="12" Sm="6" Md="3">
                             <MTextField @bind-Value="_filter.EndDate"
                                         Label="结束日期"
                                         Type="date"
                                         Outlined
-                                        Dense />
+                                        Dense
+                                        HideDetails="true" />
                         </MCol>
                         <MCol Cols="12" Sm="6" Md="3">
                             <MSelect @bind-Value="_filter.CategoryId"
@@ -46,7 +53,8 @@
                                      Label="分类"
                                      Outlined
                                      Dense
-                                     Clearable />
+                                     Clearable
+                                     HideDetails="true" />
                         </MCol>
                         <MCol Cols="12" Sm="6" Md="3">
                             <MSelect @bind-Value="_filter.PaymentChannelId"
@@ -56,7 +64,8 @@
                                      Label="支付渠道"
                                      Outlined
                                      Dense
-                                     Clearable />
+                                     Clearable
+                                     HideDetails="true" />
                         </MCol>
                     </MRow>
                     <MRow>
@@ -80,27 +89,27 @@
     </MRow>
 
     <!-- 统计卡片 -->
-    <MRow Class="mb-4">
-        <MCol Cols="6">
+    <MRow Class="my-0">
+        <MCol Cols="6" Class="pr-1">
             <MCard Color="error" Dark>
-                <MCardText Class="text-center">
-                    <div class="text-h6">总支出</div>
-                    <div class="text-h4">¥@_totalExpense.ToString("N2")</div>
+                <MCardText Class="text-center pa-2">
+                    <div class="text-caption">总支出</div>
+                    <div class="text-subtitle-1 font-weight-bold">¥@_totalExpense.ToString("N2")</div>
                 </MCardText>
             </MCard>
         </MCol>
-        <MCol Cols="6">
+        <MCol Cols="6" Class="pl-1">
             <MCard Color="success" Dark>
-                <MCardText Class="text-center">
-                    <div class="text-h6">总收入</div>
-                    <div class="text-h4">¥@_totalIncome.ToString("N2")</div>
+                <MCardText Class="text-center pa-2">
+                    <div class="text-caption">总收入</div>
+                    <div class="text-subtitle-1 font-weight-bold">¥@_totalIncome.ToString("N2")</div>
                 </MCardText>
             </MCard>
         </MCol>
     </MRow>
 
     <!-- 账单列表 -->
-    <MRow>
+    <MRow Class="my-0">
         <MCol Cols="12">
             @if (_isLoading)
             {
@@ -114,10 +123,12 @@
                     <MCardText Class="text-center">
                         <MIcon Size="64" Color="grey lighten-1">mdi-receipt</MIcon>
                         <div class="text-h6 grey--text text--lighten-1 mt-4">暂无账单记录</div>
-                        <MButton Color="primary" Class="mt-4" Href="/add-bill">
-                            <MIcon Class="mr-2">mdi-plus</MIcon>
-                            记一笔
-                        </MButton>
+                        <PPageStackLink Href="/add-bill">
+                            <MButton Color="primary" Class="mt-4">
+                                <MIcon Class="mr-2">mdi-plus</MIcon>
+                                记一笔
+                            </MButton>
+                        </PPageStackLink>
                     </MCardText>
                 </MCard>
             }
@@ -136,12 +147,12 @@
                         </MCardTitle>
 
                         <MCardText>
-                            <MList>
+                            <MList Class="px-0">
                                 @foreach (var bill in group.Bills)
                                 {
-                                    <MListItem OnClick="() => EditBill(bill.Id)">
-                                        <MListItemIcon>
-                                            <MIcon Color="@(bill.Type == "Expense" ? "error" : "success")">
+                                    <MListItem OnClick="() => EditBill(bill.Id)" Class="px-0">
+                                        <MListItemIcon Class="mr-2">
+                                            <MIcon Size="28" Color="@(bill.Type == "Expense" ? "error" : "success")">
                                                 @(bill.Type == "Expense" ? "mdi-minus" : "mdi-plus")
                                             </MIcon>
                                         </MListItemIcon>
@@ -174,7 +185,7 @@
                 <!-- 加载更多 -->
                 @if (_hasMore)
                 {
-                    <MContainer Class="d-flex justify-center">
+                    <MContainer Class="d-flex justify-center pb-4">
                         <MButton Outlined Color="primary" OnClick="LoadMore" Loading="_loadingMore">
                             加载更多
                         </MButton>
@@ -384,7 +395,7 @@
 
     private void EditBill(Guid billId)
     {
-        Navigation.NavigateTo($"/add-bill/{billId}");
+        NavController.Push($"/add-bill/{billId}");
     }
 
     private class FilterModel

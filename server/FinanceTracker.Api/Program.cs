@@ -80,7 +80,6 @@ builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
 builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
-builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<ICsvParserService, CsvParserService>();
 
@@ -100,16 +99,13 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-// 启用 Swagger
-if (app.Environment.IsDevelopment())
+// 启用 Swagger（所有环境）
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "记账本 API V1");
-        c.RoutePrefix = string.Empty; // 在根路径访问 Swagger UI
-    });
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "记账本 API V1");
+    c.RoutePrefix = string.Empty; // 在根路径访问 Swagger UI
+});
 
 app.UseHttpsRedirection();
 

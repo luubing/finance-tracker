@@ -1,12 +1,9 @@
-using Android;
-using Android.App;
+using System.Globalization;
 using Android.Content;
-using Android.Content.PM;
 using Android.Database;
 using Android.Provider;
-using AndroidX.Core.App;
-using AndroidX.Core.Content;
 using FinanceTracker.Core.Interfaces;
+using Microsoft.Maui.ApplicationModel;
 
 namespace FinanceTracker.App.Platforms.Android.Services;
 
@@ -22,31 +19,46 @@ public class SmsService : ISmsService
         _context = Platform.CurrentActivity ?? throw new InvalidOperationException("无法获取当前 Activity");
     }
 
-    public Task<bool> HasPermissionAsync()
+    public async Task<bool> HasPermissionAsync()
     {
-        var permission = ContextCompat.CheckSelfPermission(_context, Manifest.Permission.ReadSms);
-        return Task.FromResult(permission == Permission.Granted);
+        try
+        {
+            // 权限 API 需在主线程调用；Blazor 组件常运行在后台线程，这里统一调度到主线程
+            var status = await MainThread.InvokeOnMainThreadAsync(() => Permissions.CheckStatusAsync<Permissions.Sms>());
+            return status == PermissionStatus.Granted;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"检查短信权限失败: {ex.Message}");
+            return false;
+        }
     }
 
-    public Task<bool> RequestPermissionAsync()
+    public async Task<bool> RequestPermissionAsync()
     {
-        var activity = Platform.CurrentActivity;
-        if (activity == null) return Task.FromResult(false);
-
-        var permissions = new[] { Manifest.Permission.ReadSms };
-        ActivityCompat.RequestPermissions(activity, permissions, 1001);
-
-        // 注意：实际应用中需要等待用户授权结果
-        return Task.FromResult(true);
+        try
+        {
+            // Permissions.RequestAsync 会弹出系统授权对话框，并等待用户作出选择后才返回
+            // （Android 10 及以下会跳转到 App 设置页，用户返回后重查状态）
+            // 必须在主线程发起授权请求，Blazor 组件常运行在后台线程，这里统一调度
+            var status = await MainThread.InvokeOnMainThreadAsync(() => Permissions.RequestAsync<Permissions.Sms>());
+            return status == PermissionStatus.Granted;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"请求短信权限失败: {ex.Message}");
+            return false;
+        }
     }
 
-    public Task<List<Core.Interfaces.SmsMessage>> ReadPaymentSmsAsync(DateTime fromDate)
+    public async Task<List<Core.Interfaces.SmsMessage>> ReadPaymentSmsAsync(DateTime fromDate)
     {
         var messages = new List<Core.Interfaces.SmsMessage>();
 
-        if (!HasPermissionAsync().Result)
+        // 统一走异步权限检查，避免 .Result 造成同步阻塞/死锁
+        if (!await HasPermissionAsync())
         {
-            return Task.FromResult(messages);
+            return messages;
         }
 
         try
@@ -54,17 +66,21 @@ public class SmsService : ISmsService
             var uri = Telephony.Sms.ContentUri;
             var projection = new[] { "_id", "address", "body", "date" };
             var selection = "date > ?";
-            var selectionArgs = new[] { fromDate.Ticks.ToString() };
+            // Android 短信库的 date 列是毫秒级 Unix 时间戳（13 位数字，如 1788486324000），
+            // 而 .NET DateTime.Ticks 是自 0001-01-01 起的 100 纳秒数（18 位数字）。
+            // 若直接用 fromDate.Ticks 作为查询参数，任何短信都无法满足 date > 条件，cursor 永远为空。
+            var fromDateMillis = new DateTimeOffset(fromDate).ToUnixTimeMilliseconds();
+            var selectionArgs = new[] { fromDateMillis.ToString(CultureInfo.InvariantCulture) };
             var sortOrder = "date DESC";
 
-            using var cursor = _context.ContentResolver.Query(uri, projection, selection, selectionArgs, sortOrder);
+            using var cursor = _context.ContentResolver.Query(uri!, projection, selection, selectionArgs, sortOrder);
 
             if (cursor != null)
             {
                 while (cursor.MoveToNext())
                 {
-                    var address = cursor.GetString(cursor.GetColumnIndex("address"));
-                    var body = cursor.GetString(cursor.GetColumnIndex("body"));
+                    var address = cursor.GetString(cursor.GetColumnIndex("address")) ?? string.Empty;
+                    var body = cursor.GetString(cursor.GetColumnIndex("body")) ?? string.Empty;
                     var date = cursor.GetLong(cursor.GetColumnIndex("date"));
 
                     // 过滤支付类短信
@@ -89,7 +105,7 @@ public class SmsService : ISmsService
             System.Diagnostics.Debug.WriteLine($"读取短信失败: {ex.Message}");
         }
 
-        return Task.FromResult(messages);
+        return messages;
     }
 
     private bool IsPaymentSms(string address, string body)

@@ -5,29 +5,26 @@
 @inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="年度报告"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 年份选择器 -->
-    <MRow>
-        <MCol Cols="12">
-            <MCard Class="mb-4">
-                <MCardText>
-                    <MRow Align="AlignTypes.Center">
-                        <MCol Cols="4">
-                            <MButton Icon OnClick="PreviousYear">
-                                <MIcon>mdi-chevron-left</MIcon>
-                            </MButton>
-                        </MCol>
-                        <MCol Cols="4" Class="text-center">
-                            <div class="text-h5">@_currentYear 年</div>
-                        </MCol>
-                        <MCol Cols="4" Class="text-right">
-                            <MButton Icon OnClick="NextYear">
-                                <MIcon>mdi-chevron-right</MIcon>
-                            </MButton>
-                        </MCol>
-                    </MRow>
-                </MCardText>
-            </MCard>
+    <MRow Align="AlignTypes.Center">
+        <MCol Cols="4">
+            <MButton Icon OnClick="PreviousYear">
+                <MIcon>mdi-chevron-left</MIcon>
+            </MButton>
+        </MCol>
+        <MCol Cols="4" Class="text-center">
+            <div class="text-subtitle-1 text-no-wrap">@_currentYear 年</div>
+        </MCol>
+        <MCol Cols="4" Class="text-right">
+            <MButton Icon OnClick="NextYear">
+                <MIcon>mdi-chevron-right</MIcon>
+            </MButton>
         </MCol>
     </MRow>
 
@@ -40,28 +37,28 @@
     else if (_annualStats != null)
     {
         <!-- 年度总览卡片 -->
-        <MRow Class="mb-4">
-            <MCol Cols="4">
-                <MCard Color="error" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总支出</div>
-                        <div class="text-h5">¥@_annualStats.TotalExpense.ToString("N2")</div>
+        <MRow Dense Class="mb-0">
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="error" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总支出</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_annualStats.TotalExpense.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="success" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">总收入</div>
-                        <div class="text-h5">¥@_annualStats.TotalIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="success" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总收入</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_annualStats.TotalIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
-            <MCol Cols="4">
-                <MCard Color="@(_annualStats.NetIncome >= 0 ? "success" : "error")" Dark>
-                    <MCardText Class="text-center">
-                        <div class="text-subtitle-2">净收支</div>
-                        <div class="text-h5">¥@_annualStats.NetIncome.ToString("N2")</div>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="@(_annualStats.NetIncome >= 0 ? "success" : "error")" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">净收支</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_annualStats.NetIncome.ToString("N2")</div>
                     </MCardText>
                 </MCard>
             </MCol>
@@ -70,7 +67,7 @@
         <!-- 同比分析 -->
         @if (_yoyData != null)
         {
-            <MRow Class="mb-4">
+            <MRow Class="mb-0">
                 <MCol Cols="12">
                     <MCard>
                         <MCardTitle>
@@ -81,7 +78,7 @@
                             <MRow>
                                 <MCol Cols="6">
                                     <div class="text-center">
-                                        <div class="text-subtitle-2">支出同比</div>
+                                        <div class="text-caption">支出同比</div>
                                         <div class="text-h4 @(_yoyData.ExpenseChangeRate > 0 ? "error--text" : "success--text")">
                                             @(_yoyData.ExpenseChangeRate > 0 ? "+" : "")@_yoyData.ExpenseChangeRate.ToString("F1")%
                                         </div>
@@ -92,7 +89,7 @@
                                 </MCol>
                                 <MCol Cols="6">
                                     <div class="text-center">
-                                        <div class="text-subtitle-2">收入同比</div>
+                                        <div class="text-caption">收入同比</div>
                                         <div class="text-h4 @(_yoyData.IncomeChangeRate > 0 ? "success--text" : "error--text")">
                                             @(_yoyData.IncomeChangeRate > 0 ? "+" : "")@_yoyData.IncomeChangeRate.ToString("F1")%
                                         </div>
@@ -109,7 +106,7 @@
         }
 
         <!-- 月度趋势图 -->
-        <MRow Class="mb-4">
+        <MRow Class="mb-0">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>
@@ -124,7 +121,7 @@
         </MRow>
 
         <!-- 分类统计 -->
-        <MRow>
+        <MRow Class="pb-4">
             <MCol Cols="12">
                 <MCard>
                     <MCardTitle>

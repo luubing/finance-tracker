@@ -1,4 +1,5 @@
 @page "/login"
+@layout AuthLayout
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Shared.Validators
 @using FinanceTracker.Web.Services
@@ -75,8 +76,8 @@
             // 保存用户信息
             await AuthStateService.SaveUserInfoAsync(user.Id, user.PhoneNumber);
 
-            // 跳转到主页
-            Navigation.NavigateTo("/");
+            // 返回首页
+            Navigation.NavigateTo("/", replace: true);
         }
         catch (Exception ex)
         {

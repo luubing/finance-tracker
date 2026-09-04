@@ -30,27 +30,19 @@ public class ImportController : BaseApiController
     /// <summary>
     /// 导入微信账单
     /// </summary>
-    /// <param name="file">CSV 文件</param>
+    /// <param name="request">CSV 内容</param>
     /// <returns>导入结果</returns>
     [HttpPost("wechat")]
-    public async Task<IActionResult> ImportWeChatBill(IFormFile file)
+    public async Task<IActionResult> ImportWeChatBill([FromBody] ImportRequest request)
     {
-        if (file == null || file.Length == 0)
+        if (request == null || string.IsNullOrWhiteSpace(request.CsvContent))
         {
-            return BadRequest(new { message = "请选择文件" });
-        }
-
-        if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { message = "请上传 CSV 文件" });
+            return BadRequest(new { message = "CSV 内容不能为空" });
         }
 
         var userId = GetUserId();
 
-        using var reader = new StreamReader(file.OpenReadStream());
-        var csvContent = await reader.ReadToEndAsync();
-
-        var importedBills = await _csvParserService.ParseWeChatCsvAsync(csvContent);
+        var importedBills = await _csvParserService.ParseWeChatCsvAsync(request.CsvContent);
 
         return await ProcessImportedBills(userId, importedBills, "微信支付");
     }
@@ -58,29 +50,57 @@ public class ImportController : BaseApiController
     /// <summary>
     /// 导入支付宝账单
     /// </summary>
-    /// <param name="file">CSV 文件</param>
+    /// <param name="request">CSV 内容</param>
     /// <returns>导入结果</returns>
     [HttpPost("alipay")]
-    public async Task<IActionResult> ImportAlipayBill(IFormFile file)
+    public async Task<IActionResult> ImportAlipayBill([FromBody] ImportRequest request)
     {
-        if (file == null || file.Length == 0)
+        if (request == null || string.IsNullOrWhiteSpace(request.CsvContent))
         {
-            return BadRequest(new { message = "请选择文件" });
-        }
-
-        if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { message = "请上传 CSV 文件" });
+            return BadRequest(new { message = "CSV 内容不能为空" });
         }
 
         var userId = GetUserId();
 
-        using var reader = new StreamReader(file.OpenReadStream());
-        var csvContent = await reader.ReadToEndAsync();
-
-        var importedBills = await _csvParserService.ParseAlipayCsvAsync(csvContent);
+        var importedBills = await _csvParserService.ParseAlipayCsvAsync(request.CsvContent);
 
         return await ProcessImportedBills(userId, importedBills, "支付宝");
+    }
+
+    /// <summary>
+    /// 预览微信账单（仅解析 CSV，不入库，供导入页面"预览-确认"流程使用）
+    /// </summary>
+    /// <param name="request">CSV 内容</param>
+    /// <returns>解析出的账单列表</returns>
+    [HttpPost("wechat/preview")]
+    public async Task<IActionResult> PreviewWeChatBill([FromBody] ImportRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.CsvContent))
+        {
+            return BadRequest(new { message = "CSV 内容不能为空" });
+        }
+
+        var importedBills = await _csvParserService.ParseWeChatCsvAsync(request.CsvContent);
+
+        return Ok(new { totalCount = importedBills.Count, bills = importedBills });
+    }
+
+    /// <summary>
+    /// 预览支付宝账单（仅解析 CSV，不入库，供导入页面"预览-确认"流程使用）
+    /// </summary>
+    /// <param name="request">CSV 内容</param>
+    /// <returns>解析出的账单列表</returns>
+    [HttpPost("alipay/preview")]
+    public async Task<IActionResult> PreviewAlipayBill([FromBody] ImportRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.CsvContent))
+        {
+            return BadRequest(new { message = "CSV 内容不能为空" });
+        }
+
+        var importedBills = await _csvParserService.ParseAlipayCsvAsync(request.CsvContent);
+
+        return Ok(new { totalCount = importedBills.Count, bills = importedBills });
     }
 
     private async Task<IActionResult> ProcessImportedBills(Guid userId, List<Core.Interfaces.ImportedBill> importedBills, string defaultChannel)
@@ -92,8 +112,9 @@ public class ImportController : BaseApiController
         var failCount = 0;
         var errors = new List<string>();
 
-        foreach (var importedBill in importedBills)
+        for (var i = 0; i < importedBills.Count; i++)
         {
+            var importedBill = importedBills[i];
             try
             {
                 // 匹配分类
@@ -107,7 +128,8 @@ public class ImportController : BaseApiController
                     UserId = userId,
                     Amount = importedBill.Amount,
                     Type = importedBill.IsIncome ? BillType.Income : BillType.Expense,
-                    CategoryId = category?.Id ?? categories.First(c => c.Name == "其他支出").Id,
+                    CategoryId = category?.Id ?? categories
+                        .First(c => c.Name == (importedBill.IsIncome ? "其他收入" : "其他支出")).Id,
                     PaymentChannelId = channel?.Id ?? channels.First(c => c.Name == defaultChannel).Id,
                     TransactionTime = importedBill.TransactionTime,
                     Note = importedBill.Description,
@@ -121,7 +143,7 @@ public class ImportController : BaseApiController
             catch (Exception ex)
             {
                 failCount++;
-                errors.Add($"行 {successCount + failCount}: {ex.Message}");
+                errors.Add($"第 {i + 1} 条: {ex.Message}");
             }
         }
 
@@ -176,4 +198,15 @@ public class ImportController : BaseApiController
         return channels.FirstOrDefault(c => c.Name.Contains(channelName)) ??
                channels.FirstOrDefault(c => c.Name == defaultChannel);
     }
+}
+
+/// <summary>
+/// 导入请求体（CSV 内容）
+/// </summary>
+public class ImportRequest
+{
+    /// <summary>
+    /// CSV 文件内容
+    /// </summary>
+    public string CsvContent { get; set; } = string.Empty;
 }

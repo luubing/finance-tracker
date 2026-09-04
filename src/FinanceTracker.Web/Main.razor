@@ -1,10 +1,10 @@
 @using Microsoft.AspNetCore.Components.Routing
 
-<MApp>
-    <MErrorHandler>
-        <Router AppAssembly="@typeof(Main).Assembly">
+<ErrorBoundary>
+    <ChildContent>
+        <Router AppAssembly="@typeof(Main).Assembly" AdditionalAssemblies="new[] { typeof(FinanceTracker.Web.Pages.Index).Assembly }">
             <Found Context="routeData">
-                <RouteView RouteData="@routeData" />
+                <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layouts.MainLayout)" />
             </Found>
             <NotFound>
                 <MContainer>
@@ -18,5 +18,12 @@
                 </MContainer>
             </NotFound>
         </Router>
-    </MErrorHandler>
-</MApp>
+    </ChildContent>
+
+    <ErrorContent>
+        <div style="padding: 20px; color: #b71c1c; font-family: Consolas, monospace; font-size: 13px;">
+            <h4 style="margin: 0 0 8px;">组件渲染发生异常:</h4>
+            <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 12px; border-radius: 4px; margin: 0;">@context</pre>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>

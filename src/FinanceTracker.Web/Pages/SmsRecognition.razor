@@ -9,7 +9,12 @@
 @inject AuthenticationService AuthService
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="短信识别"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <MRow>
         <MCol Cols="12">
             <MCard>
@@ -92,6 +97,45 @@
     </MRow>
 </MContainer>
 
+<!-- 手动补全对话框（Issue 14）：短信金额识别失败时，让用户手动输入金额/类型/渠道后创建账单 -->
+@if (_editingSms != null)
+{
+    <MDialog Value="true" Persistent MaxWidth="480">
+        <ChildContent>
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-pencil</MIcon>
+                    识别失败，请手动补全
+                </MCardTitle>
+                <MCardText>
+                    <div class="text-body-2 mb-4">@(_editingSms.Body.Length > 120 ? _editingSms.Body[..120] + "…" : _editingSms.Body)</div>
+
+                    <MTextField @bind-Value="_manualAmountText"
+                                Label="金额"
+                                Type="number"
+                                Prefix="¥"
+                                Outlined
+                                Dense />
+
+                    <MSwitch @bind-Value="_manualIsIncome"
+                             Label="收入"
+                             Class="mt-4" />
+
+                    <MTextField @bind-Value="_manualChannel"
+                                Label="支付渠道"
+                                Outlined
+                                Dense />
+                </MCardText>
+                <MCardActions>
+                    <MSpacer />
+                    <MButton Text OnClick="CancelManualBill">取消</MButton>
+                    <MButton Color="primary" OnClick="ConfirmManualBill">创建账单</MButton>
+                </MCardActions>
+            </MCard>
+        </ChildContent>
+    </MDialog>
+}
+
 @code {
     private bool _hasPermission;
     private bool _loading;
@@ -147,19 +191,70 @@
         }
     }
 
+    // ===== 手动补全（Issue 14：识别失败的短信由用户手动补全后创建账单） =====
+    private Core.Interfaces.SmsMessage? _editingSms;
+    private string _manualAmountText = string.Empty;
+    private bool _manualIsIncome;
+    private string _manualChannel = string.Empty;
+
+    private void CancelManualBill()
+    {
+        CloseManualDialog();
+    }
+
+    private async Task ConfirmManualBill()
+    {
+        if (_editingSms == null) return;
+
+        // 手动补全时同样校验金额，避免重复打开对话框覆盖用户输入
+        if (!decimal.TryParse(_manualAmountText.Trim(), out var amount) || amount <= 0)
+        {
+            await PopupService.EnqueueSnackbarAsync("请输入有效的金额", AlertTypes.Warning);
+            return;
+        }
+
+        var sms = _editingSms;
+        CloseManualDialog();
+        await CreateBillFromSms(sms, amount, _manualIsIncome, _manualChannel);
+    }
+
+    private void CloseManualDialog()
+    {
+        _editingSms = null;
+        _manualAmountText = string.Empty;
+        _manualIsIncome = false;
+        _manualChannel = string.Empty;
+    }
+
     private async Task CreateBillFromSms(Core.Interfaces.SmsMessage sms)
     {
         try
         {
-            // 解析短信内容
-            var (amount, isIncome, description, channel) = ParseSmsContent(sms.Body);
+            // 解析短信内容（description 未单独使用，备注记录原始短信内容）
+            var (amount, isIncome, _, channel) = ParseSmsContent(sms.Body);
 
             if (amount <= 0)
             {
-                await PopupService.EnqueueSnackbarAsync("无法识别金额，请手动输入", AlertTypes.Warning);
+                // Issue 14：金额识别失败时打开手动补全对话框，而不是直接中断
+                _editingSms = sms;
+                _manualAmountText = string.Empty;
+                _manualIsIncome = false;
+                _manualChannel = string.Empty;
                 return;
             }
 
+            await CreateBillFromSms(sms, amount, isIncome, channel);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task CreateBillFromSms(Core.Interfaces.SmsMessage sms, decimal amount, bool isIncome, string channel)
+    {
+        try
+        {
             // 获取分类和渠道
             var categories = await CategoryService.GetCategoriesAsync(_userId);
             var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
@@ -184,7 +279,7 @@
                 CategoryId = category.Id,
                 PaymentChannelId = paymentChannel.Id,
                 TransactionTime = sms.Date,
-                Note = description,
+                Note = sms.Body,
                 Source = BillSource.SmsRecognition,
                 SyncStatus = SyncStatus.Pending
             };

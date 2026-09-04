@@ -13,5 +13,7 @@ public interface IApplicationDbContext
     DbSet<Category> Categories { get; }
     DbSet<PaymentChannel> PaymentChannels { get; }
 
+    DbSet<PendingBill> PendingBills { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

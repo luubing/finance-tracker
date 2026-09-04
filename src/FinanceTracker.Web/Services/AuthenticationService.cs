@@ -116,6 +116,14 @@ public class AuthenticationService
     }
 
     /// <summary>
+    /// 获取当前登录手机号（用于向云端换取 JWT）
+    /// </summary>
+    public async Task<string?> GetPhoneNumberAsync()
+    {
+        return await TryGetItemAsync("phoneNumber");
+    }
+
+    /// <summary>
     /// 保存用户信息
     /// </summary>
     public async Task SaveUserInfoAsync(Guid userId, string phoneNumber)

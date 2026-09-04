@@ -70,6 +70,10 @@ public class HttpService
 
     private async Task<T?> SendAsync<T>(HttpRequestMessage request)
     {
+        // 本地未持有 JWT 时，尝试用已登录手机号向云端换取（MAUI/Web 登录均为本地登录，
+        // 不会自动产生云端 token；同步等云端接口必须携带 Bearer，否则一律 401）
+        await EnsureRemoteTokenAsync();
+
         // 添加 JWT Token
         var token = await _authService.GetTokenAsync();
         if (!string.IsNullOrEmpty(token))
@@ -103,5 +107,54 @@ public class HttpService
         // 处理其他错误
         var errorContent = await response.Content.ReadAsStringAsync();
         throw new Exception($"请求失败: {response.StatusCode} - {errorContent}");
+    }
+
+    /// <summary>
+    /// 确保本地已持有云端 JWT：若无 token 且本地已保存手机号，则调用云端 /api/auth/login
+    /// 换取 token 并持久化。已持有 token 或未登录时不做任何事。失败静默（由后续请求报错）。
+    /// </summary>
+    private async Task EnsureRemoteTokenAsync()
+    {
+        try
+        {
+            var existing = await _authService.GetTokenAsync();
+            if (!string.IsNullOrEmpty(existing))
+            {
+                return;
+            }
+
+            var phoneNumber = await _authService.GetPhoneNumberAsync();
+            if (string.IsNullOrEmpty(phoneNumber))
+            {
+                return;
+            }
+
+            using var content = new StringContent(
+                JsonSerializer.Serialize(new { phoneNumber }),
+                Encoding.UTF8,
+                "application/json");
+
+            using var loginResponse = await _httpClient.PostAsync("api/auth/login", content);
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            var loginJson = await loginResponse.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(loginJson);
+            if (doc.RootElement.TryGetProperty("token", out var tokenElement) &&
+                tokenElement.ValueKind == JsonValueKind.String)
+            {
+                var remoteToken = tokenElement.GetString();
+                if (!string.IsNullOrEmpty(remoteToken))
+                {
+                    await _authService.SaveTokenAsync(remoteToken);
+                }
+            }
+        }
+        catch
+        {
+            // 远端换取 token 失败（离线/服务不可用等）不影响本地功能，后续请求会再试
+        }
     }
 }

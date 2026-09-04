@@ -5,7 +5,12 @@
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
 
-<MContainer>
+<PStackPageBar Title="支付渠道"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <MRow>
         <MCol Cols="12">
             <MCard>

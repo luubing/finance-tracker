@@ -1,6 +1,7 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -13,20 +14,19 @@ public class SyncService : ISyncService
 {
     private readonly IApplicationDbContext _context;
     private readonly INetworkService _networkService;
-    private readonly ISyncQueueService _syncQueueService;
+    private readonly ICloudSyncClient _cloudSyncClient;
     private readonly ILogger<SyncService> _logger;
     private const int MaxOfflineCacheCount = 1000;
-    private const int BatchSize = 10;
 
     public SyncService(
         IApplicationDbContext context,
         INetworkService networkService,
-        ISyncQueueService syncQueueService,
+        ICloudSyncClient cloudSyncClient,
         ILogger<SyncService> logger)
     {
         _context = context;
         _networkService = networkService;
-        _syncQueueService = syncQueueService;
+        _cloudSyncClient = cloudSyncClient;
         _logger = logger;
     }
 
@@ -44,68 +44,85 @@ public class SyncService : ISyncService
                 return result;
             }
 
-            // 从队列中获取待同步的账单
-            var pendingBillIds = await _syncQueueService.DequeueAsync(BatchSize);
+            // 0. 先同步分类与支付渠道：账单外键依赖它们，
+            //    且拉取账单合并前本地必须已存在对应分类/渠道
+            await SyncCategoriesAsync(userId);
+            await SyncPaymentChannelsAsync(userId);
 
-            if (!pendingBillIds.Any())
-            {
-                // 如果队列为空，从数据库获取待同步的账单
-                var pendingBills = await GetPendingBillsAsync(userId);
-                pendingBillIds = pendingBills.Select(b => b.Id).ToList();
+            // 获取本地待同步的账单
+            var pendingBills = await GetPendingBillsAsync(userId);
 
-                // 将账单添加到队列
-                foreach (var billId in pendingBillIds)
-                {
-                    await _syncQueueService.EnqueueAsync(billId);
-                }
-
-                pendingBillIds = await _syncQueueService.DequeueAsync(BatchSize);
-            }
-
-            if (!pendingBillIds.Any())
+            if (!pendingBills.Any())
             {
                 result.Success = true;
                 return result;
             }
 
-            // 获取账单详情
-            var bills = await _context.Bills
-                .Where(b => pendingBillIds.Contains(b.Id))
-                .ToListAsync();
-
-            // 同步到云端（模拟实现）
-            foreach (var bill in bills)
+            // 1. 批量推送到云端，服务端按 UpdatedAt 做“后写入优先”冲突裁决
+            var pushResponse = await _cloudSyncClient.PushBillsAsync(
+                userId,
+                pendingBills.Select(BillSyncDto.FromEntity).ToList());
+            // 处理推送结果
+            foreach (var item in pushResponse.Results)
             {
-                try
+                var bill = pendingBills.FirstOrDefault(b => b.Id == item.BillId);
+                if (bill == null)
                 {
-                    // 模拟云端同步，返回云端版本时间
-                    var cloudVersion = await SimulateCloudSyncAsync(bill);
-
-                    // 冲突解决：后写入优先
-                    if (cloudVersion > bill.UpdatedAt)
-                    {
-                        // 云端版本更新，需要拉取云端数据更新本地
-                        _logger.LogInformation("账单 {BillId} 云端版本更新，拉取云端数据", bill.Id);
-
-                        // 模拟从云端获取最新数据并更新本地
-                        // 实际实现中应该调用云端 API 获取最新数据
-                        bill.UpdatedAt = cloudVersion;
-                        bill.SyncStatus = SyncStatus.Synced;
-                    }
-                    else
-                    {
-                        // 本地版本更新或相同，推送到云端成功
-                        _logger.LogInformation("账单 {BillId} 本地版本更新，推送成功", bill.Id);
-                        bill.SyncStatus = SyncStatus.Synced;
-                    }
-
-                    result.SyncedCount++;
+                    continue;
                 }
-                catch (Exception ex)
+
+                if (string.Equals(item.Action, "pulled", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogError(ex, "同步账单 {BillId} 失败", bill.Id);
+                    // 云端版本更新，采用云端权威数据覆盖本地
+                    item.AuthoritativeBill?.ApplyTo(bill);
+                    _logger.LogInformation("账单 {BillId} 云端版本更新，采用云端数据", bill.Id);
+                }
+                else if (string.Equals(item.Action, "pushed", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 本地版本更新或相同，推送成功
+                    _logger.LogInformation("账单 {BillId} 推送成功", bill.Id);
+                }
+                else
+                {
+                    // failed
+                    _logger.LogWarning("账单 {BillId} 同步失败: {Error}", bill.Id, item.Error);
                     bill.SyncStatus = SyncStatus.Failed;
                     result.FailedCount++;
+                    continue;
+                }
+
+                bill.SyncStatus = SyncStatus.Synced;
+                result.SyncedCount++;
+            }
+
+            // 2. 拉取云端更新（其他设备新增/修改的账单）合并到本地
+            //    先补建本地缺失的分类/支付渠道，避免合并账单时外键违例
+            var cloudBills = await _cloudSyncClient.PullBillsAsync(userId);
+            foreach (var cloudBill in cloudBills)
+            {
+                await cloudBill.EnsureCategoryExistsAsync(_context, userId);
+                await cloudBill.EnsurePaymentChannelExistsAsync(_context, userId);
+            }
+
+            foreach (var cloudBill in cloudBills)
+            {
+                // IgnoreQueryFilters：本地软删除的账单也要能查到，否则会被误判为“新建”导致主键冲突
+                var existing = await _context.Bills
+                    .IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(b => b.Id == cloudBill.Id);
+                if (existing == null)
+                {
+                    // 本地不存在 → 新增（云端为权威）
+                    var newLocal = cloudBill.ToEntity(userId);
+                    newLocal.SyncStatus = SyncStatus.Synced;
+                    _context.Bills.Add(newLocal);
+                    result.SyncedCount++;
+                }
+                else if (existing.SyncStatus == SyncStatus.Synced && cloudBill.UpdatedAt > existing.UpdatedAt)
+                {
+                    // 本地已同步且云端更新 → 覆盖本地
+                    cloudBill.ApplyTo(existing);
+                    existing.SyncStatus = SyncStatus.Synced;
                 }
             }
 
@@ -123,12 +140,154 @@ public class SyncService : ISyncService
         return result;
     }
 
+    /// <inheritdoc />
+    public async Task SyncCategoriesAsync(Guid userId)
+    {
+        // 1. 推送本地全部自定义分类（含软删除，删除操作借此传播；数量少，全量推送由服务端 LWW+内容比较去重）
+        var localCategories = await _context.Categories
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && !c.IsPreset)
+            .ToListAsync();
+
+        var pushResponse = await _cloudSyncClient.PushCategoriesAsync(
+            userId,
+            localCategories.Select(CategorySyncDto.FromEntity).ToList());
+
+        foreach (var item in pushResponse.Results)
+        {
+            var local = localCategories.FirstOrDefault(c => c.Id == item.CategoryId);
+            if (local == null)
+            {
+                continue;
+            }
+
+            if (string.Equals(item.Action, "pulled", StringComparison.OrdinalIgnoreCase) && item.AuthoritativeCategory != null)
+            {
+                if (!item.AuthoritativeCategory.ContentEquals(local))
+                {
+                    item.AuthoritativeCategory.ApplyTo(local);
+                    await _context.SaveChangesAsync();
+                }
+                _logger.LogInformation("分类 {CategoryId} 云端版本更新，采用云端数据", item.CategoryId);
+            }
+            else if (string.Equals(item.Action, "skipped", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("分类 {CategoryId} 推送被跳过: {Error}", item.CategoryId, item.Error);
+            }
+            else if (string.Equals(item.Action, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("分类 {CategoryId} 推送失败: {Error}", item.CategoryId, item.Error);
+            }
+        }
+
+        // 2. 拉取云端自定义分类合并到本地
+        var cloudCategories = await _cloudSyncClient.PullCategoriesAsync(userId);
+        var merged = false;
+
+        foreach (var dto in cloudCategories)
+        {
+            var existing = await _context.Categories
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.Id == dto.Id);
+
+            if (existing == null)
+            {
+                _context.Categories.Add(dto.ToEntity(userId));
+                merged = true;
+            }
+            else if (dto.UpdatedAt > existing.UpdatedAt && !dto.ContentEquals(existing))
+            {
+                dto.ApplyTo(existing);
+                merged = true;
+            }
+        }
+
+        if (merged)
+        {
+            await _context.SaveChangesAsync();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SyncPaymentChannelsAsync(Guid userId)
+    {
+        // 1. 推送本地全部自定义支付渠道（含软删除）
+        var localChannels = await _context.PaymentChannels
+            .IgnoreQueryFilters()
+            .Where(c => c.UserId == userId && !c.IsPreset)
+            .ToListAsync();
+
+        var pushResponse = await _cloudSyncClient.PushPaymentChannelsAsync(
+            userId,
+            localChannels.Select(PaymentChannelSyncDto.FromEntity).ToList());
+
+        foreach (var item in pushResponse.Results)
+        {
+            var local = localChannels.FirstOrDefault(c => c.Id == item.PaymentChannelId);
+            if (local == null)
+            {
+                continue;
+            }
+
+            if (string.Equals(item.Action, "pulled", StringComparison.OrdinalIgnoreCase) && item.AuthoritativeChannel != null)
+            {
+                if (!item.AuthoritativeChannel.ContentEquals(local))
+                {
+                    item.AuthoritativeChannel.ApplyTo(local);
+                    await _context.SaveChangesAsync();
+                }
+                _logger.LogInformation("支付渠道 {ChannelId} 云端版本更新，采用云端数据", item.PaymentChannelId);
+            }
+            else if (string.Equals(item.Action, "skipped", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("支付渠道 {ChannelId} 推送被跳过: {Error}", item.PaymentChannelId, item.Error);
+            }
+            else if (string.Equals(item.Action, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("支付渠道 {ChannelId} 推送失败: {Error}", item.PaymentChannelId, item.Error);
+            }
+        }
+
+        // 2. 拉取云端自定义支付渠道合并到本地
+        var cloudChannels = await _cloudSyncClient.PullPaymentChannelsAsync(userId);
+        var merged = false;
+
+        foreach (var dto in cloudChannels)
+        {
+            var existing = await _context.PaymentChannels
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.Id == dto.Id);
+
+            if (existing == null)
+            {
+                _context.PaymentChannels.Add(dto.ToEntity(userId));
+                merged = true;
+            }
+            else if (dto.UpdatedAt > existing.UpdatedAt && !dto.ContentEquals(existing))
+            {
+                dto.ApplyTo(existing);
+                merged = true;
+            }
+        }
+
+        if (merged)
+        {
+            await _context.SaveChangesAsync();
+        }
+    }
+
     public async Task<List<Bill>> GetPendingBillsAsync(Guid userId)
     {
+        // Include 导航属性：推送 DTO 需要携带分类/渠道信息，供云端“缺则补建”
+        // Pending 之外同时取 Failed：失败的账单必须在下次同步时自动重试，
+        // 否则会永久卡在“同步失败”状态（例如曾因时间格式问题推送失败的账单）
         return await _context.Bills
-            .Where(b => b.UserId == userId && b.SyncStatus == SyncStatus.Pending)
+            .Where(b => b.UserId == userId &&
+                (b.SyncStatus == SyncStatus.Pending || b.SyncStatus == SyncStatus.Failed))
             .OrderBy(b => b.CreatedAt)
             .Take(MaxOfflineCacheCount)
+            .Include(b => b.Category)
+            .Include(b => b.PaymentChannel)
             .ToListAsync();
     }
 
@@ -169,19 +328,10 @@ public class SyncService : ISyncService
 
     public async Task<int> GetOfflineCacheCountAsync(Guid userId)
     {
+        // 与 GetPendingBillsAsync 保持一致：Failed 的账单也会在下次同步时重试
         return await _context.Bills
-            .CountAsync(b => b.UserId == userId && b.SyncStatus == SyncStatus.Pending);
-    }
-
-    /// <summary>
-    /// 模拟云端同步（实际实现中应该调用真正的云端 API）
-    /// </summary>
-    private async Task<DateTime> SimulateCloudSyncAsync(Bill bill)
-    {
-        // 模拟网络延迟
-        await Task.Delay(100);
-
-        // 模拟云端返回的时间戳（实际应该从云端获取）
-        return DateTime.UtcNow.AddSeconds(-new Random().Next(0, 60));
+            .CountAsync(b => b.UserId == userId &&
+                (b.SyncStatus == SyncStatus.Pending || b.SyncStatus == SyncStatus.Failed));
     }
 }
+

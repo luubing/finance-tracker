@@ -1,27 +1,26 @@
 @page "/add-bill"
 @page "/add-bill/{BillId}"
-@using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Web.Services
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject AuthenticationService AuthStateService
 @inject IJSRuntime JSRuntime
-@inject NavigationManager Navigation
+@inject PageStackNavController NavController
 @inject IPopupService PopupService
+@inject BillEventService BillEventService
 
-<MContainer>
+<PStackPageBar Title="@(IsEditing ? "编辑账单" : "记一笔")"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <MRow>
         <MCol Cols="12">
             <MCard>
-                <MCardTitle>
-                    <MButton Icon OnClick="GoBack">
-                        <MIcon>mdi-arrow-left</MIcon>
-                    </MButton>
-                    <span class="ml-2">@(IsEditing ? "编辑账单" : "记一笔")</span>
-                </MCardTitle>
-
                 <MCardText>
                     <MForm @ref="_form" Model="_model" OnValidSubmit="SaveBill">
                         <!-- 支出/收入切换 -->
@@ -50,8 +49,10 @@
                                             Type="number"
                                             Prefix="¥"
                                             Required
-                                            Min="0.01"
-                                            Step="0.01" />
+                                            HideDetails="true"
+                                            NumberProps="@(prop => { prop.Min = 0; prop.Step = 0.01m; })"
+                                            Rules="_amountRules"
+                                            OnBlur="OnAmountBlur" />
                             </MCol>
                         </MRow>
 
@@ -59,22 +60,20 @@
                         <MRow>
                             <MCol Cols="12">
                                 <div class="text-subtitle-2 mb-2">选择分类</div>
-                                <MCard Outlined>
-                                    <MCardText>
-                                        <MRow Dense>
+                                <MCard Outlined Class="category-card">
+                                    <MCardText Class="pa-2">
+                                        <div class="category-grid">
                                             @foreach (var category in _categories.Where(c => c.Type == _model.Type))
                                             {
-                                                <MCol Cols="4" Sm="3">
-                                                    <MButton Block
-                                                             Outlined
-                                                             Class="@(_model.CategoryId == category.Id ? "selected-category" : "")"
-                                                             OnClick="() => _model.CategoryId = category.Id">
-                                                        <MIcon Class="mr-1">@category.Icon</MIcon>
-                                                        <span class="text-caption">@category.Name</span>
-                                                    </MButton>
-                                                </MCol>
+                                                <MButton Class="@(_model.CategoryId == category.Id ? "category-btn selected-category" : "category-btn")"
+                                                         Outlined
+                                                         Small
+                                                         OnClick="() => _model.CategoryId = category.Id">
+                                                    <MIcon Small Class="mr-1">@category.Icon</MIcon>
+                                                    <span class="text-caption">@category.Name</span>
+                                                </MButton>
                                             }
-                                        </MRow>
+                                        </div>
                                     </MCardText>
                                 </MCard>
                             </MCol>
@@ -90,7 +89,8 @@
                                          Label="支付渠道"
                                          Outlined
                                          Dense
-                                         Required>
+                                         Required
+                                         HideDetails="true">
                                     <SelectionContent Context="item">
                                         <MIcon Class="mr-2">@(item.Item?.Icon ?? "mdi-credit-card")</MIcon>
                                         @(item.Item?.Name ?? "未知渠道")
@@ -106,6 +106,7 @@
                                             Label="交易时间"
                                             Outlined
                                             Dense
+                                            HideDetails="true"
                                             Type="datetime-local" />
                             </MCol>
                         </MRow>
@@ -113,11 +114,14 @@
                         <!-- 备注 -->
                         <MRow>
                             <MCol Cols="12">
-                                <MTextField @bind-Value="_model.Note"
-                                            Label="备注（可选）"
-                                            Outlined
-                                            Dense
-                                            Placeholder="添加备注..." />
+                                <MTextarea @bind-Value="_model.Note"
+                                           Label="备注（可选）"
+                                           Outlined
+                                           Dense
+                                           AutoGrow
+                                           Rows="2"
+                                           Placeholder="添加备注..."
+                                           HideDetails="true" />
                             </MCol>
                         </MRow>
 
@@ -142,9 +146,35 @@
 </MContainer>
 
 <style>
+    .category-card {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .category-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+    }
+
+    .category-btn {
+        min-width: 0 !important;
+        padding: 8px 4px !important;
+        text-transform: none !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
     .selected-category {
-        border-color: var(--m-theme-primary) !important;
-        background-color: var(--m-theme-primary-lighten-4) !important;
+        background-color: #1976D2 !important;
+        color: white !important;
+        border-color: #1976D2 !important;
+        box-shadow: 0 2px 8px rgba(25, 118, 210, 0.4);
+    }
+
+    .selected-category .m-icon {
+        color: white !important;
     }
 </style>
 
@@ -160,6 +190,17 @@
     private List<PaymentChannelModel> _paymentChannels = new();
     private bool _loading;
     private Guid _userId;
+
+    private List<Func<decimal, StringBoolean>> _amountRules = new()
+    {
+        v => v > 0 ? true : "金额必须大于0",
+        v => decimal.Round(v, 2) == v ? true : "最多保留两位小数"
+    };
+
+    private void OnAmountBlur(FocusEventArgs e)
+    {
+        _model.Amount = decimal.Round(_model.Amount, 2);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -220,7 +261,7 @@
         else
         {
             await PopupService.EnqueueSnackbarAsync("账单不存在", AlertTypes.Warning);
-            Navigation.NavigateTo("/bills");
+            NavController.Pop();
         }
     }
 
@@ -244,7 +285,7 @@
         if (_userId == Guid.Empty)
         {
             await PopupService.EnqueueSnackbarAsync("请先登录", AlertTypes.Warning);
-            Navigation.NavigateTo("/login");
+            NavController.Push("/login");
             return;
         }
 
@@ -300,7 +341,8 @@
                 await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
             }
 
-            Navigation.NavigateTo("/bills");
+            BillEventService.NotifyBillChanged();
+            NavController.Pop();
         }
         catch (Exception ex)
         {
@@ -314,7 +356,7 @@
 
     private void GoBack()
     {
-        Navigation.NavigateTo("/bills");
+        NavController.Pop();
     }
 
     private class BillModel

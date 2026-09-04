@@ -1,0 +1,302 @@
+@page "/profile"
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Components
+@using FinanceTracker.Web.Services
+@implements IDisposable
+@inject IAuthService AuthService
+@inject AuthenticationService AuthStateService
+@inject PageStackNavController NavController
+@inject IPopupService PopupService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager NavigationManager
+
+<PStackPageBar Title="我的"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else if (_user == null)
+    {
+        <MCard>
+            <MCardText Class="text-center py-8">
+                <MIcon Size="64" Color="grey lighten-1">mdi-account-circle</MIcon>
+                <div class="text-h6 grey--text text--lighten-1 mt-4">请先登录</div>
+                <PPageStackLink Href="/login">
+                    <MButton Color="primary" Class="mt-4">去登录</MButton>
+                </PPageStackLink>
+            </MCardText>
+        </MCard>
+    }
+    else
+    {
+        <!-- 用户信息卡片 -->
+        <MCard Class="mb-4">
+            <MCardText Class="d-flex align-center pa-4">
+                <MAvatar Size="64" Color="primary">
+                    <MIcon Size="40" Color="white">mdi-account</MIcon>
+                </MAvatar>
+                <div class="ml-4">
+                    <div class="text-h6">@MaskPhoneNumber(_user.PhoneNumber)</div>
+                    <div class="text-caption text--secondary">注册时间: @_user.CreatedAt.ToString("yyyy-MM-dd")</div>
+                </div>
+            </MCardText>
+        </MCard>
+
+        <!-- 同步状态 -->
+        <SyncStatus />
+
+        <!-- 功能列表 -->
+        <MCard Class="mb-4">
+            <MList>
+                <MListItem OnClick="@(() => NavController.Push("/categories"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-tag-multiple</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>分类管理</MListItemTitle>
+                        <MListItemSubtitle>管理支出和收入分类</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/payment-channels"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-credit-card</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>支付渠道</MListItemTitle>
+                        <MListItemSubtitle>管理支付渠道</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/import"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-import</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>数据导入</MListItemTitle>
+                        <MListItemSubtitle>从微信、支付宝导入账单</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/sms-recognition"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-message-text</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>短信识别</MListItemTitle>
+                        <MListItemSubtitle>从短信中识别账单</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/pending-bills"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-bell-check</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>待确认账单</MListItemTitle>
+                        <MListItemSubtitle>通知栏/短信自动捕获的支付记录</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/bills"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-format-list-bulleted</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>账单列表</MListItemTitle>
+                        <MListItemSubtitle>查看所有账单记录</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/trend"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-chart-line</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>趋势分析</MListItemTitle>
+                        <MListItemSubtitle>支出/收入趋势变化</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/annual-report"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-calendar</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>年度报告</MListItemTitle>
+                        <MListItemSubtitle>年度总览与同比分析</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+            </MList>
+        </MCard>
+
+        <!-- 退出登录 -->
+        <MButton Block
+                 Outlined
+                 Color="error"
+                 Class="mb-4"
+                 OnClick="ShowLogoutConfirm">
+            <MIcon Class="mr-2">mdi-logout</MIcon>
+            退出登录
+        </MButton>
+    }
+</MContainer>
+
+<!-- 退出登录确认对话框 -->
+<MDialog @bind-Value="_showLogoutDialog" MaxWidth="320">
+    <MCard>
+        <MCardTitle Class="text-h6">
+            确认退出
+        </MCardTitle>
+
+        <MCardText>
+            确定要退出登录吗？
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CancelLogout">取消</MButton>
+            <MButton Color="error" OnClick="ConfirmLogout">退出</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    private Core.Entities.User? _user;
+    private bool _isLoading = true;
+    private bool _showLogoutDialog;
+
+    protected override void OnInitialized()
+    {
+        AuthStateService.AuthStateChanged += OnAuthStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadUser();
+            StateHasChanged();
+        }
+    }
+
+    private async void OnAuthStateChanged()
+    {
+        try
+        {
+            await LoadUser();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            // 电路可能已关闭，忽略刷新失败
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+    }
+
+    private async Task LoadUser()
+    {
+        try
+        {
+            var userId = await AuthStateService.GetUserIdAsync();
+
+            if (userId.HasValue)
+            {
+                _user = await AuthService.GetUserByIdAsync(userId.Value);
+            }
+        }
+        catch (Exception)
+        {
+            // 忽略错误
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private string MaskPhoneNumber(string phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber) || phoneNumber.Length != 11)
+        {
+            return phoneNumber;
+        }
+
+        return $"{phoneNumber[..3]}****{phoneNumber[7..]}";
+    }
+
+    private void ShowLogoutConfirm()
+    {
+        _showLogoutDialog = true;
+    }
+
+    private void CancelLogout()
+    {
+        _showLogoutDialog = false;
+    }
+
+    private async Task ConfirmLogout()
+    {
+        _showLogoutDialog = false;
+
+        try
+        {
+            await AuthStateService.LogoutAsync();
+            await PopupService.EnqueueSnackbarAsync("已退出登录", AlertTypes.Success);
+            NavigationManager.Replace("/login");
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+}

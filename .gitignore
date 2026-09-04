@@ -112,3 +112,9 @@ Icon
 /deploy.sh
 /finance-tracker-api.tar.gz
 /finance-tracker-web.tar.gz
+
+## 打包配置（敏感文件）
+build/config.env
+build/*.keystore
+build/*.jks
+build/output/

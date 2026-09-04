@@ -4,64 +4,178 @@
 @using Microsoft.Extensions.Logging
 @implements IDisposable
 @inject IAuthService AuthService
+@inject IStatisticsService StatisticsService
+@inject IBillService BillService
 @inject AuthenticationService AuthStateService
+@inject BillEventService BillEventService
+@inject FinanceTracker.Core.Interfaces.IPendingBillService PendingBillService
+@inject PageStackNavController NavController
 @inject NavigationManager Navigation
 @inject ILogger<Index> Logger
 
+<PStackPageBar Title="记账本"
+               CenterTitle
+               Flat
+               Color="primary">
+    <ActionContent>
+        <MButton Icon OnClick="NavigateToAddBill">
+            <MIcon Color="white">mdi-plus</MIcon>
+        </MButton>
+    </ActionContent>
+</PStackPageBar>
+
 @if (_isLoading)
 {
-    <MContainer Class="d-flex justify-center align-center" Style="height: 100vh;">
+    <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
         <MProgressCircular Indeterminate Size="64" Color="primary" />
     </MContainer>
 }
-else if (_user == null)
+else if (_user != null)
 {
-    <LoginPage />
-}
-else
-{
-    <MContainer>
-        <MRow>
-            <MCol Cols="12">
-                <MCard>
-                    <MCardTitle>
-                        <MIcon Class="mr-2">mdi-account</MIcon>
-                        欢迎回来
-                    </MCardTitle>
-                    <MCardText>
-                        <div class="text-h6">手机号: @MaskPhoneNumber(_user.PhoneNumber)</div>
-                        <div class="text-body-2 text--secondary">注册时间: @_user.CreatedAt.ToString("yyyy-MM-dd HH:mm")</div>
-                    </MCardText>
-                </MCard>
-            </MCol>
-        </MRow>
+    <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+        <!-- 财务概览卡片 -->
+        <MCard Class="mb-4" Color="primary" Dark>
+            <MCardText Class="pa-4">
+                <div class="text-h6 mb-2">本月概览</div>
+                <MRow>
+                    <MCol Cols="4">
+                        <div class="text-caption">收入</div>
+                        <div class="text-body-1">¥@_monthlyIncome.ToString("N2")</div>
+                    </MCol>
+                    <MCol Cols="4">
+                        <div class="text-caption">支出</div>
+                        <div class="text-body-1">¥@_monthlyExpense.ToString("N2")</div>
+                    </MCol>
+                    <MCol Cols="4">
+                        <div class="text-caption">结余</div>
+                        <div class="text-body-1">¥@_monthlyBalance.ToString("N2")</div>
+                    </MCol>
+                </MRow>
+            </MCardText>
+        </MCard>
 
-        <MRow Class="mt-4">
-            <MCol Cols="12">
-                <MCard>
-                    <MCardTitle>
-                        <MIcon Class="mr-2">mdi-chart-pie</MIcon>
-                        快捷操作
-                    </MCardTitle>
-                    <MCardText>
-                        <MRow>
-                            <MCol Cols="6">
-                                <MButton Block Large Color="primary" OnClick="NavigateToAddBill">
-                                    <MIcon Class="mr-2">mdi-plus</MIcon>
-                                    记一笔
-                                </MButton>
-                            </MCol>
-                            <MCol Cols="6">
-                                <MButton Block Large Outlined Color="primary" OnClick="NavigateToBills">
-                                    <MIcon Class="mr-2">mdi-format-list-bulleted</MIcon>
-                                    账单列表
-                                </MButton>
-                            </MCol>
-                        </MRow>
-                    </MCardText>
-                </MCard>
-            </MCol>
-        </MRow>
+        <!-- 快捷操作 -->
+        <MCard Class="mb-4">
+            <MCardTitle Class="pb-0">
+                <MIcon Class="mr-2" Color="primary">mdi-lightning-bolt</MIcon>
+                快捷操作
+            </MCardTitle>
+            <MCardText>
+                <MRow Dense>
+                    <MCol Cols="4">
+                        <MButton Block
+                                 Outlined
+                                 Class="py-1"
+                                 Style="height: unset !important;"
+                                 Color="primary"
+                                 OnClick="NavigateToAddBill">
+                            <div class="d-flex flex-column align-center">
+                                <MIcon Size="24">mdi-plus-circle</MIcon>
+                                <span class="text-caption">记一笔</span>
+                            </div>
+                        </MButton>
+                    </MCol>
+                    <MCol Cols="4">
+                        <MButton Block
+                                 Class="py-1"
+                                 Outlined
+                                 Color="primary"
+                                 Style="height: unset !important;"
+                                 OnClick="NavigateToBills">
+                            <div class="d-flex flex-column align-center">
+                                <MIcon Size="24">mdi-format-list-bulleted</MIcon>
+                                <span class="text-caption">账单</span>
+                            </div>
+                        </MButton>
+                    </MCol>
+                    <MCol Cols="4">
+                        <MButton Block
+                                 Class="py-1"
+                                 Outlined
+                                 Color="primary"
+                                 Style="height: unset !important;"
+                                 OnClick="NavigateToPendingBills">
+                            <div class="d-flex flex-column align-center">
+                                @if (_pendingCount > 0)
+                                {
+                                    <MBadge Content="@_pendingCount.ToString()" Color="error" OffsetY="4">
+                                        <MIcon Size="24">mdi-bell-check</MIcon>
+                                    </MBadge>
+                                }
+                                else
+                                {
+                                    <MIcon Size="24">mdi-bell-check</MIcon>
+                                }
+                                <span class="text-caption">待确认</span>
+                            </div>
+                        </MButton>
+                    </MCol>
+                </MRow>
+            </MCardText>
+        </MCard>
+
+        <!-- 最近账单 -->
+        <MCard Class="mb-4">
+            <MCardTitle Class="pb-0">
+                <MIcon Class="mr-2" Color="primary">mdi-clock-outline</MIcon>
+                最近账单
+                <MSpacer />
+                <MButton Small Color="primary" OnClick="NavigateToBills">
+                    查看全部
+                </MButton>
+            </MCardTitle>
+            <MCardText>
+                @if (_isLoadingBills)
+                {
+                    <div class="text-center py-4">
+                        <MProgressCircular Indeterminate Size="32" Color="primary" />
+                    </div>
+                }
+                else if (!_recentBills.Any())
+                {
+                    <div class="text-center text--secondary py-4">
+                        <MIcon Size="48" Color="grey lighten-1">mdi-receipt</MIcon>
+                        <div class="mt-2">暂无账单记录</div>
+                        <MButton Small Color="primary" Class="mt-2" OnClick="NavigateToAddBill">
+                            记一笔
+                        </MButton>
+                    </div>
+                }
+                else
+                {
+                    <MList>
+                        @foreach (var bill in _recentBills)
+                        {
+                            <MListItem Class="px-0">
+                                <MListItemIcon Class="mr-2">
+                                    <MIcon Size="36" Color="@(bill.Type == "Expense" ? "error" : "success")">
+                                        @bill.CategoryIcon
+                                    </MIcon>
+                                </MListItemIcon>
+                                <MListItemContent>
+                                    <MListItemTitle>
+                                        @bill.CategoryName
+                                        @if (!string.IsNullOrEmpty(bill.Note))
+                                        {
+                                            <span class="text--secondary ml-2">- @bill.Note</span>
+                                        }
+                                    </MListItemTitle>
+                                    <MListItemSubtitle>
+                                        @bill.PaymentChannelName
+                                        <span class="ml-2">@bill.TransactionTime.ToString("MM-dd HH:mm")</span>
+                                    </MListItemSubtitle>
+                                </MListItemContent>
+                                <MListItemAction>
+                                    <span class="@(bill.Type == "Expense" ? "error--text" : "success--text") text-subtitle-1">
+                                        @(bill.Type == "Expense" ? "-" : "+")¥@bill.Amount.ToString("N2")
+                                    </span>
+                                </MListItemAction>
+                            </MListItem>
+                        }
+                    </MList>
+                }
+            </MCardText>
+        </MCard>
     </MContainer>
 }
 
@@ -69,10 +183,23 @@ else
     private Core.Entities.User? _user;
     private bool _isLoading = true;
 
+    // 月度统计数据
+    private decimal _monthlyIncome;
+    private decimal _monthlyExpense;
+    private decimal _monthlyBalance;
+
+    // 最近账单
+    private List<BillModel> _recentBills = new();
+    private bool _isLoadingBills;
+
+    // 待确认账单数量（通知栏/短信自动捕获，角标展示）
+    private int _pendingCount;
+
     protected override void OnInitialized()
     {
-        // 订阅认证状态变化：登录/登出后立即刷新用户信息（无需整页刷新）
         AuthStateService.AuthStateChanged += OnAuthStateChanged;
+        BillEventService.BillChanged += OnBillChanged;
+        PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -93,14 +220,44 @@ else
         }
         catch (Exception ex)
         {
-            // 电路可能已关闭，忽略刷新失败
             Logger.LogWarning(ex, "认证状态变化后刷新用户信息失败");
+        }
+    }
+
+    private async void OnBillChanged()
+    {
+        try
+        {
+            if (_user != null)
+            {
+                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "账单变更后刷新首页数据失败");
         }
     }
 
     public void Dispose()
     {
         AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+        BillEventService.BillChanged -= OnBillChanged;
+        PendingBillService.PendingBillsChanged -= OnPendingBillsChanged;
+    }
+
+    private async void OnPendingBillsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+            // 电路可能已关闭，忽略刷新失败
+        }
     }
 
     private async Task LoadUser()
@@ -113,10 +270,25 @@ else
             {
                 _user = await AuthService.GetUserByIdAsync(userId.Value);
             }
+
+            // 未登录则重定向到登录页
+            if (_user == null)
+            {
+                Navigation.Replace("/login");
+                return;
+            }
+
+            // 加载业务数据
+            await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+
+            // 加载待确认账单数量（角标）
+            _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "加载用户信息失败，将显示登录页面");
+            Logger.LogWarning(ex, "加载用户信息失败，将重定向到登录页面");
+            Navigation.Replace("/login");
+            return;
         }
         finally
         {
@@ -124,23 +296,87 @@ else
         }
     }
 
-    private string MaskPhoneNumber(string phoneNumber)
+    private async Task LoadMonthlyStatistics()
     {
-        if (string.IsNullOrEmpty(phoneNumber) || phoneNumber.Length != 11)
+        try
         {
-            return phoneNumber;
-        }
+            var now = DateTime.Now;
+            var statistics = await StatisticsService.GetMonthlyStatisticsAsync(
+                _user!.Id, now.Year, now.Month);
 
-        return $"{phoneNumber[..3]}****{phoneNumber[7..]}";
+            _monthlyIncome = statistics.TotalIncome;
+            _monthlyExpense = statistics.TotalExpense;
+            _monthlyBalance = statistics.NetIncome;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载月度统计失败");
+        }
+    }
+
+    private async Task LoadRecentBills()
+    {
+        _isLoadingBills = true;
+        try
+        {
+            var bills = await BillService.GetBillsAsync(
+                _user!.Id,
+                page: 1,
+                pageSize: 5);
+
+            _recentBills = bills.Select(b => new BillModel
+            {
+                Id = b.Id,
+                Amount = b.Amount,
+                Type = b.Type.ToString(),
+                CategoryName = b.Category?.Name ?? "未知分类",
+                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
+                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
+                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
+                TransactionTime = b.TransactionTime,
+                Note = b.Note
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载最近账单失败");
+        }
+        finally
+        {
+            _isLoadingBills = false;
+        }
     }
 
     private void NavigateToAddBill()
     {
-        Navigation.NavigateTo("/add-bill");
+        NavController.Push("/add-bill");
     }
 
     private void NavigateToBills()
     {
-        Navigation.NavigateTo("/bills");
+        NavController.Push("/bills");
+    }
+
+    private void NavigateToPendingBills()
+    {
+        NavController.Push("/pending-bills");
+    }
+
+    private void NavigateToStatistics()
+    {
+        NavController.Push("/statistics");
+    }
+
+    private class BillModel
+    {
+        public Guid Id { get; set; }
+        public decimal Amount { get; set; }
+        public string Type { get; set; } = string.Empty;
+        public string CategoryName { get; set; } = string.Empty;
+        public string CategoryIcon { get; set; } = string.Empty;
+        public string PaymentChannelName { get; set; } = string.Empty;
+        public string PaymentChannelIcon { get; set; } = string.Empty;
+        public DateTime TransactionTime { get; set; }
+        public string? Note { get; set; }
     }
 }

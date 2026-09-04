@@ -3,9 +3,10 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:blazor="clr-namespace:Microsoft.AspNetCore.Components.WebView.Maui;assembly=Microsoft.AspNetCore.Components.WebView.Maui"
              xmlns:web="clr-namespace:FinanceTracker.Web;assembly=FinanceTracker.Web"
-             x:Class="FinanceTracker.App.MainPage">
+             x:Class="FinanceTracker.App.MainPage"
+             BackgroundColor="White" SafeAreaEdges="Container">
 
-    <blazor:BlazorWebView HostPage="wwwroot/index.html">
+    <blazor:BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
         <blazor:BlazorWebView.RootComponents>
             <blazor:RootComponent Selector="#app" ComponentType="{x:Type web:Main}" />
         </blazor:BlazorWebView.RootComponents>

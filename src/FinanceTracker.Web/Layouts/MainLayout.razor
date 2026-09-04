@@ -1,0 +1,108 @@
+@using Masa.Blazor.Presets.PageStack
+@implements IDisposable
+@inherits LayoutComponentBase
+
+<MApp>
+    <MErrorHandler>
+        <PPageStack TabRules="@_tabRules" FallbackUri="/">
+            @Body
+        </PPageStack>
+
+        <MBottomNavigation Value="_currentTab"
+                           ValueChanged="OnTabChanged"
+                           Color="primary"
+                           Grow
+                           Fixed>
+            <MButton Value="@("home")">
+                <MIcon>mdi-home</MIcon>
+                <span>首页</span>
+            </MButton>
+            <MButton Value="@("statistics")">
+                <MIcon>mdi-chart-bar</MIcon>
+                <span>统计</span>
+            </MButton>
+            <MButton Value="@("profile")">
+                <MIcon>mdi-account</MIcon>
+                <span>我的</span>
+            </MButton>
+        </MBottomNavigation>
+    </MErrorHandler>
+</MApp>
+
+@code {
+    private StringNumber _currentTab = "home";
+    private HashSet<TabRule> _tabRules = new();
+
+    [Inject]
+    private NavigationManager Navigation { get; set; } = default!;
+
+    [Inject]
+    private PageStackNavController NavController { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        _tabRules = new HashSet<TabRule>
+        {
+            new TabRule("^/$"),              // 首页
+            new TabRule("^/statistics$"),     // 统计
+            new TabRule("^/profile$")         // 我的
+        };
+
+        // 监听路由变化，同步 Tab 状态
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // 初始化时根据当前路由设置 Tab
+            SyncTabWithUri(Navigation.Uri);
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        SyncTabWithUri(e.Location);
+    }
+
+    private void SyncTabWithUri(string uri)
+    {
+        var path = new Uri(uri).AbsolutePath;
+
+        StringNumber newTab = path switch
+        {
+            "/" => "home",
+            "/statistics" => "statistics",
+            "/profile" => "profile",
+            _ => _currentTab  // 非 Tab 页面保持当前选中状态
+        };
+
+        if (_currentTab?.ToString() != newTab?.ToString())
+        {
+            _currentTab = newTab ?? string.Empty;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void OnTabChanged(StringNumber tab)
+    {
+        _currentTab = tab;
+
+        var uri = tab?.ToString() switch
+        {
+            "home" => "/",
+            "statistics" => "/statistics",
+            "profile" => "/profile",
+            _ => "/"
+        };
+
+        // 使用 NavigateTo 进行 Tab 切换
+        Navigation.NavigateTo(uri);
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}
