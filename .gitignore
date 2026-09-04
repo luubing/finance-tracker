@@ -106,3 +106,9 @@ Icon
 *.swp
 *.swo
 *~
+/server/FinanceTracker.Api/appsettings.Production.json
+/deploy
+/publish
+/deploy.sh
+/finance-tracker-api.tar.gz
+/finance-tracker-web.tar.gz

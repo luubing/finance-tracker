@@ -1,0 +1,197 @@
+name: Build iOS and Upload to Pgyer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: false
+        default: ''
+      build_number:
+        description: 'Build number (auto-increment if empty)'
+        required: false
+        default: ''
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  PROJECT_PATH: 'src/FinanceTracker.App/FinanceTracker.App.csproj'
+  OUTPUT_PATH: 'build/output/ios'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 .NET SDK
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # 3. 安装 MAUI 工作负载
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+
+      # 4. 获取当前版本号
+      - name: Get current version
+        id: version
+        run: |
+          # 从 csproj 读取版本号
+          VERSION=$(grep -oP '<ApplicationDisplayVersion>\K[^<]+' ${{ env.PROJECT_PATH }})
+          BUILD=$(grep -oP '<ApplicationVersion>\K[^<]+' ${{ env.PROJECT_PATH }})
+
+          # 使用输入的版本号或当前版本号
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+
+          if [ -n "${{ github.event.inputs.build_number }}" ]; then
+            BUILD="${{ github.event.inputs.build_number }}"
+          else
+            BUILD=$((BUILD + 1))
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "build_number=$BUILD" >> $GITHUB_OUTPUT
+          echo "📦 Building version $VERSION (Build $BUILD)"
+
+      # 5. 更新版本号
+      - name: Update version
+        run: |
+          sed -i '' "s/<ApplicationDisplayVersion>.*<\/ApplicationDisplayVersion>/<ApplicationDisplayVersion>${{ steps.version.outputs.version }}<\/ApplicationDisplayVersion>/" ${{ env.PROJECT_PATH }}
+          sed -i '' "s/<ApplicationVersion>.*<\/ApplicationVersion>/<ApplicationVersion>${{ steps.version.outputs.build_number }}<\/ApplicationVersion>/" ${{ env.PROJECT_PATH }}
+
+      # 6. 安装 Apple 证书和 Provisioning Profile
+      - name: Install Apple certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+        run: |
+          # 创建临时目录
+          mkdir -p ~/Certificates
+
+          # 解码证书
+          echo "$APPLE_CERTIFICATE" | base64 --decode > ~/Certificates/certificate.p12
+
+          # 创建钥匙串
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # 导入证书
+          security import ~/Certificates/certificate.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          # 安装 Provisioning Profile
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo "$APPLE_PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_PATH"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          UUID=$(grep -aA1 UUID "$PROFILE_PATH" | xmllint --xpath '//string/text()' - 2>/dev/null || \
+                 /usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$PROFILE_PATH") 2>/dev/null || \
+                 echo "temp-profile")
+
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
+
+      # 7. 还原依赖
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      # 8. 打包 iOS
+      - name: Build iOS
+        env:
+          CODE_SIGN_KEYSTORE_PASSWORD: ""
+        run: |
+          dotnet publish ${{ env.PROJECT_PATH }} \
+            -f net10.0-ios \
+            -c Release \
+            -o ${{ env.OUTPUT_PATH }} \
+            -p:ArchiveOnBuild=true \
+            -p:RuntimeIdentifier=ios-arm64 \
+            -p:CodesignKey="Apple Distribution" \
+            -p:CodesignProvision="${{ secrets.APPLE_PROVISIONING_PROFILE_NAME }}"
+
+      # 9. 查找 IPA 文件
+      - name: Find IPA file
+        id: find-ipa
+        run: |
+          IPA_FILE=$(find ${{ env.OUTPUT_PATH }} -name "*.ipa" | head -1)
+          if [ -z "$IPA_FILE" ]; then
+            echo "❌ IPA file not found!"
+            exit 1
+          fi
+          echo "ipa_path=$IPA_FILE" >> $GITHUB_OUTPUT
+          echo "✅ Found IPA: $IPA_FILE"
+          ls -lh "$IPA_FILE"
+
+      # 10. 上传到蒲公英
+      - name: Upload to Pgyer
+        env:
+          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
+        run: |
+          echo "🚀 Uploading to Pgyer..."
+
+          RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" \
+            -F "_api_key=$PGYER_API_KEY" \
+            -F "file=@${{ steps.find-ipa.outputs.ipa_path }}" \
+            -F "buildInstallType=2" \
+            -F "buildName=记账本" \
+            -F "buildPassword=123456")
+
+          # 解析响应
+          CODE=$(echo "$RESPONSE" | jq -r '.code')
+          MESSAGE=$(echo "$RESPONSE" | jq -r '.message')
+
+          if [ "$CODE" = "0" ]; then
+            BUILD_KEY=$(echo "$RESPONSE" | jq -r '.data.buildKey')
+            BUILD_VERSION=$(echo "$RESPONSE" | jq -r '.data.buildVersion')
+            SHORT_URL=$(echo "$RESPONSE" | jq -r '.data.buildShortcutUrl')
+
+            echo "✅ Upload successful!"
+            echo "📱 App Name: 记账本"
+            echo "📦 Version: $BUILD_VERSION"
+            echo "🔗 Download: https://www.pgyer.com/$SHORT_URL"
+            echo "🔑 Install Password: 123456"
+
+            # 保存到 artifacts
+            echo "https://www.pgyer.com/$SHORT_URL" > download-url.txt
+          else
+            echo "❌ Upload failed: $MESSAGE"
+            exit 1
+          fi
+
+      # 11. 清理签名文件
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+          rm -f ~/Certificates/certificate.p12
+          rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision
+
+      # 12. 上传构建产物
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: |
+            ${{ env.OUTPUT_PATH }}/*.ipa
+            download-url.txt
+          retention-days: 7
