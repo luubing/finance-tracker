@@ -18,6 +18,9 @@
                Flat
                Color="primary">
     <ActionContent>
+        <MButton Icon Disabled="@(_isLoading || _isRefreshing)" OnClick="RefreshData">
+            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
         <MButton Icon OnClick="NavigateToAddBill">
             <MIcon Color="white">mdi-plus</MIcon>
         </MButton>
@@ -195,6 +198,9 @@ else if (_user != null)
     // 待确认账单数量（通知栏/短信自动捕获，角标展示）
     private int _pendingCount;
 
+    // 手动刷新状态
+    private bool _isRefreshing;
+
     protected override void OnInitialized()
     {
         AuthStateService.AuthStateChanged += OnAuthStateChanged;
@@ -257,6 +263,44 @@ else if (_user != null)
         catch (Exception)
         {
             // 电路可能已关闭，忽略刷新失败
+        }
+    }
+
+    /// <summary>
+    /// 手动刷新首页数据（月度统计 + 最近账单 + 待确认账单数量）
+    /// </summary>
+    private async Task RefreshData()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        _isRefreshing = true;
+        StateHasChanged();
+
+        try
+        {
+            if (_user == null)
+            {
+                await LoadUser();
+            }
+
+            if (_user != null)
+            {
+                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+
+                _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "手动刷新首页数据失败");
+        }
+        finally
+        {
+            _isRefreshing = false;
+            StateHasChanged();
         }
     }
 

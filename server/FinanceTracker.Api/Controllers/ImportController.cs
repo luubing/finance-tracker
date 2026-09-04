@@ -80,9 +80,15 @@ public class ImportController : BaseApiController
             return BadRequest(new { message = "CSV 内容不能为空" });
         }
 
-        var importedBills = await _csvParserService.ParseWeChatCsvAsync(request.CsvContent);
+        // 跳过中性交易（充值/提现/零钱通存取等）与已撤销等无效交易，避免污染收支统计
+        var parseResult = await _csvParserService.ParseWeChatCsvWithStatsAsync(request.CsvContent);
 
-        return Ok(new { totalCount = importedBills.Count, bills = importedBills });
+        return Ok(new
+        {
+            totalCount = parseResult.Bills.Count,
+            skippedCount = parseResult.SkippedCount,
+            bills = parseResult.Bills
+        });
     }
 
     /// <summary>

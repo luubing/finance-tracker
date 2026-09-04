@@ -21,11 +21,13 @@ public class StatisticsController : BaseApiController
     /// </summary>
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>月度统计数据</returns>
     [HttpGet("monthly")]
     public async Task<IActionResult> GetMonthlyStatistics(
         [FromQuery] int year,
-        [FromQuery] int month)
+        [FromQuery] int month,
+        [FromQuery] Guid? ledgerId)
     {
         var userId = GetUserId();
 
@@ -39,7 +41,7 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "月份不正确" });
         }
 
-        var statistics = await _statisticsService.GetMonthlyStatisticsAsync(userId, year, month);
+        var statistics = await _statisticsService.GetMonthlyStatisticsAsync(userId, year, month, ledgerId);
 
         return Ok(new
         {
@@ -58,12 +60,14 @@ public class StatisticsController : BaseApiController
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
     /// <param name="type">账单类型</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>分类统计数据</returns>
     [HttpGet("category")]
     public async Task<IActionResult> GetCategoryStatistics(
         [FromQuery] int year,
         [FromQuery] int month,
-        [FromQuery] BillType type)
+        [FromQuery] BillType type,
+        [FromQuery] Guid? ledgerId)
     {
         var userId = GetUserId();
 
@@ -77,7 +81,7 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "月份不正确" });
         }
 
-        var statistics = await _statisticsService.GetCategoryStatisticsAsync(userId, year, month, type);
+        var statistics = await _statisticsService.GetCategoryStatisticsAsync(userId, year, month, type, ledgerId);
 
         return Ok(statistics.Select(s => new
         {
@@ -96,12 +100,14 @@ public class StatisticsController : BaseApiController
     /// <param name="startDate">开始日期</param>
     /// <param name="endDate">结束日期</param>
     /// <param name="dimension">维度（day/week/month）</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>趋势数据</returns>
     [HttpGet("trend")]
     public async Task<IActionResult> GetTrendData(
         [FromQuery] DateTime startDate,
         [FromQuery] DateTime endDate,
-        [FromQuery] string dimension = "day")
+        [FromQuery] string dimension = "day",
+        [FromQuery] Guid? ledgerId = null)
     {
         var userId = GetUserId();
 
@@ -115,7 +121,7 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "维度必须是 day、week 或 month" });
         }
 
-        var trendData = await _statisticsService.GetTrendDataAsync(userId, startDate, endDate, dimension);
+        var trendData = await _statisticsService.GetTrendDataAsync(userId, startDate, endDate, dimension, ledgerId);
 
         return Ok(trendData.Select(t => new
         {
@@ -130,9 +136,10 @@ public class StatisticsController : BaseApiController
     /// 获取年度统计数据
     /// </summary>
     /// <param name="year">年份</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>年度统计数据</returns>
     [HttpGet("annual")]
-    public async Task<IActionResult> GetAnnualStatistics([FromQuery] int year)
+    public async Task<IActionResult> GetAnnualStatistics([FromQuery] int year, [FromQuery] Guid? ledgerId)
     {
         var userId = GetUserId();
 
@@ -141,7 +148,7 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "年份不正确" });
         }
 
-        var statistics = await _statisticsService.GetAnnualStatisticsAsync(userId, year);
+        var statistics = await _statisticsService.GetAnnualStatisticsAsync(userId, year, ledgerId);
 
         return Ok(new
         {
@@ -175,9 +182,10 @@ public class StatisticsController : BaseApiController
     /// </summary>
     /// <param name="year">当前年份</param>
     /// <param name="month">当前月份</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>同比数据</returns>
     [HttpGet("year-over-year")]
-    public async Task<IActionResult> GetYearOverYearData([FromQuery] int year, [FromQuery] int month)
+    public async Task<IActionResult> GetYearOverYearData([FromQuery] int year, [FromQuery] int month, [FromQuery] Guid? ledgerId)
     {
         var userId = GetUserId();
 
@@ -191,7 +199,7 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "月份不正确" });
         }
 
-        var data = await _statisticsService.GetYearOverYearDataAsync(userId, year, month);
+        var data = await _statisticsService.GetYearOverYearDataAsync(userId, year, month, ledgerId);
 
         return Ok(new
         {

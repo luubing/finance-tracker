@@ -2,6 +2,7 @@
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Web.Services
 @inject IStatisticsService StatisticsService
+@inject ILedgerService LedgerService
 @inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 
@@ -27,6 +28,25 @@
             </MButton>
         </MCol>
     </MRow>
+
+    <!-- 账本筛选 -->
+    @if (_ledgers.Any())
+    {
+        <MRow>
+            <MCol Cols="12">
+                <MSelect Value="_selectedLedgerId"
+                         ValueChanged="@((Guid? v) => OnLedgerChanged(v))"
+                         Items="_ledgers"
+                         ItemText="l => l.Name"
+                         ItemValue="l => (Guid?)l.Id"
+                         Label="账本（全部账本）"
+                         Outlined
+                         Dense
+                         Clearable
+                         HideDetails="true" />
+            </MCol>
+        </MRow>
+    }
 
     @if (_isLoading)
     {
@@ -171,6 +191,10 @@
 
     private Guid _userId;
 
+    // 账本筛选
+    private Guid? _selectedLedgerId;
+    private List<LedgerModel> _ledgers = new();
+
     protected override async Task OnInitializedAsync()
     {
         var userId = await AuthStateService.GetUserIdAsync();
@@ -179,6 +203,38 @@
             _userId = userId.Value;
         }
 
+        await LoadLedgersAsync();
+        await LoadData();
+    }
+
+    /// <summary>
+    /// 加载用户的账本列表（用于账本筛选）
+    /// </summary>
+    private async Task LoadLedgersAsync()
+    {
+        try
+        {
+            var ledgers = await LedgerService.GetLedgersAsync(_userId);
+            _ledgers = ledgers.Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon
+            }).ToList();
+        }
+        catch
+        {
+            // 账本加载失败不影响统计展示
+            _ledgers = new List<LedgerModel>();
+        }
+    }
+
+    /// <summary>
+    /// 账本筛选变更后重新加载年度数据
+    /// </summary>
+    private async Task OnLedgerChanged(Guid? ledgerId)
+    {
+        _selectedLedgerId = ledgerId;
         await LoadData();
     }
 
@@ -189,7 +245,7 @@
         try
         {
             // 加载年度统计
-            var annualStats = await StatisticsService.GetAnnualStatisticsAsync(_userId, _currentYear);
+            var annualStats = await StatisticsService.GetAnnualStatisticsAsync(_userId, _currentYear, _selectedLedgerId);
             _annualStats = new AnnualStatisticsModel
             {
                 Year = annualStats.Year,
@@ -202,7 +258,7 @@
             };
 
             // 加载同比数据
-            var yoyData = await StatisticsService.GetYearOverYearDataAsync(_userId, _currentYear, DateTime.Now.Month);
+            var yoyData = await StatisticsService.GetYearOverYearDataAsync(_userId, _currentYear, DateTime.Now.Month, _selectedLedgerId);
             _yoyData = new YearOverYearModel
             {
                 CurrentYear = yoyData.CurrentYear,
@@ -300,5 +356,12 @@
         public decimal PreviousYearIncome { get; set; }
         public decimal ExpenseChangeRate { get; set; }
         public decimal IncomeChangeRate { get; set; }
+    }
+
+    private class LedgerModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
     }
 }

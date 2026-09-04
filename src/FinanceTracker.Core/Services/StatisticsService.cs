@@ -16,7 +16,7 @@ public class StatisticsService : IStatisticsService
         _context = context;
     }
 
-    public async Task<MonthlyStatistics> GetMonthlyStatisticsAsync(Guid userId, int year, int month)
+    public async Task<MonthlyStatistics> GetMonthlyStatisticsAsync(Guid userId, int year, int month, Guid? ledgerId = null)
     {
         var startDate = new DateTime(year, month, 1);
         var endDate = startDate.AddMonths(1).AddSeconds(-1);
@@ -24,7 +24,8 @@ public class StatisticsService : IStatisticsService
         var bills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= startDate &&
-                       b.TransactionTime <= endDate)
+                       b.TransactionTime <= endDate &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
             .ToListAsync();
 
         return new MonthlyStatistics
@@ -37,7 +38,7 @@ public class StatisticsService : IStatisticsService
         };
     }
 
-    public async Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type)
+    public async Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type, Guid? ledgerId = null)
     {
         var startDate = new DateTime(year, month, 1);
         var endDate = startDate.AddMonths(1).AddSeconds(-1);
@@ -47,7 +48,8 @@ public class StatisticsService : IStatisticsService
                     where b.UserId == userId &&
                           b.TransactionTime >= startDate &&
                           b.TransactionTime <= endDate &&
-                          b.Type == type
+                          b.Type == type &&
+                          (!ledgerId.HasValue || b.LedgerId == ledgerId)
                     group b by new { b.CategoryId, c.Name, c.Icon } into g
                     select new CategoryStatistics
                     {
@@ -72,12 +74,13 @@ public class StatisticsService : IStatisticsService
         return result.OrderByDescending(r => r.Amount).ToList();
     }
 
-    public async Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, string dimension)
+    public async Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, string dimension, Guid? ledgerId = null)
     {
         var bills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= startDate &&
-                       b.TransactionTime <= endDate)
+                       b.TransactionTime <= endDate &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
             .ToListAsync();
 
         var result = new List<TrendData>();
@@ -133,7 +136,7 @@ public class StatisticsService : IStatisticsService
         return date.AddDays(-1 * diff).Date;
     }
 
-    public async Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year)
+    public async Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year, Guid? ledgerId = null)
     {
         var startDate = new DateTime(year, 1, 1);
         var endDate = startDate.AddYears(1).AddSeconds(-1);
@@ -141,7 +144,8 @@ public class StatisticsService : IStatisticsService
         var bills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= startDate &&
-                       b.TransactionTime <= endDate)
+                       b.TransactionTime <= endDate &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
             .Include(b => b.Category)
             .ToListAsync();
 
@@ -192,7 +196,7 @@ public class StatisticsService : IStatisticsService
         };
     }
 
-    public async Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month)
+    public async Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month, Guid? ledgerId = null)
     {
         var currentStartDate = new DateTime(year, month, 1);
         var currentEndDate = currentStartDate.AddMonths(1).AddSeconds(-1);
@@ -202,13 +206,15 @@ public class StatisticsService : IStatisticsService
         var currentBills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= currentStartDate &&
-                       b.TransactionTime <= currentEndDate)
+                       b.TransactionTime <= currentEndDate &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
             .ToListAsync();
 
         var previousBills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= previousStartDate &&
-                       b.TransactionTime <= previousEndDate)
+                       b.TransactionTime <= previousEndDate &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
             .ToListAsync();
 
         return new YearOverYearData

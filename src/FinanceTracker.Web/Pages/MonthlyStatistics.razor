@@ -4,6 +4,7 @@
 @using FinanceTracker.Web.Services
 @implements IDisposable
 @inject IStatisticsService StatisticsService
+@inject ILedgerService LedgerService
 @inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
@@ -11,7 +12,13 @@
 <PStackPageBar Title="月度统计"
                CenterTitle
                Flat
-               Color="primary" />
+               Color="primary">
+    <ActionContent>
+        <MButton Icon Disabled="_isRefreshing" OnClick="RefreshStatistics">
+            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
+    </ActionContent>
+</PStackPageBar>
 
 <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 月份选择器 -->
@@ -30,6 +37,25 @@
             </MButton>
         </MCol>
     </MRow>
+
+    <!-- 账本筛选 -->
+    @if (_ledgers.Any())
+    {
+        <MRow>
+            <MCol Cols="12">
+                <MSelect Value="_selectedLedgerId"
+                         ValueChanged="@((Guid? v) => OnLedgerChanged(v))"
+                         Items="_ledgers"
+                         ItemText="l => l.Name"
+                         ItemValue="l => (Guid?)l.Id"
+                         Label="账本（全部账本）"
+                         Outlined
+                         Dense
+                         Clearable
+                         HideDetails="true" />
+            </MCol>
+        </MRow>
+    }
 
       
     @if (_isLoading)
@@ -173,6 +199,13 @@
 
     private Guid _userId;
 
+    // 账本筛选
+    private Guid? _selectedLedgerId;
+    private List<LedgerModel> _ledgers = new();
+
+    // 手动刷新状态
+    private bool _isRefreshing;
+
     protected override void OnInitialized()
     {
         BillEventService.BillChanged += OnBillChanged;
@@ -186,6 +219,7 @@
             _userId = userId;
         }
 
+        await LoadLedgersAsync();
         await LoadStatistics();
     }
 
@@ -207,6 +241,61 @@
         BillEventService.BillChanged -= OnBillChanged;
     }
 
+    /// <summary>
+    /// 手动刷新当前月份的统计数据
+    /// </summary>
+    private async Task RefreshStatistics()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        _isRefreshing = true;
+        StateHasChanged();
+
+        try
+        {
+            await LoadStatistics();
+        }
+        finally
+        {
+            _isRefreshing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// 加载用户的账本列表（用于账本筛选）
+    /// </summary>
+    private async Task LoadLedgersAsync()
+    {
+        try
+        {
+            var ledgers = await LedgerService.GetLedgersAsync(_userId);
+            _ledgers = ledgers.Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon
+            }).ToList();
+        }
+        catch
+        {
+            // 账本加载失败不影响统计展示
+            _ledgers = new List<LedgerModel>();
+        }
+    }
+
+    /// <summary>
+    /// 账本筛选变更后重新加载统计数据
+    /// </summary>
+    private async Task OnLedgerChanged(Guid? ledgerId)
+    {
+        _selectedLedgerId = ledgerId;
+        await LoadStatistics();
+    }
+
     private async Task LoadStatistics()
     {
         _isLoading = true;
@@ -214,7 +303,7 @@
         try
         {
             // 加载月度统计
-            var stats = await StatisticsService.GetMonthlyStatisticsAsync(_userId, _currentYear, _currentMonth);
+            var stats = await StatisticsService.GetMonthlyStatisticsAsync(_userId, _currentYear, _currentMonth, _selectedLedgerId);
             _monthlyStats = new MonthlyStatisticsModel
             {
                 TotalExpense = stats.TotalExpense,
@@ -224,7 +313,7 @@
             };
 
             // 加载支出分类统计
-            var expenseStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Expense);
+            var expenseStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Expense, _selectedLedgerId);
             _expenseCategories = expenseStats.Select(s => new CategoryStatisticsModel
             {
                 CategoryId = s.CategoryId,
@@ -238,7 +327,7 @@
             _expensePieOption = BuildPieOption(_expenseCategories, "支出分类");
 
             // 加载收入分类统计
-            var incomeStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Income);
+            var incomeStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Income, _selectedLedgerId);
             _incomeCategories = incomeStats.Select(s => new CategoryStatisticsModel
             {
                 CategoryId = s.CategoryId,
@@ -328,5 +417,12 @@
         public decimal Amount { get; set; }
         public decimal Percentage { get; set; }
         public int Count { get; set; }
+    }
+
+    private class LedgerModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
     }
 }

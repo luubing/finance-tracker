@@ -2,15 +2,21 @@
 @page "/add-bill/{BillId}"
 @using FinanceTracker.Core.Enums
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Services
 @using FinanceTracker.Web.Services
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
+@inject ILedgerService LedgerService
+@inject ISpeechService SpeechService
+@inject IBillVoiceParser VoiceParser
+@inject BillVoiceInputService VoiceInputService
 @inject AuthenticationService AuthStateService
 @inject IJSRuntime JSRuntime
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
+@implements IDisposable
 
 <PStackPageBar Title="@(IsEditing ? "编辑账单" : "记一笔")"
                CenterTitle
@@ -22,6 +28,27 @@
         <MCol Cols="12">
             <MCard>
                 <MCardText>
+                    <!-- 语音录入：识别结果仅预填表单，确认后保存 -->
+                    <div class="voice-bar d-flex align-center mb-4">
+                        <MIcon Class="mr-2" Color="@(_voiceBrowserSupported ? "primary" : "grey")">mdi-microphone</MIcon>
+                        <div class="flex-grow-1 text-body-2 text--secondary">
+                            @(_voiceStatus ?? "点击麦克风说出账单，例如：昨天午饭花了三十五块，微信支付")
+                        </div>
+                        <MButton Color="primary"
+                                 Small
+                                 Dark
+                                 Class="ml-2"
+                                 Loading="@(_voicePhase == BillVoiceInputPhase.Listening)"
+                                 Disabled="@(!_voiceBrowserSupported || _voicePhase != BillVoiceInputPhase.Idle)"
+                                 OnClick="StartVoiceInput">
+                            <MIcon Small>mdi-microphone</MIcon>
+                        </MButton>
+                    </div>
+                    @if (_voiceMatchHint != null)
+                    {
+                        <div class="voice-matched-hint">@_voiceMatchHint</div>
+                    }
+
                     <MForm @ref="_form" Model="_model" OnValidSubmit="SaveBill">
                         <!-- 支出/收入切换 -->
                         <MRow>
@@ -94,6 +121,26 @@
                                     <SelectionContent Context="item">
                                         <MIcon Class="mr-2">@(item.Item?.Icon ?? "mdi-credit-card")</MIcon>
                                         @(item.Item?.Name ?? "未知渠道")
+                                    </SelectionContent>
+                                </MSelect>
+                            </MCol>
+                        </MRow>
+
+                        <!-- 账本选择 -->
+                        <MRow>
+                            <MCol Cols="12">
+                                <MSelect @bind-Value="_model.LedgerId"
+                                         Items="_ledgers"
+                                         ItemText="l => l.Name"
+                                         ItemValue="l => (Guid?)l.Id"
+                                         Label="账本（可选）"
+                                         Outlined
+                                         Dense
+                                         Clearable
+                                         HideDetails="true">
+                                    <SelectionContent Context="item">
+                                        <MIcon Class="mr-2">@(item.Item?.Icon ?? "mdi-book")</MIcon>
+                                        @(item.Item?.Name ?? "不归属账本")
                                     </SelectionContent>
                                 </MSelect>
                             </MCol>
@@ -176,11 +223,54 @@
     .selected-category .m-icon {
         color: white !important;
     }
+
+    .voice-bar {
+        background: #F5F7FA;
+        border-radius: 8px;
+        padding: 10px 12px;
+    }
+
+    .voice-matched-hint {
+        font-size: 12px;
+        color: #4CAF50;
+        margin-top: 4px;
+    }
 </style>
 
 @code {
     [Parameter]
     public string? BillId { get; set; }
+
+    // ===== 语音录入状态 =====
+
+    /// <summary>语音录入交互阶段（禁止在待办/识别中重复触发）</summary>
+    private enum BillVoiceInputPhase
+    {
+        Idle = 0,
+        Listening = 1,
+        Parsing = 2
+    }
+
+    /// <summary>语音栏提示文案（null 显示默认引导语）</summary>
+    private string? _voiceStatus;
+
+    /// <summary>当前交互阶段</summary>
+    private BillVoiceInputPhase _voicePhase = BillVoiceInputPhase.Idle;
+
+    /// <summary>浏览器 Web Speech API 是否可用（决定麦克风按钮是否可点）</summary>
+    private bool _voiceBrowserSupported;
+
+    /// <summary>本次表单是否由语音预填（保存时据此标记数据来源）</summary>
+    private bool _voicePrefilled;
+
+    /// <summary>语音解析命中的分类/渠道提示</summary>
+    private string? _voiceMatchHint;
+
+    /// <summary>语音识别取消令牌来源（识别超时控制）</summary>
+    private CancellationTokenSource? _voiceCts;
+
+    /// <summary>语音能力初始化标记（OnAfterRenderAsync 只执行一次）</summary>
+    private bool _voiceInitialized;
 
     private bool IsEditing => !string.IsNullOrEmpty(BillId);
 
@@ -188,6 +278,7 @@
     private BillModel _model = new();
     private List<CategoryModel> _categories = new();
     private List<PaymentChannelModel> _paymentChannels = new();
+    private List<LedgerModel> _ledgers = new();
     private bool _loading;
     private Guid _userId;
 
@@ -223,6 +314,51 @@
         }
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 语音能力检测依赖 JS interop，必须放在渲染完成后执行：
+        // 预渲染阶段 IJSRuntime 不可用，若在 OnInitializedAsync 中调用会导致电路终止
+        // （与 AuthenticationService.IsPrerendering 处理的是同类问题）
+        if (!firstRender || _voiceInitialized)
+        {
+            return;
+        }
+
+        _voiceInitialized = true;
+
+        // MAUI 宿主注册原生语音服务；Blazor Server 注入的是 NoOpSpeechService（无原生能力），
+        // 此时检测浏览器 Web Speech API 是否可用，决定麦克风按钮是否可点
+        VoiceInputService.RegisterVoiceService(SpeechService);
+        if (!VoiceInputService.IsUsingNativeVoice)
+        {
+            try
+            {
+                _voiceBrowserSupported = await VoiceInputService.IsBrowserSupportedAsync();
+            }
+            catch (Exception)
+            {
+                // JS 模块加载失败（如宿主不支持）一律按不支持处理，静默降级为手动录入
+                _voiceBrowserSupported = false;
+            }
+        }
+        else
+        {
+            _voiceBrowserSupported = true;
+        }
+
+        if (_voiceBrowserSupported)
+        {
+            VoiceInputService.VoiceTextReceived += OnVoiceTextReceived;
+            VoiceInputService.ErrorOccurred += OnVoiceErrorOccurred;
+        }
+        else
+        {
+            _voiceStatus = "当前环境不支持语音识别，可手动填写账单";
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
     private async Task LoadData()
     {
         var categories = await CategoryService.GetCategoriesAsync(_userId);
@@ -241,6 +377,14 @@
             Name = c.Name,
             Icon = c.Icon
         }).ToList();
+
+        var ledgers = await LedgerService.GetLedgersAsync(_userId);
+        _ledgers = ledgers.Select(l => new LedgerModel
+        {
+            Id = l.Id,
+            Name = l.Name,
+            Icon = l.Icon
+        }).ToList();
     }
 
     private async Task LoadBill(Guid billId)
@@ -254,6 +398,7 @@
                 Type = bill.Type,
                 CategoryId = bill.CategoryId,
                 PaymentChannelId = bill.PaymentChannelId,
+                LedgerId = bill.LedgerId,
                 TransactionTime = bill.TransactionTime.ToString("yyyy-MM-ddTHH:mm"),
                 Note = bill.Note
             };
@@ -317,6 +462,7 @@
                     Type = _model.Type,
                     CategoryId = _model.CategoryId,
                     PaymentChannelId = _model.PaymentChannelId,
+                    LedgerId = _model.LedgerId,
                     TransactionTime = transactionTime,
                     Note = _model.Note
                 };
@@ -333,8 +479,11 @@
                     Type = _model.Type,
                     CategoryId = _model.CategoryId,
                     PaymentChannelId = _model.PaymentChannelId,
+                    LedgerId = _model.LedgerId,
                     TransactionTime = transactionTime,
-                    Note = _model.Note
+                    Note = _model.Note,
+                    // 语音预填的账单标记来源为语音识别，便于后续统计分析
+                    Source = _voicePrefilled ? BillSource.Voice : BillSource.Manual
                 };
 
                 await BillService.CreateBillAsync(bill);
@@ -359,12 +508,160 @@
         NavController.Pop();
     }
 
+    // ===== 语音录入 =====
+
+    /// <summary>点击麦克风：启动一次语音识别</summary>
+    private async Task StartVoiceInput()
+    {
+        if (_voicePhase != BillVoiceInputPhase.Idle || !_voiceBrowserSupported)
+        {
+            return;
+        }
+
+        _voicePhase = BillVoiceInputPhase.Listening;
+        _voiceStatus = "正在聆听，请说出账单内容…";
+        _voiceMatchHint = null;
+        StateHasChanged();
+
+        // 识别最长 15 秒，避免 SpeechRecognizer 异常挂起导致按钮永远转圈
+        _voiceCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            await VoiceInputService.StartAsync(_voiceCts.Token);
+        }
+        finally
+        {
+            _voiceCts.Dispose();
+            _voiceCts = null;
+            if (_voicePhase == BillVoiceInputPhase.Listening)
+            {
+                // 识别结束但未收到文本（如静默超时），恢复正常状态
+                _voicePhase = BillVoiceInputPhase.Idle;
+                _voiceStatus = null;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>语音识别完成：解析文本并预填表单（不直接保存，由用户确认）</summary>
+    private async Task OnVoiceTextReceived(string text)
+    {
+        _voicePhase = BillVoiceInputPhase.Parsing;
+        _voiceStatus = $"识别到「{text}」，正在解析…";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var draft = await VoiceParser.ParseAsync(text, _categories.Select(c => new Category
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Type = c.Type
+            }).ToList(), _paymentChannels.Select(p => new PaymentChannel
+            {
+                Id = p.Id,
+                Name = p.Name
+            }).ToList());
+
+            ApplyVoiceDraft(draft);
+
+            if (!draft.Amount.HasValue)
+            {
+                // 关键字段缺失时不修改表单，提示用户重试
+                _voiceStatus = null;
+                await PopupService.EnqueueSnackbarAsync("未能识别金额，请说出金额后重试，例如：昨天午饭花了三十五块", AlertTypes.Warning);
+                return;
+            }
+
+            _voicePrefilled = true;
+            _voiceStatus = $"已按「{text}」预填账单，请确认后保存";
+        }
+        catch (Exception ex)
+        {
+            _voiceStatus = null;
+            await PopupService.EnqueueSnackbarAsync($"解析语音内容失败：{ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _voicePhase = BillVoiceInputPhase.Idle;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>语音识别失败：恢复状态并提示</summary>
+    private async Task OnVoiceErrorOccurred(string message)
+    {
+        _voicePhase = BillVoiceInputPhase.Idle;
+        _voiceStatus = null;
+        await InvokeAsync(StateHasChanged);
+        await PopupService.EnqueueSnackbarAsync(message, AlertTypes.Error);
+    }
+
+    /// <summary>
+    /// 将解析结果预填到表单：只填识别到的字段，未识别字段保持原值由用户手动补充。
+    /// 分类/渠道必须在当前候选列表中（且类型匹配）才会应用。
+    /// </summary>
+    private void ApplyVoiceDraft(ParsedBillDraft draft)
+    {
+        var applied = new List<string>();
+
+        if (draft.Amount is decimal amount && amount > 0)
+        {
+            _model.Amount = decimal.Round(amount, 2);
+            applied.Add("金额");
+        }
+
+        if (draft.Type != _model.Type)
+        {
+            _model.Type = draft.Type;
+            _model.CategoryId = Guid.Empty; // 类型切换后原分类可能不适用
+        }
+
+        if (draft.CategoryId is Guid categoryId &&
+            _categories.Any(c => c.Id == categoryId && c.Type == _model.Type))
+        {
+            _model.CategoryId = categoryId;
+            var categoryName = _categories.First(c => c.Id == categoryId).Name;
+            applied.Add($"分类「{categoryName}」");
+        }
+
+        if (draft.PaymentChannelId is Guid channelId &&
+            _paymentChannels.Any(p => p.Id == channelId))
+        {
+            _model.PaymentChannelId = channelId;
+            var channelName = _paymentChannels.First(p => p.Id == channelId).Name;
+            applied.Add($"支付渠道「{channelName}」");
+        }
+
+        if (draft.TransactionTime is DateTime time)
+        {
+            _model.TransactionTime = time.ToString("yyyy-MM-ddTHH:mm");
+            applied.Add("交易时间");
+        }
+
+        if (!string.IsNullOrWhiteSpace(draft.RawText))
+        {
+            _model.Note = draft.RawText;
+        }
+
+        _voiceMatchHint = applied.Count > 0 ? $"已识别：{string.Join("、", applied)}" : null;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        VoiceInputService.VoiceTextReceived -= OnVoiceTextReceived;
+        VoiceInputService.ErrorOccurred -= OnVoiceErrorOccurred;
+        _voiceCts?.Dispose();
+    }
+
     private class BillModel
     {
         public decimal Amount { get; set; }
         public BillType Type { get; set; } = BillType.Expense;
         public Guid CategoryId { get; set; }
         public Guid PaymentChannelId { get; set; }
+        public Guid? LedgerId { get; set; }
         public string TransactionTime { get; set; } = string.Empty;
         public string? Note { get; set; }
     }
@@ -378,6 +675,13 @@
     }
 
     private class PaymentChannelModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+    }
+
+    private class LedgerModel
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;

@@ -13,7 +13,13 @@
 <PStackPageBar Title="我的"
                CenterTitle
                Flat
-               Color="primary" />
+               Color="primary">
+    <ActionContent>
+        <MButton Icon Disabled="@(_isLoading || _isRefreshing)" OnClick="RefreshData">
+            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
+    </ActionContent>
+</PStackPageBar>
 
 <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     @if (_isLoading)
@@ -50,11 +56,26 @@
         </MCard>
 
         <!-- 同步状态 -->
-        <SyncStatus />
+        <SyncStatus @ref="_syncStatus" />
 
         <!-- 功能列表 -->
         <MCard Class="mb-4">
             <MList>
+                <MListItem OnClick="@(() => NavController.Push("/ledgers"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-book-multiple</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>账本管理</MListItemTitle>
+                        <MListItemSubtitle>维护账本名称，账单可归属到账本</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
                 <MListItem OnClick="@(() => NavController.Push("/categories"))">
                     <MListItemIcon>
                         <MIcon Color="primary">mdi-tag-multiple</MIcon>
@@ -211,6 +232,11 @@
     private bool _isLoading = true;
     private bool _showLogoutDialog;
 
+    // 手动刷新状态
+    private bool _isRefreshing;
+
+    private Components.SyncStatus? _syncStatus;
+
     protected override void OnInitialized()
     {
         AuthStateService.AuthStateChanged += OnAuthStateChanged;
@@ -241,6 +267,35 @@
     public void Dispose()
     {
         AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+    }
+
+    /// <summary>
+    /// 手动刷新“我的”页面数据（用户信息 + 同步状态）
+    /// </summary>
+    private async Task RefreshData()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        _isRefreshing = true;
+        StateHasChanged();
+
+        try
+        {
+            await LoadUser();
+
+            if (_syncStatus != null)
+            {
+                await _syncStatus.RefreshAsync();
+            }
+        }
+        finally
+        {
+            _isRefreshing = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadUser()

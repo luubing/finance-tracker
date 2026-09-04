@@ -36,7 +36,8 @@ public class SyncController : BaseApiController
         {
             try
             {
-                // 先补建账单引用的分类/支付渠道（远端缺失时），避免 Bills 外键违例
+                // 先补建账单引用的账本/分类/支付渠道（远端缺失时），避免 Bills 外键违例
+                await dto.EnsureLedgerExistsAsync(_context, userId);
                 await dto.EnsureCategoryExistsAsync(_context, userId);
                 await dto.EnsurePaymentChannelExistsAsync(_context, userId);
 
@@ -317,6 +318,101 @@ public class SyncController : BaseApiController
         return Ok(new PaymentChannelSyncPullResponse
         {
             PaymentChannels = channels.Select(PaymentChannelSyncDto.FromEntity).ToList()
+        });
+    }
+
+    /// <summary>
+    /// 批量推送账本到云端，服务端按 UpdatedAt 做"后写入优先"冲突裁决
+    /// </summary>
+    /// <param name="request">待推送的账本列表</param>
+    /// <returns>每个账本的冲突裁决结果</returns>
+    [HttpPost("ledgers/push")]
+    public async Task<IActionResult> PushLedgers([FromBody] LedgerSyncPushRequest request)
+    {
+        var userId = GetUserId();
+        var results = new List<LedgerSyncItemResult>();
+
+        foreach (var dto in request?.Ledgers ?? new List<LedgerSyncDto>())
+        {
+            try
+            {
+                var existing = await _context.Ledgers
+                    .IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(l => l.Id == dto.Id);
+
+                if (existing == null)
+                {
+                    var entity = dto.ToEntity(userId);
+                    _context.Ledgers.Add(entity);
+                    await _context.SaveChangesAsync();
+                    results.Add(new LedgerSyncItemResult(dto.Id, "pushed"));
+                }
+                else if (existing.UserId != userId)
+                {
+                    // 同 Id 但归属他人：拒绝覆盖（防越权）
+                    results.Add(new LedgerSyncItemResult(dto.Id, "skipped",
+                        LedgerSyncDto.FromEntity(existing), "数据归属其他用户"));
+                }
+                else if (dto.UpdatedAt >= existing.UpdatedAt)
+                {
+                    // 内容一致时跳过写入，避免 UpdatedAt 被无意义刷新
+                    if (!dto.ContentEquals(existing))
+                    {
+                        dto.ApplyTo(existing);
+                        await _context.SaveChangesAsync();
+                    }
+                    results.Add(new LedgerSyncItemResult(dto.Id, "pushed"));
+                }
+                else
+                {
+                    // 云端版本更新 → 返回权威数据，客户端据此覆盖本地
+                    results.Add(new LedgerSyncItemResult(dto.Id, "pulled", LedgerSyncDto.FromEntity(existing)));
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add(new LedgerSyncItemResult(dto.Id, "failed", null, ex.Message));
+                if (_context is DbContext dbContext)
+                {
+                    foreach (var entry in dbContext.ChangeTracker.Entries())
+                    {
+                        if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
+                        {
+                            entry.State = EntityState.Detached;
+                        }
+                    }
+                }
+            }
+        }
+
+        return Ok(new LedgerSyncPushResponse { Results = results });
+    }
+
+    /// <summary>
+    /// 拉取云端账本（含软删除，删除操作借此同步到其他设备）
+    /// </summary>
+    [HttpPost("ledgers/pull")]
+    public async Task<IActionResult> PullLedgers([FromBody] LedgerSyncPullRequest? request)
+    {
+        var userId = GetUserId();
+        var since = request?.Since;
+
+        var query = _context.Ledgers
+            .IgnoreQueryFilters()
+            .Where(l => l.UserId == userId);
+
+        if (since.HasValue)
+        {
+            query = query.Where(l => l.UpdatedAt >= since.Value);
+        }
+
+        var ledgers = await query
+            .OrderBy(l => l.UpdatedAt)
+            .ToListAsync();
+
+        return Ok(new LedgerSyncPullResponse
+        {
+            Ledgers = ledgers.Select(LedgerSyncDto.FromEntity).ToList()
         });
     }
 }

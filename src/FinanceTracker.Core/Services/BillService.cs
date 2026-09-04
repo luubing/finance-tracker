@@ -23,6 +23,7 @@ public class BillService : IBillService
         DateTime? endDate = null,
         Guid? categoryId = null,
         Guid? paymentChannelId = null,
+        Guid? ledgerId = null,
         BillType? type = null,
         int page = 1,
         int pageSize = 20)
@@ -50,6 +51,11 @@ public class BillService : IBillService
             query = query.Where(b => b.PaymentChannelId == paymentChannelId.Value);
         }
 
+        if (ledgerId.HasValue)
+        {
+            query = query.Where(b => b.LedgerId == ledgerId.Value);
+        }
+
         if (type.HasValue)
         {
             query = query.Where(b => b.Type == type.Value);
@@ -61,6 +67,7 @@ public class BillService : IBillService
             .Take(pageSize)
             .Include(b => b.Category)
             .Include(b => b.PaymentChannel)
+            .Include(b => b.Ledger)
             .ToListAsync();
     }
 
@@ -69,6 +76,7 @@ public class BillService : IBillService
         return await _context.Bills
             .Include(b => b.Category)
             .Include(b => b.PaymentChannel)
+            .Include(b => b.Ledger)
             .FirstOrDefaultAsync(b => b.Id == billId);
     }
 
@@ -76,7 +84,8 @@ public class BillService : IBillService
     {
         bill.Id = Guid.NewGuid();
         bill.SyncStatus = SyncStatus.Pending;
-        bill.Source = BillSource.Manual;
+        // 数据来源（Source）由调用方决定（手动录入/导入/短信识别/通知栏/语音识别），
+        // 不在此处强制覆盖，否则语音等非手动来源的账单会被错误标记为手动录入
 
         // 确保 TransactionTime 为 UTC 时间
         if (bill.TransactionTime.Kind != DateTimeKind.Utc)
@@ -105,6 +114,7 @@ public class BillService : IBillService
         existingBill.Type = bill.Type;
         existingBill.CategoryId = bill.CategoryId;
         existingBill.PaymentChannelId = bill.PaymentChannelId;
+        existingBill.LedgerId = bill.LedgerId;
 
         // 确保 TransactionTime 为 UTC 时间
         if (bill.TransactionTime.Kind != DateTimeKind.Utc)
@@ -143,12 +153,47 @@ public class BillService : IBillService
         return true;
     }
 
+    public async Task<int> AssignBillsToLedgerAsync(List<Guid> billIds, Guid userId, Guid? ledgerId)
+    {
+        if (billIds == null || billIds.Count == 0)
+        {
+            return 0;
+        }
+
+        // 目标账本必须属于当前用户且未删除（移出账本时 ledgerId 为 null，无需校验）
+        if (ledgerId.HasValue)
+        {
+            var ledgerExists = await _context.Ledgers
+                .AnyAsync(l => l.Id == ledgerId.Value && l.UserId == userId && !l.IsDeleted);
+
+            if (!ledgerExists)
+            {
+                throw new ArgumentException("账本不存在");
+            }
+        }
+
+        var bills = await _context.Bills
+            .Where(b => billIds.Contains(b.Id) && b.UserId == userId && !b.IsDeleted)
+            .ToListAsync();
+
+        foreach (var bill in bills)
+        {
+            bill.LedgerId = ledgerId;
+            bill.SyncStatus = SyncStatus.Pending;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return bills.Count;
+    }
+
     public async Task<int> GetBillCountAsync(
         Guid userId,
         DateTime? startDate = null,
         DateTime? endDate = null,
         Guid? categoryId = null,
         Guid? paymentChannelId = null,
+        Guid? ledgerId = null,
         BillType? type = null)
     {
         var query = _context.Bills
@@ -172,6 +217,11 @@ public class BillService : IBillService
         if (paymentChannelId.HasValue)
         {
             query = query.Where(b => b.PaymentChannelId == paymentChannelId.Value);
+        }
+
+        if (ledgerId.HasValue)
+        {
+            query = query.Where(b => b.LedgerId == ledgerId.Value);
         }
 
         if (type.HasValue)

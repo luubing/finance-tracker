@@ -36,4 +36,14 @@ public interface ICloudSyncClient
     /// 拉取云端自定义支付渠道（since 为空则拉取全部，含软删除）
     /// </summary>
     Task<List<PaymentChannelSyncDto>> PullPaymentChannelsAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 批量推送账本到云端（服务端按 UpdatedAt 做"后写入优先"裁决）
+    /// </summary>
+    Task<LedgerSyncPushResponse> PushLedgersAsync(Guid userId, IReadOnlyList<LedgerSyncDto> ledgers, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 拉取云端账本（since 为空则拉取全部，含软删除）
+    /// </summary>
+    Task<List<LedgerSyncDto>> PullLedgersAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default);
 }

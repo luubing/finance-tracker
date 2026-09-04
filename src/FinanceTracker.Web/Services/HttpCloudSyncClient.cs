@@ -97,4 +97,26 @@ public class HttpCloudSyncClient : ICloudSyncClient
         var response = await _http.PostAsync<PaymentChannelSyncPullResponse>(BuildApiUrl("sync/paymentchannels/pull"), request);
         return response?.PaymentChannels ?? new List<PaymentChannelSyncDto>();
     }
+
+    public async Task<LedgerSyncPushResponse> PushLedgersAsync(Guid userId, IReadOnlyList<LedgerSyncDto> ledgers, CancellationToken cancellationToken = default)
+    {
+        var request = new LedgerSyncPushRequest
+        {
+            Ledgers = ledgers.ToList()
+        };
+
+        var response = await _http.PostAsync<LedgerSyncPushResponse>(BuildApiUrl("sync/ledgers/push"), request);
+        return response ?? new LedgerSyncPushResponse();
+    }
+
+    public async Task<List<LedgerSyncDto>> PullLedgersAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default)
+    {
+        var request = new LedgerSyncPullRequest
+        {
+            Since = since
+        };
+
+        var response = await _http.PostAsync<LedgerSyncPullResponse>(BuildApiUrl("sync/ledgers/pull"), request);
+        return response?.Ledgers ?? new List<LedgerSyncDto>();
+    }
 }

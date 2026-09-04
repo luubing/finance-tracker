@@ -24,4 +24,5 @@ public class User : BaseEntity
     public ICollection<Bill> Bills { get; set; } = new List<Bill>();
     public ICollection<Category> Categories { get; set; } = new List<Category>();
     public ICollection<PaymentChannel> PaymentChannels { get; set; } = new List<PaymentChannel>();
+    public ICollection<Ledger> Ledgers { get; set; } = new List<Ledger>();
 }

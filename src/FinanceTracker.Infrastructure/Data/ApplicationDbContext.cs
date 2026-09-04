@@ -17,6 +17,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Bill> Bills => Set<Bill>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<PaymentChannel> PaymentChannels => Set<PaymentChannel>();
+    public DbSet<Ledger> Ledgers => Set<Ledger>();
     public DbSet<PendingBill> PendingBills => Set<PendingBill>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -57,6 +58,11 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .HasForeignKey(e => e.PaymentChannelId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(e => e.Ledger)
+                .WithMany(l => l.Bills)
+                .HasForeignKey(e => e.LedgerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -86,6 +92,22 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.PaymentChannels)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 账本配置
+        modelBuilder.Entity<Ledger>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Icon).HasMaxLength(100);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Ledgers)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
 

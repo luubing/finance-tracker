@@ -1,7 +1,19 @@
 @page "/import"
 @using FinanceTracker.Web.Services
+@using System.Text
 @inject HttpService HttpService
 @inject IPopupService PopupService
+@inject ISyncService SyncService
+@inject AuthenticationService AuthStateService
+@inject BillEventService BillEventService
+
+@code {
+    // 注册编码提供程序以支持 GB18030 等编码
+    static Import()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+}
 
 <PStackPageBar Title="导入账单"
                CenterTitle
@@ -218,10 +230,12 @@
         {
             var endpoint = platform == ImportPlatform.WeChat ? "api/import/wechat/preview" : "api/import/alipay/preview";
 
-            // 读取文件内容
+            // 读取文件内容（自动检测编码：微信/支付宝账单通常是 GB18030）
             using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
-            using var reader = new System.IO.StreamReader(stream);
-            var csvContent = await reader.ReadToEndAsync();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            var csvContent = DecodeCsvContent(bytes);
 
             // 调用预览 API（仅解析，不入库）
             var request = new { CsvContent = csvContent };
@@ -245,7 +259,13 @@
             _previewPlatformName = platform == ImportPlatform.WeChat ? "微信" : "支付宝";
             _previewBills = result.Bills;
 
-            await PopupService.EnqueueSnackbarAsync($"解析完成，共 {result.Bills.Count} 条账单，请确认后导入", AlertTypes.Info);
+            var message = $"解析完成，共 {result.Bills.Count} 条账单";
+            if (result.SkippedCount > 0)
+            {
+                message += $"，已跳过 {result.SkippedCount} 条中性交易/无效交易";
+            }
+
+            await PopupService.EnqueueSnackbarAsync($"{message}，请确认后导入", AlertTypes.Info);
         }
         catch (Exception ex)
         {
@@ -275,6 +295,13 @@
             {
                 _importResult = result;
                 await PopupService.EnqueueSnackbarAsync($"{_previewPlatformName}账单导入完成", AlertTypes.Success);
+
+                // 导入写入的是云端数据库，而账单列表/统计页读取的是本地数据库；
+                // 导入成功后立即从云端拉取，否则本地列表看不到刚导入的账单
+                if (result.SuccessCount > 0)
+                {
+                    await PullImportedBillsAsync();
+                }
             }
             else
             {
@@ -303,6 +330,83 @@
         _previewPlatformName = string.Empty;
     }
 
+    /// <summary>
+    /// 导入成功后从云端拉取账单到本地库，并通知列表/统计页刷新。
+    /// 失败不影响导入结果，用户可稍后在"我的"页点击"立即同步"补拉。
+    /// </summary>
+    private async Task PullImportedBillsAsync()
+    {
+        try
+        {
+            var userId = await AuthStateService.GetUserIdAsync();
+            if (!userId.HasValue)
+            {
+                await PopupService.EnqueueSnackbarAsync("导入成功，但当前未登录，请登录后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+                return;
+            }
+
+            var syncResult = await SyncService.SyncBillsAsync(userId.Value);
+
+            if (syncResult.Success)
+            {
+                await PopupService.EnqueueSnackbarAsync("已从云端拉取到本地，账单列表即可查看", AlertTypes.Info);
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{syncResult.ErrorMessage}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+            }
+
+            // 通知首页/统计页刷新数据
+            BillEventService.NotifyBillChanged();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{ex.Message}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 检测编码并解码 CSV 内容
+    /// 微信/支付宝账单通常使用 GB18030 编码
+    /// </summary>
+    private static string DecodeCsvContent(byte[] bytes)
+    {
+        // 检测 BOM
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+
+        // 尝试 UTF-8（无 BOM）
+        try
+        {
+            var utf8Text = Encoding.UTF8.GetString(bytes);
+            // 检查是否包含有效的中文字符（UTF-8 解码成功且包含常见中文标点）
+            if (utf8Text.Contains("交易时间") || utf8Text.Contains("交易类型"))
+                return utf8Text;
+        }
+        catch
+        {
+            // UTF-8 解码失败，继续尝试其他编码
+        }
+
+        // 默认使用 GB18030（微信/支付宝账单标准编码）
+        try
+        {
+            var gb18030 = Encoding.GetEncoding("gb18030");
+            return gb18030.GetString(bytes);
+        }
+        catch
+        {
+            // 最后回退到系统默认编码
+            return Encoding.UTF8.GetString(bytes);
+        }
+    }
+
     private class ImportedBillPreview
     {
         public DateTime TransactionTime { get; set; }
@@ -317,6 +421,7 @@
     private class PreviewResult
     {
         public int TotalCount { get; set; }
+        public int SkippedCount { get; set; }
         public List<ImportedBillPreview> Bills { get; set; } = new();
     }
 

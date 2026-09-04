@@ -41,6 +41,9 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid?>("LedgerId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Note")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -69,6 +72,8 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("LedgerId");
 
                     b.HasIndex("PaymentChannelId");
 
@@ -123,6 +128,44 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.HasIndex("UserId", "Type");
 
                     b.ToTable("Categories");
+                });
+
+            modelBuilder.Entity("FinanceTracker.Core.Entities.Ledger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("Ledgers");
                 });
 
             modelBuilder.Entity("FinanceTracker.Core.Entities.PaymentChannel", b =>
@@ -240,6 +283,11 @@ namespace FinanceTracker.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("FinanceTracker.Core.Entities.Ledger", "Ledger")
+                        .WithMany("Bills")
+                        .HasForeignKey("LedgerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("FinanceTracker.Core.Entities.PaymentChannel", "PaymentChannel")
                         .WithMany("Bills")
                         .HasForeignKey("PaymentChannelId")
@@ -254,6 +302,8 @@ namespace FinanceTracker.Infrastructure.Migrations
 
                     b.Navigation("Category");
 
+                    b.Navigation("Ledger");
+
                     b.Navigation("PaymentChannel");
 
                     b.Navigation("User");
@@ -265,6 +315,17 @@ namespace FinanceTracker.Infrastructure.Migrations
                         .WithMany("Categories")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("FinanceTracker.Core.Entities.Ledger", b =>
+                {
+                    b.HasOne("FinanceTracker.Core.Entities.User", "User")
+                        .WithMany("Ledgers")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });
@@ -284,6 +345,11 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.Navigation("Bills");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.Ledger", b =>
+                {
+                    b.Navigation("Bills");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.PaymentChannel", b =>
                 {
                     b.Navigation("Bills");
@@ -294,6 +360,8 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.Navigation("Bills");
 
                     b.Navigation("Categories");
+
+                    b.Navigation("Ledgers");
 
                     b.Navigation("PaymentChannels");
                 });

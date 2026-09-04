@@ -23,6 +23,7 @@ public class BillsController : BaseApiController
     /// <param name="endDate">结束日期</param>
     /// <param name="categoryId">分类ID</param>
     /// <param name="paymentChannelId">支付渠道ID</param>
+    /// <param name="ledgerId">账本ID</param>
     /// <param name="type">账单类型</param>
     /// <param name="page">页码</param>
     /// <param name="pageSize">每页数量</param>
@@ -33,6 +34,7 @@ public class BillsController : BaseApiController
         [FromQuery] DateTime? endDate = null,
         [FromQuery] Guid? categoryId = null,
         [FromQuery] Guid? paymentChannelId = null,
+        [FromQuery] Guid? ledgerId = null,
         [FromQuery] BillType? type = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
@@ -40,10 +42,10 @@ public class BillsController : BaseApiController
         var userId = GetUserId();
 
         var bills = await _billService.GetBillsAsync(
-            userId, startDate, endDate, categoryId, paymentChannelId, type, page, pageSize);
+            userId, startDate, endDate, categoryId, paymentChannelId, ledgerId, type, page, pageSize);
 
         var totalCount = await _billService.GetBillCountAsync(
-            userId, startDate, endDate, categoryId, paymentChannelId, type);
+            userId, startDate, endDate, categoryId, paymentChannelId, ledgerId, type);
 
         return Ok(new
         {
@@ -96,6 +98,7 @@ public class BillsController : BaseApiController
             Type = request.Type,
             CategoryId = request.CategoryId,
             PaymentChannelId = request.PaymentChannelId,
+            LedgerId = request.LedgerId,
             TransactionTime = request.TransactionTime ?? DateTime.UtcNow,
             Note = request.Note
         };
@@ -130,6 +133,7 @@ public class BillsController : BaseApiController
             Type = request.Type,
             CategoryId = request.CategoryId,
             PaymentChannelId = request.PaymentChannelId,
+            LedgerId = request.LedgerId,
             TransactionTime = request.TransactionTime ?? DateTime.UtcNow,
             Note = request.Note
         };
@@ -195,6 +199,9 @@ public class BillsController : BaseApiController
         paymentChannelId = bill.PaymentChannelId,
         paymentChannelName = bill.PaymentChannel?.Name,
         paymentChannelIcon = bill.PaymentChannel?.Icon,
+        ledgerId = bill.LedgerId,
+        ledgerName = bill.Ledger?.Name,
+        ledgerIcon = bill.Ledger?.Icon,
         transactionTime = bill.TransactionTime,
         note = bill.Note,
         source = bill.Source.ToString(),
@@ -227,6 +234,11 @@ public class BillRequest
     /// 支付渠道ID
     /// </summary>
     public Guid PaymentChannelId { get; set; }
+
+    /// <summary>
+    /// 账本ID（null 表示未归属账本）
+    /// </summary>
+    public Guid? LedgerId { get; set; }
 
     /// <summary>
     /// 交易时间

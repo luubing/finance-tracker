@@ -51,10 +51,19 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
+builder.Services.AddScoped<ILedgerService, LedgerService>();
 builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
+
+// 注册语音记账服务：
+// - 文本解析（中文口语 → 账单草稿）使用规则解析器，服务端/客户端通用
+// - BillVoiceInputService 负责"语音 → 文本"的分发（服务端为空实现时自动降级浏览器 Web Speech API）
+// - Blazor Server 服务端进程不做真实语音识别（空实现），实际识别走浏览器 Web Speech API（JS interop）
+builder.Services.AddScoped<IBillVoiceParser, BillVoiceParser>();
+builder.Services.AddSingleton<ISpeechService, NoOpSpeechService>();
+builder.Services.AddScoped<BillVoiceInputService>();
 
 // 注册 HttpClient - 从配置文件读取 Api 地址
 var apiBaseUrl = builder.Configuration["ApiSettings:BaseUrl"] ?? "http://localhost:5270";

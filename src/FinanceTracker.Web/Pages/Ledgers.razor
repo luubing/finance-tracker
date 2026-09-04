@@ -1,0 +1,238 @@
+@page "/ledgers"
+@using FinanceTracker.Core.Interfaces
+@inject ILedgerService LedgerService
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IPopupService PopupService
+
+<PStackPageBar Title="账本"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    <MRow>
+        <MCol Cols="12">
+            <MCard>
+                <MCardTitle>
+                    <MIcon Class="mr-2">mdi-book-multiple</MIcon>
+                    账本管理
+                    <MSpacer />
+                    <MButton Color="primary" OnClick="ShowCreateDialog">
+                        <MIcon Class="mr-2">mdi-plus</MIcon>
+                        添加账本
+                    </MButton>
+                </MCardTitle>
+
+                <MCardText>
+                    @if (!_ledgers.Any())
+                    {
+                        <div class="text-center py-8">
+                            <MIcon Size="64" Color="grey lighten-1">mdi-book-outline</MIcon>
+                            <div class="text-h6 grey--text text--lighten-1 mt-4">暂无账本，点击右上角添加</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <MList>
+                            @foreach (var ledger in _ledgers)
+                            {
+                                <MListItem>
+                                    <MListItemIcon>
+                                        <MIcon>@ledger.Icon</MIcon>
+                                    </MListItemIcon>
+                                    <MListItemContent>
+                                        <MListItemTitle>@ledger.Name</MListItemTitle>
+                                    </MListItemContent>
+                                    <MListItemAction>
+                                        <MButton Icon OnClick="() => ShowEditDialog(ledger)">
+                                            <MIcon>mdi-pencil</MIcon>
+                                        </MButton>
+                                        <MButton Icon OnClick="() => DeleteLedger(ledger)">
+                                            <MIcon Color="error">mdi-delete</MIcon>
+                                        </MButton>
+                                    </MListItemAction>
+                                </MListItem>
+                            }
+                        </MList>
+                    }
+                </MCardText>
+            </MCard>
+        </MCol>
+    </MRow>
+</MContainer>
+
+<!-- 创建/编辑对话框 -->
+<MDialog @bind-Value="_showDialog" MaxWidth="500">
+    <MCard>
+        <MCardTitle>
+            @(_isEditing ? "编辑账本" : "创建账本")
+        </MCardTitle>
+
+        <MCardText>
+            <MForm @ref="_form" Model="_ledgerModel" OnValidSubmit="SaveLedger">
+                <MTextField @bind-Value="_ledgerModel.Name"
+                            Label="账本名称"
+                            Outlined
+                            Dense
+                            Required />
+
+                <MTextField @bind-Value="_ledgerModel.Icon"
+                            Label="图标（mdi-xxx）"
+                            Outlined
+                            Dense
+                            Placeholder="mdi-book" />
+
+                <MTextField @bind-Value="_ledgerModel.SortOrder"
+                            Label="排序顺序"
+                            Outlined
+                            Dense
+                            Type="number" />
+            </MForm>
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CloseDialog">取消</MButton>
+            <MButton Color="primary" OnClick="SaveLedger">保存</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    private List<LedgerModel> _ledgers = new();
+    private bool _showDialog;
+    private bool _isEditing;
+    private LedgerModel _ledgerModel = new();
+    private MForm? _form;
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        await LoadLedgers();
+    }
+
+    private async Task LoadLedgers()
+    {
+        var ledgers = await LedgerService.GetLedgersAsync(_userId);
+
+        _ledgers = ledgers
+            .Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon,
+                SortOrder = l.SortOrder
+            })
+            .ToList();
+    }
+
+    private void ShowCreateDialog()
+    {
+        _isEditing = false;
+        _ledgerModel = new LedgerModel
+        {
+            Icon = "mdi-book"
+        };
+        _showDialog = true;
+    }
+
+    private void ShowEditDialog(LedgerModel ledger)
+    {
+        _isEditing = true;
+        _ledgerModel = new LedgerModel
+        {
+            Id = ledger.Id,
+            Name = ledger.Name,
+            Icon = ledger.Icon,
+            SortOrder = ledger.SortOrder
+        };
+        _showDialog = true;
+    }
+
+    private void CloseDialog()
+    {
+        _showDialog = false;
+    }
+
+    private async Task SaveLedger()
+    {
+        try
+        {
+            if (_isEditing)
+            {
+                var ledger = new Core.Entities.Ledger
+                {
+                    Id = _ledgerModel.Id,
+                    UserId = _userId,
+                    Name = _ledgerModel.Name,
+                    Icon = _ledgerModel.Icon ?? "mdi-book",
+                    SortOrder = _ledgerModel.SortOrder
+                };
+
+                await LedgerService.UpdateLedgerAsync(ledger);
+                await PopupService.EnqueueSnackbarAsync("账本更新成功", AlertTypes.Success);
+            }
+            else
+            {
+                var ledger = new Core.Entities.Ledger
+                {
+                    UserId = _userId,
+                    Name = _ledgerModel.Name,
+                    Icon = _ledgerModel.Icon ?? "mdi-book",
+                    SortOrder = _ledgerModel.SortOrder
+                };
+
+                await LedgerService.CreateLedgerAsync(ledger);
+                await PopupService.EnqueueSnackbarAsync("账本创建成功", AlertTypes.Success);
+            }
+
+            CloseDialog();
+            await LoadLedgers();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task DeleteLedger(LedgerModel ledger)
+    {
+        try
+        {
+            var result = await LedgerService.DeleteLedgerAsync(ledger.Id, _userId);
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync("账本删除成功", AlertTypes.Success);
+                await LoadLedgers();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("账本不存在", AlertTypes.Warning);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private class LedgerModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string? Icon { get; set; }
+        public int SortOrder { get; set; }
+    }
+}

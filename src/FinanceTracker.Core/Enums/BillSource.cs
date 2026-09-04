@@ -23,5 +23,10 @@ public enum BillSource
     /// <summary>
     /// 通知栏识别
     /// </summary>
-    Notification = 3
+    Notification = 3,
+
+    /// <summary>
+    /// 语音识别
+    /// </summary>
+    Voice = 4
 }

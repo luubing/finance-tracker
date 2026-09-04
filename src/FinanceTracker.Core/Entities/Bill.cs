@@ -38,6 +38,11 @@ public class Bill : BaseEntity
     public Guid PaymentChannelId { get; set; }
 
     /// <summary>
+    /// 账本ID（null 表示未归属账本，兼容历史账单）
+    /// </summary>
+    public Guid? LedgerId { get; set; }
+
+    /// <summary>
     /// 交易时间
     /// </summary>
     public DateTime TransactionTime { get; set; }
@@ -66,4 +71,5 @@ public class Bill : BaseEntity
     public User User { get; set; } = null!;
     public Category Category { get; set; } = null!;
     public PaymentChannel PaymentChannel { get; set; } = null!;
+    public Ledger? Ledger { get; set; }
 }

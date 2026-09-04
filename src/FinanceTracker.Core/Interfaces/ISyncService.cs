@@ -25,6 +25,11 @@ public interface ISyncService
     Task SyncPaymentChannelsAsync(Guid userId);
 
     /// <summary>
+    /// 同步账本到云端（双向）
+    /// </summary>
+    Task SyncLedgersAsync(Guid userId);
+
+    /// <summary>
     /// 获取待同步的账单
     /// </summary>
     /// <param name="userId">用户ID</param>

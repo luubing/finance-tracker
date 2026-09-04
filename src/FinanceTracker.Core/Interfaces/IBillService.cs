@@ -16,6 +16,7 @@ public interface IBillService
     /// <param name="endDate">结束日期</param>
     /// <param name="categoryId">分类ID</param>
     /// <param name="paymentChannelId">支付渠道ID</param>
+    /// <param name="ledgerId">账本ID</param>
     /// <param name="type">账单类型</param>
     /// <param name="page">页码</param>
     /// <param name="pageSize">每页数量</param>
@@ -26,6 +27,7 @@ public interface IBillService
         DateTime? endDate = null,
         Guid? categoryId = null,
         Guid? paymentChannelId = null,
+        Guid? ledgerId = null,
         BillType? type = null,
         int page = 1,
         int pageSize = 20);
@@ -60,6 +62,15 @@ public interface IBillService
     Task<bool> DeleteBillAsync(Guid billId, Guid userId);
 
     /// <summary>
+    /// 批量归属账本（ledgerId 为 null 表示移出账本）
+    /// </summary>
+    /// <param name="billIds">账单ID列表</param>
+    /// <param name="userId">用户ID</param>
+    /// <param name="ledgerId">目标账本ID（null 表示移出账本）</param>
+    /// <returns>成功归属的账单数量</returns>
+    Task<int> AssignBillsToLedgerAsync(List<Guid> billIds, Guid userId, Guid? ledgerId);
+
+    /// <summary>
     /// 获取账单总数
     /// </summary>
     /// <param name="userId">用户ID</param>
@@ -67,6 +78,7 @@ public interface IBillService
     /// <param name="endDate">结束日期</param>
     /// <param name="categoryId">分类ID</param>
     /// <param name="paymentChannelId">支付渠道ID</param>
+    /// <param name="ledgerId">账本ID</param>
     /// <param name="type">账单类型</param>
     /// <returns>账单总数</returns>
     Task<int> GetBillCountAsync(
@@ -75,5 +87,6 @@ public interface IBillService
         DateTime? endDate = null,
         Guid? categoryId = null,
         Guid? paymentChannelId = null,
+        Guid? ledgerId = null,
         BillType? type = null);
 }

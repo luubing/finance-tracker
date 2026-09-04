@@ -13,6 +13,13 @@ public interface ICsvParserService
     Task<List<ImportedBill>> ParseWeChatCsvAsync(string csvContent);
 
     /// <summary>
+    /// 解析微信账单 CSV（含跳过行统计：中性交易、已撤销等无效交易）
+    /// </summary>
+    /// <param name="csvContent">CSV 内容</param>
+    /// <returns>解析结果（账单列表 + 跳过行数）</returns>
+    Task<CsvParseResult> ParseWeChatCsvWithStatsAsync(string csvContent);
+
+    /// <summary>
     /// 解析支付宝账单 CSV
     /// </summary>
     /// <param name="csvContent">CSV 内容</param>
@@ -59,4 +66,20 @@ public class ImportedBill
     /// 原始交易号
     /// </summary>
     public string TransactionId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// CSV 解析结果（账单列表 + 跳过行统计）
+/// </summary>
+public class CsvParseResult
+{
+    /// <summary>
+    /// 解析出的账单列表
+    /// </summary>
+    public List<ImportedBill> Bills { get; set; } = new();
+
+    /// <summary>
+    /// 被跳过的行数（中性交易、已撤销/已失效等无效交易、无法解析的行）
+    /// </summary>
+    public int SkippedCount { get; set; }
 }

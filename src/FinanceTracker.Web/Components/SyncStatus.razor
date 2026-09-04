@@ -27,13 +27,13 @@
             </div>
         </div>
         <MSpacer />
-        @if (_pendingCount > 0 && !_isSyncing)
-        {
-            <MButton Small Color="primary" OnClick="SyncNow">
-                <MIcon Small Class="mr-1">mdi-cloud-upload</MIcon>
-                立即同步
-            </MButton>
-        }
+        <!-- 同步按钮始终显示，即使待同步为 0 也允许手动触发同步 -->
+        <MButton Small Color="primary"
+                 Loading="_isSyncing"
+                 OnClick="SyncNow">
+            <MIcon Small Class="mr-1">mdi-cloud-upload</MIcon>
+            立即同步
+        </MButton>
     </MCardText>
 </MCard>
 
@@ -64,6 +64,15 @@
         {
             // 忽略错误
         }
+    }
+
+    /// <summary>
+    /// 刷新同步状态显示（供父组件通过 @ref 调用）
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        await LoadSyncStatus();
+        StateHasChanged();
     }
 
     private async Task SyncNow()

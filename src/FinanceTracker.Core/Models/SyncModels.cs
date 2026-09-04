@@ -248,3 +248,99 @@ public class PaymentChannelSyncPullResponse
 {
     public List<PaymentChannelSyncDto> PaymentChannels { get; set; } = new();
 }
+
+/// <summary>
+/// 账本同步传输对象（UserId 不在 DTO 中传输：服务端以 JWT 为准，客户端以本地用户为准）
+/// </summary>
+public class LedgerSyncDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Icon { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public static LedgerSyncDto FromEntity(Ledger ledger) => new()
+    {
+        Id = ledger.Id,
+        Name = ledger.Name,
+        Icon = ledger.Icon,
+        SortOrder = ledger.SortOrder,
+        IsDeleted = ledger.IsDeleted,
+        CreatedAt = ledger.CreatedAt,
+        UpdatedAt = ledger.UpdatedAt
+    };
+
+    public Ledger ToEntity(Guid userId) => new()
+    {
+        Id = Id,
+        UserId = userId,
+        Name = Name,
+        Icon = Icon,
+        SortOrder = SortOrder,
+        IsDeleted = IsDeleted
+    };
+
+    /// <summary>
+    /// 用对端权威数据覆盖已有实体（不改动 Id/UserId）
+    /// </summary>
+    public void ApplyTo(Ledger ledger)
+    {
+        ledger.Name = Name;
+        ledger.Icon = Icon;
+        ledger.SortOrder = SortOrder;
+        ledger.IsDeleted = IsDeleted;
+    }
+
+    /// <summary>
+    /// 内容是否与实体一致（用于跳过无变化的写入，避免 UpdatedAt 空转递增）
+    /// </summary>
+    public bool ContentEquals(Ledger ledger) =>
+        ledger.Name == Name &&
+        ledger.Icon == Icon &&
+        ledger.SortOrder == SortOrder &&
+        ledger.IsDeleted == IsDeleted;
+}
+
+/// <summary>
+/// 账本同步 - 推送请求体
+/// </summary>
+public class LedgerSyncPushRequest
+{
+    public List<LedgerSyncDto> Ledgers { get; set; } = new();
+}
+
+/// <summary>
+/// 账本同步 - 推送响应体（逐条冲突裁决结果）
+/// </summary>
+public class LedgerSyncPushResponse
+{
+    public List<LedgerSyncItemResult> Results { get; set; } = new();
+}
+
+/// <summary>
+/// 单个账本的推送裁决结果（Action: "pushed" | "pulled" | "skipped"）
+/// </summary>
+public record LedgerSyncItemResult(
+    Guid LedgerId,
+    string Action,
+    LedgerSyncDto? AuthoritativeLedger = null,
+    string? Error = null);
+
+/// <summary>
+/// 账本同步 - 拉取请求体（Since 为空则拉取该用户全部账本，含软删除）
+/// </summary>
+public class LedgerSyncPullRequest
+{
+    public DateTime? Since { get; set; }
+}
+
+/// <summary>
+/// 账本同步 - 拉取响应体
+/// </summary>
+public class LedgerSyncPullResponse
+{
+    public List<LedgerSyncDto> Ledgers { get; set; } = new();
+}

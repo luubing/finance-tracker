@@ -4,14 +4,25 @@
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
+@inject ILedgerService LedgerService
 @inject IJSRuntime JSRuntime
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
+@inject BillEventService BillEventService
 
 <PStackPageBar Title="账单列表"
                CenterTitle
                Flat
-               Color="primary" />
+               Color="primary">
+    <ActionContent>
+        <MButton Icon Disabled="_isRefreshing" OnClick="RefreshData">
+            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
+        <MButton Icon OnClick="ToggleSelectMode">
+            <MIcon Color="white">@(_selectMode ? "mdi-close" : "mdi-checkbox-multiple-marked-outline")</MIcon>
+        </MButton>
+    </ActionContent>
+</PStackPageBar>
 
 <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
     <!-- 筛选区域 -->
@@ -77,6 +88,17 @@
                             </MButtonGroup>
                         </MCol>
                         <MCol Cols="12" Sm="6" Md="3">
+                            <MSelect @bind-Value="_filter.LedgerId"
+                                     Items="_ledgers"
+                                     ItemText="l => l.Name"
+                                     ItemValue="l => (Guid?)l.Id"
+                                     Label="账本"
+                                     Outlined
+                                     Dense
+                                     Clearable
+                                     HideDetails="true" />
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="3">
                             <MButton Color="primary" OnClick="LoadBills">
                                 <MIcon Class="mr-2">mdi-magnify</MIcon>
                                 查询
@@ -87,6 +109,37 @@
             </MCard>
         </MCol>
     </MRow>
+
+    <!-- 批量操作栏（批量选择模式） -->
+    @if (_selectMode)
+    {
+        <MRow Class="my-0">
+            <MCol Cols="12">
+                <MCard Class="mb-2">
+                    <MCardText Class="d-flex align-center pa-2">
+                        <div class="d-flex align-center mr-2" style="cursor: pointer;"
+                             @onclick="() => OnSelectAllChanged(!_selectAll)">
+                            <MIcon Color="primary">
+                                @(_selectAll ? "mdi-checkbox-marked" : "mdi-checkbox-blank-outline")
+                            </MIcon>
+                            <span class="text-caption ml-1">全选</span>
+                        </div>
+                        <span class="text-caption text--secondary">已选 @_selectedBillIds.Count 笔</span>
+                        <MSpacer />
+                        <MButton Small Color="primary" Class="mr-1"
+                                 Disabled="@(!_selectedBillIds.Any())"
+                                 OnClick="ShowAssignDialog">
+                            <MIcon Small Class="mr-1">mdi-book-plus</MIcon>
+                            归属账本
+                        </MButton>
+                        <MButton Small Text Disabled="@(!_selectedBillIds.Any())" OnClick="ClearSelection">
+                            清空
+                        </MButton>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
 
     <!-- 统计卡片 -->
     <MRow Class="my-0">
@@ -150,12 +203,25 @@
                             <MList Class="px-0">
                                 @foreach (var bill in group.Bills)
                                 {
-                                    <MListItem OnClick="() => EditBill(bill.Id)" Class="px-0">
-                                        <MListItemIcon Class="mr-2">
-                                            <MIcon Size="28" Color="@(bill.Type == "Expense" ? "error" : "success")">
-                                                @(bill.Type == "Expense" ? "mdi-minus" : "mdi-plus")
-                                            </MIcon>
-                                        </MListItemIcon>
+                                    <MListItem OnClick="() => OnBillClicked(bill)" Class="px-0">
+                                        @if (_selectMode)
+                                        {
+                                            <div class="mr-2 d-flex align-center" style="cursor: pointer;"
+                                                 @onclick="() => ToggleBillSelection(bill.Id)"
+                                                 @onclick:stopPropagation>
+                                                <MIcon Color="primary">
+                                                    @(_selectedBillIds.Contains(bill.Id) ? "mdi-checkbox-marked" : "mdi-checkbox-blank-outline")
+                                                </MIcon>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <MListItemIcon Class="mr-2">
+                                                <MIcon Size="28" Color="@(bill.Type == "Expense" ? "error" : "success")">
+                                                    @(bill.Type == "Expense" ? "mdi-minus" : "mdi-plus")
+                                                </MIcon>
+                                            </MListItemIcon>
+                                        }
                                         <MListItemContent>
                                             <MListItemTitle>
                                                 <span>@bill.CategoryName</span>
@@ -167,13 +233,28 @@
                                             <MListItemSubtitle>
                                                 <MIcon Small Class="mr-1">@bill.PaymentChannelIcon</MIcon>
                                                 @bill.PaymentChannelName
+                                                @if (!string.IsNullOrEmpty(bill.LedgerName))
+                                                {
+                                                    <MChip XSmall Outlined Class="mx-1">
+                                                        <MIcon XSmall Class="mr-1">@bill.LedgerIcon</MIcon>
+                                                        @bill.LedgerName
+                                                    </MChip>
+                                                }
                                                 <span class="ml-2">@bill.TransactionTime.ToString("HH:mm")</span>
                                             </MListItemSubtitle>
                                         </MListItemContent>
-                                        <MListItemAction>
+                                        <MListItemAction Class="d-flex align-center">
                                             <span class="@(bill.Type == "Expense" ? "error--text" : "success--text") text-h6">
                                                 @(bill.Type == "Expense" ? "-" : "+")¥@bill.Amount.ToString("N2")
                                             </span>
+                                            @if (!_selectMode)
+                                            {
+                                                <span class="ml-1" style="cursor: pointer;"
+                                                      @onclick="() => ShowDeleteConfirm(bill)"
+                                                      @onclick:stopPropagation>
+                                                    <MIcon Small Color="error">mdi-delete</MIcon>
+                                                </span>
+                                            }
                                         </MListItemAction>
                                     </MListItem>
                                 }
@@ -196,6 +277,67 @@
     </MRow>
 </MContainer>
 
+<!-- 删除账单确认对话框 -->
+<MDialog @bind-Value="_showDeleteDialog" MaxWidth="320">
+    <MCard>
+        <MCardTitle Class="text-h6">
+            确认删除
+        </MCardTitle>
+
+        <MCardText>
+            确定要删除这笔账单吗？删除后将从列表中移除。
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CancelDelete">取消</MButton>
+            <MButton Color="error" Loading="_isDeleting" OnClick="ConfirmDelete">删除</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+<!-- 批量归属账本对话框 -->
+<MDialog @bind-Value="_showAssignDialog" MaxWidth="400">
+    <MCard>
+        <MCardTitle Class="text-h6">
+            归属账本
+        </MCardTitle>
+
+        <MCardText>
+            <div class="text-caption text--secondary mb-2">
+                将已选的 @_selectedBillIds.Count 笔账单归属到账本（已归属的账单将被重新归属）
+            </div>
+            @if (_ledgers.Any())
+            {
+                <MSelect @bind-Value="_assignLedgerId"
+                         Items="_ledgers"
+                         ItemText="l => l.Name"
+                         ItemValue="l => (Guid?)l.Id"
+                         Label="目标账本"
+                         Outlined
+                         Dense
+                         Clearable
+                         HideDetails="true" />
+                <div class="text-caption text--secondary mt-2">不选择账本表示移出已选账单的账本归属</div>
+            }
+            else
+            {
+                <div class="text-caption text--secondary">暂无账本，请先到“我的 - 账本管理”中创建</div>
+            }
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CloseAssignDialog">取消</MButton>
+            <MButton Color="primary" Loading="_isAssigning"
+                     Disabled="@(!_ledgers.Any() || _isAssigning)"
+                     OnClick="ConfirmAssign">
+                确定
+            </MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
 @code {
     private bool _isLoading = true;
     private bool _loadingMore;
@@ -203,8 +345,27 @@
     private int _currentPage = 1;
     private const int PageSize = 20;
 
+    // 手动刷新状态
+    private bool _isRefreshing;
+
+    // 批量选择模式
+    private bool _selectMode;
+    private bool _selectAll;
+    private HashSet<Guid> _selectedBillIds = new();
+
+    // 删除账单
+    private bool _showDeleteDialog;
+    private bool _isDeleting;
+    private BillModel? _deletingBill;
+
+    // 批量归属账本
+    private bool _showAssignDialog;
+    private bool _isAssigning;
+    private Guid? _assignLedgerId;
+
     private List<CategoryModel> _categories = new();
     private List<PaymentChannelModel> _paymentChannels = new();
+    private List<LedgerModel> _ledgers = new();
     private List<BillGroup> _groupedBills = new();
 
     private decimal _totalExpense;
@@ -244,6 +405,14 @@
             Name = c.Name,
             Icon = c.Icon
         }).ToList();
+
+        var ledgers = await LedgerService.GetLedgersAsync(_userId);
+        _ledgers = ledgers.Select(l => new LedgerModel
+        {
+            Id = l.Id,
+            Name = l.Name,
+            Icon = l.Icon
+        }).ToList();
     }
 
     private async Task LoadBills()
@@ -251,41 +420,12 @@
         _isLoading = true;
         _currentPage = 1;
         _groupedBills.Clear();
+        _selectedBillIds.Clear();
+        _selectAll = false;
 
         try
         {
-            DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
-                ? DateTime.Parse(_filter.StartDate)
-                : null;
-
-            DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
-                ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
-                : null;
-
-            var bills = await BillService.GetBillsAsync(
-                _userId,
-                startDate,
-                endDate,
-                _filter.CategoryId,
-                _filter.PaymentChannelId,
-                _filter.Type,
-                _currentPage,
-                PageSize);
-
-            var billModels = bills.Select(b => new BillModel
-            {
-                Id = b.Id,
-                Amount = b.Amount,
-                Type = b.Type.ToString(),
-                CategoryId = b.CategoryId,
-                CategoryName = b.Category?.Name ?? "未知分类",
-                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
-                PaymentChannelId = b.PaymentChannelId,
-                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
-                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
-                TransactionTime = b.TransactionTime,
-                Note = b.Note
-            }).ToList();
+            var billModels = await FetchBillsAsync(_currentPage);
 
             GroupBills(billModels);
 
@@ -301,6 +441,73 @@
         }
     }
 
+    /// <summary>
+    /// 手动刷新账单列表（保持当前筛选条件）
+    /// </summary>
+    private async Task RefreshData()
+    {
+        if (_isRefreshing)
+        {
+            return;
+        }
+
+        _isRefreshing = true;
+        StateHasChanged();
+
+        try
+        {
+            await LoadFilterData();
+            await LoadBills();
+        }
+        finally
+        {
+            _isRefreshing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// 按筛选条件获取指定页的账单
+    /// </summary>
+    private async Task<List<BillModel>> FetchBillsAsync(int page)
+    {
+        DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
+            ? DateTime.Parse(_filter.StartDate)
+            : null;
+
+        DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
+            ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
+            : null;
+
+        var bills = await BillService.GetBillsAsync(
+            _userId,
+            startDate,
+            endDate,
+            _filter.CategoryId,
+            _filter.PaymentChannelId,
+            _filter.LedgerId,
+            _filter.Type,
+            page,
+            PageSize);
+
+        return bills.Select(b => new BillModel
+        {
+            Id = b.Id,
+            Amount = b.Amount,
+            Type = b.Type.ToString(),
+            CategoryId = b.CategoryId,
+            CategoryName = b.Category?.Name ?? "未知分类",
+            CategoryIcon = b.Category?.Icon ?? "mdi-tag",
+            PaymentChannelId = b.PaymentChannelId,
+            PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
+            PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
+            LedgerName = b.Ledger?.Name,
+            LedgerIcon = b.Ledger?.Icon ?? "mdi-book",
+            TransactionTime = b.TransactionTime,
+            Note = b.Note
+        }).ToList();
+    }
+
     private async Task LoadMore()
     {
         if (_loadingMore) return;
@@ -310,38 +517,7 @@
 
         try
         {
-            DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
-                ? DateTime.Parse(_filter.StartDate)
-                : null;
-
-            DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
-                ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
-                : null;
-
-            var bills = await BillService.GetBillsAsync(
-                _userId,
-                startDate,
-                endDate,
-                _filter.CategoryId,
-                _filter.PaymentChannelId,
-                _filter.Type,
-                _currentPage,
-                PageSize);
-
-            var billModels = bills.Select(b => new BillModel
-            {
-                Id = b.Id,
-                Amount = b.Amount,
-                Type = b.Type.ToString(),
-                CategoryId = b.CategoryId,
-                CategoryName = b.Category?.Name ?? "未知分类",
-                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
-                PaymentChannelId = b.PaymentChannelId,
-                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
-                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
-                TransactionTime = b.TransactionTime,
-                Note = b.Note
-            }).ToList();
+            var billModels = await FetchBillsAsync(_currentPage);
 
             GroupBills(billModels);
 
@@ -354,6 +530,40 @@
         finally
         {
             _loadingMore = false;
+        }
+    }
+
+    /// <summary>
+    /// 账单变更（删除/归属账本）后重新加载，保持已加载的页数
+    /// </summary>
+    private async Task ReloadBills()
+    {
+        var lastLoadedPage = _currentPage;
+        _isLoading = true;
+        _currentPage = 1;
+        _groupedBills.Clear();
+
+        try
+        {
+            var hasMore = true;
+
+            for (var page = 1; page <= lastLoadedPage && hasMore; page++)
+            {
+                var billModels = await FetchBillsAsync(page);
+                GroupBills(billModels);
+                hasMore = billModels.Count == PageSize;
+                _currentPage = page;
+            }
+
+            _hasMore = hasMore;
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
         }
     }
 
@@ -398,12 +608,197 @@
         NavController.Push($"/add-bill/{billId}");
     }
 
+    /// <summary>
+    /// 点击账单项：批量选择模式下切换选中状态，否则进入编辑页
+    /// </summary>
+    private void OnBillClicked(BillModel bill)
+    {
+        if (_selectMode)
+        {
+            ToggleBillSelection(bill.Id);
+        }
+        else
+        {
+            EditBill(bill.Id);
+        }
+    }
+
+    /// <summary>
+    /// 切换批量选择模式（进入时清空已选，退出时重置全选状态）
+    /// </summary>
+    private void ToggleSelectMode()
+    {
+        _selectMode = !_selectMode;
+        _selectedBillIds.Clear();
+        _selectAll = false;
+    }
+
+    private void ToggleBillSelection(Guid billId)
+    {
+        if (!_selectedBillIds.Remove(billId))
+        {
+            _selectedBillIds.Add(billId);
+        }
+
+        SyncSelectAllState();
+    }
+
+    private void OnSelectAllChanged(bool selectAll)
+    {
+        _selectAll = selectAll;
+
+        if (_selectAll)
+        {
+            foreach (var group in _groupedBills)
+            {
+                foreach (var bill in group.Bills)
+                {
+                    _selectedBillIds.Add(bill.Id);
+                }
+            }
+        }
+        else
+        {
+            _selectedBillIds.Clear();
+        }
+    }
+
+    /// <summary>
+    /// 根据已选数量同步全选复选框状态
+    /// </summary>
+    private void SyncSelectAllState()
+    {
+        var totalCount = _groupedBills.Sum(g => g.Bills.Count);
+        _selectAll = totalCount > 0 && _selectedBillIds.Count >= totalCount;
+    }
+
+    private void ClearSelection()
+    {
+        _selectedBillIds.Clear();
+        _selectAll = false;
+    }
+
+    /// <summary>
+    /// 显示删除账单确认对话框
+    /// </summary>
+    private void ShowDeleteConfirm(BillModel bill)
+    {
+        _deletingBill = bill;
+        _showDeleteDialog = true;
+    }
+
+    private void CancelDelete()
+    {
+        _showDeleteDialog = false;
+        _deletingBill = null;
+    }
+
+    /// <summary>
+    /// 确认删除账单（软删除，并通知其他页面刷新数据）
+    /// </summary>
+    private async Task ConfirmDelete()
+    {
+        if (_deletingBill == null || _isDeleting)
+        {
+            return;
+        }
+
+        _isDeleting = true;
+
+        try
+        {
+            var success = await BillService.DeleteBillAsync(_deletingBill.Id, _userId);
+
+            if (success)
+            {
+                await PopupService.EnqueueSnackbarAsync("账单已删除", AlertTypes.Success);
+                BillEventService.NotifyBillChanged();
+                _showDeleteDialog = false;
+                await ReloadBills();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("账单不存在或已删除", AlertTypes.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isDeleting = false;
+            _deletingBill = null;
+        }
+    }
+
+    private void ShowAssignDialog()
+    {
+        if (!_selectedBillIds.Any())
+        {
+            return;
+        }
+
+        _assignLedgerId = null;
+        _showAssignDialog = true;
+    }
+
+    private void CloseAssignDialog()
+    {
+        _showAssignDialog = false;
+        _assignLedgerId = null;
+    }
+
+    /// <summary>
+    /// 确认批量归属账本（清空目标账本表示移出账本归属），并通知其他页面刷新数据
+    /// </summary>
+    private async Task ConfirmAssign()
+    {
+        if (!_selectedBillIds.Any() || _isAssigning)
+        {
+            return;
+        }
+
+        _isAssigning = true;
+
+        try
+        {
+            var count = await BillService.AssignBillsToLedgerAsync(
+                _selectedBillIds.ToList(),
+                _userId,
+                _assignLedgerId);
+
+            await PopupService.EnqueueSnackbarAsync(
+                _assignLedgerId.HasValue
+                    ? $"已将 {count} 笔账单归属到账本"
+                    : $"已将 {count} 笔账单移出账本",
+                AlertTypes.Success);
+
+            BillEventService.NotifyBillChanged();
+
+            _showAssignDialog = false;
+            _selectedBillIds.Clear();
+            _selectAll = false;
+
+            await ReloadBills();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"归属账本失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isAssigning = false;
+        }
+    }
+
     private class FilterModel
     {
         public string? StartDate { get; set; }
         public string? EndDate { get; set; }
         public Guid? CategoryId { get; set; }
         public Guid? PaymentChannelId { get; set; }
+        public Guid? LedgerId { get; set; }
         public BillType? Type { get; set; }
     }
 
@@ -418,6 +813,8 @@
         public Guid PaymentChannelId { get; set; }
         public string PaymentChannelName { get; set; } = string.Empty;
         public string PaymentChannelIcon { get; set; } = string.Empty;
+        public string? LedgerName { get; set; }
+        public string? LedgerIcon { get; set; }
         public DateTime TransactionTime { get; set; }
         public string? Note { get; set; }
     }
@@ -439,6 +836,13 @@
     }
 
     private class PaymentChannelModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+    }
+
+    private class LedgerModel
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;

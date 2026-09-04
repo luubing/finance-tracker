@@ -12,6 +12,7 @@ public interface IApplicationDbContext
     DbSet<Bill> Bills { get; }
     DbSet<Category> Categories { get; }
     DbSet<PaymentChannel> PaymentChannels { get; }
+    DbSet<Ledger> Ledgers { get; }
 
     DbSet<PendingBill> PendingBills { get; }
 

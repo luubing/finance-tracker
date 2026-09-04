@@ -75,6 +75,7 @@ public static class MauiProgram
         builder.Services.AddScoped<IPresetDataService, PresetDataService>();
         builder.Services.AddScoped<ICategoryService, CategoryService>();
         builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
+        builder.Services.AddScoped<ILedgerService, LedgerService>();
         builder.Services.AddScoped<IBillService, BillService>();
         builder.Services.AddScoped<IStatisticsService, StatisticsService>();
         builder.Services.AddScoped<ISyncService, SyncService>();
@@ -96,10 +97,23 @@ public static class MauiProgram
         builder.Services.AddSingleton<IPendingBillService, NoOpPendingBillService>();
 #endif
 
+        // 语音记账：App 端原生语音识别（Android SpeechRecognizer / iOS SFSpeechRecognizer），其他平台空实现
+#if ANDROID
+        builder.Services.AddSingleton<ISpeechService, SpeechService>();
+#elif IOS
+        builder.Services.AddSingleton<ISpeechService, FinanceTracker.App.Platforms.iOS.Services.SpeechService>();
+#else
+        builder.Services.AddSingleton<ISpeechService, NoOpSpeechService>();
+#endif
+
         // 注册应用服务
         builder.Services.AddScoped<AuthenticationService>();
         builder.Services.AddScoped<BillEventService>();
         builder.Services.AddScoped<HttpService>();
+        // 语音记账：文本解析（中文口语 → 账单草稿）+ 语音录入桥接服务
+        // （App 端 SpeechService 注册进 BillVoiceInputService 后走原生识别，见 ISpeechService 注册）
+        builder.Services.AddScoped<IBillVoiceParser, BillVoiceParser>();
+        builder.Services.AddScoped<BillVoiceInputService>();
         builder.Services.AddScoped<ICloudSyncClient>(sp =>
             new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), CloudApiBaseUrl));
         builder.Services.AddSingleton<BackgroundSyncService>();

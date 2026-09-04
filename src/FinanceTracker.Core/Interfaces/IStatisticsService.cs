@@ -13,8 +13,9 @@ public interface IStatisticsService
     /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>月度统计数据</returns>
-    Task<MonthlyStatistics> GetMonthlyStatisticsAsync(Guid userId, int year, int month);
+    Task<MonthlyStatistics> GetMonthlyStatisticsAsync(Guid userId, int year, int month, Guid? ledgerId = null);
 
     /// <summary>
     /// 获取分类统计数据
@@ -23,8 +24,9 @@ public interface IStatisticsService
     /// <param name="year">年份</param>
     /// <param name="month">月份</param>
     /// <param name="type">账单类型</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>分类统计数据</returns>
-    Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type);
+    Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type, Guid? ledgerId = null);
 
     /// <summary>
     /// 获取趋势数据
@@ -33,16 +35,18 @@ public interface IStatisticsService
     /// <param name="startDate">开始日期</param>
     /// <param name="endDate">结束日期</param>
     /// <param name="dimension">维度（day/week/month）</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>趋势数据</returns>
-    Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, string dimension);
+    Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, string dimension, Guid? ledgerId = null);
 
     /// <summary>
     /// 获取年度统计数据
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>年度统计数据</returns>
-    Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year);
+    Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year, Guid? ledgerId = null);
 
     /// <summary>
     /// 获取同比数据
@@ -50,8 +54,9 @@ public interface IStatisticsService
     /// <param name="userId">用户ID</param>
     /// <param name="year">当前年份</param>
     /// <param name="month">当前月份</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>同比数据</returns>
-    Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month);
+    Task<YearOverYearData> GetYearOverYearDataAsync(Guid userId, int year, int month, Guid? ledgerId = null);
 }
 
 /// <summary>

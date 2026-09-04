@@ -2,6 +2,7 @@
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
 @inject IStatisticsService StatisticsService
+@inject ILedgerService LedgerService
 @inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
 
@@ -39,6 +40,21 @@
                                 <MButton Value="@("week")" OnClick="@(() => ChangeDimension("week"))">按周</MButton>
                                 <MButton Value="@("month")" OnClick="@(() => ChangeDimension("month"))">按月</MButton>
                             </MButtonGroup>
+                        </MCol>
+                        <MCol Cols="12" Sm="6" Md="4">
+                            @if (_ledgers.Any())
+                            {
+                                <MSelect Value="_selectedLedgerId"
+                                         ValueChanged="@((Guid? v) => OnLedgerChanged(v))"
+                                         Items="_ledgers"
+                                         ItemText="l => l.Name"
+                                         ItemValue="l => (Guid?)l.Id"
+                                         Label="账本（全部账本）"
+                                         Outlined
+                                         Dense
+                                         Clearable
+                                         HideDetails="true" />
+                            }
                         </MCol>
                     </MRow>
                 </MCardText>
@@ -203,6 +219,10 @@
 
     private Guid _userId;
 
+    // 账本筛选
+    private Guid? _selectedLedgerId;
+    private List<LedgerModel> _ledgers = new();
+
     private List<(string Text, string Value)> _timeRanges = new()
     {
         ("最近7天", "7days"),
@@ -227,6 +247,38 @@
             _userId = userId;
         }
 
+        await LoadLedgersAsync();
+        await LoadTrendData();
+    }
+
+    /// <summary>
+    /// 加载用户的账本列表（用于账本筛选）
+    /// </summary>
+    private async Task LoadLedgersAsync()
+    {
+        try
+        {
+            var ledgers = await LedgerService.GetLedgersAsync(_userId);
+            _ledgers = ledgers.Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon
+            }).ToList();
+        }
+        catch
+        {
+            // 账本加载失败不影响统计展示
+            _ledgers = new List<LedgerModel>();
+        }
+    }
+
+    /// <summary>
+    /// 账本筛选变更后重新加载趋势数据
+    /// </summary>
+    private async Task OnLedgerChanged(Guid? ledgerId)
+    {
+        _selectedLedgerId = ledgerId;
         await LoadTrendData();
     }
 
@@ -238,7 +290,7 @@
         {
             var (startDate, endDate) = GetDateRange(_selectedRange);
 
-            var trendData = await StatisticsService.GetTrendDataAsync(_userId, startDate, endDate, _selectedDimension);
+            var trendData = await StatisticsService.GetTrendDataAsync(_userId, startDate, endDate, _selectedDimension, _selectedLedgerId);
 
             _trendData = trendData.Select(t => new TrendDataModel
             {
@@ -331,5 +383,12 @@
         public decimal Expense { get; set; }
         public decimal Income { get; set; }
         public decimal NetIncome { get; set; }
+    }
+
+    private class LedgerModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
     }
 }

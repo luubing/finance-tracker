@@ -16,6 +16,7 @@ public class BillSyncDto
     public BillType Type { get; set; }
     public Guid CategoryId { get; set; }
     public Guid PaymentChannelId { get; set; }
+    public Guid? LedgerId { get; set; }
     public DateTime TransactionTime { get; set; }
     public string? Note { get; set; }
     public BillSource Source { get; set; }
@@ -24,13 +25,15 @@ public class BillSyncDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    // ---- 分类/支付渠道附带信息（用于对端"缺则补建"，避免账单外键违例） ----
+    // ---- 分类/支付渠道/账本附带信息（用于对端"缺则补建"，避免账单外键违例） ----
     public string? CategoryName { get; set; }
     public string? CategoryIcon { get; set; }
     public bool CategoryIsPreset { get; set; }
     public string? PaymentChannelName { get; set; }
     public string? PaymentChannelIcon { get; set; }
     public bool PaymentChannelIsPreset { get; set; }
+    public string? LedgerName { get; set; }
+    public string? LedgerIcon { get; set; }
 
     /// <summary>
     /// 由实体转换为传输对象（需已 Include Category/PaymentChannel 导航属性，否则附带信息为空）
@@ -43,6 +46,7 @@ public class BillSyncDto
         Type = bill.Type,
         CategoryId = bill.CategoryId,
         PaymentChannelId = bill.PaymentChannelId,
+        LedgerId = bill.LedgerId,
         TransactionTime = bill.TransactionTime,
         Note = bill.Note,
         Source = bill.Source,
@@ -55,7 +59,9 @@ public class BillSyncDto
         CategoryIsPreset = bill.Category?.IsPreset ?? false,
         PaymentChannelName = bill.PaymentChannel?.Name,
         PaymentChannelIcon = bill.PaymentChannel?.Icon,
-        PaymentChannelIsPreset = bill.PaymentChannel?.IsPreset ?? false
+        PaymentChannelIsPreset = bill.PaymentChannel?.IsPreset ?? false,
+        LedgerName = bill.Ledger?.Name,
+        LedgerIcon = bill.Ledger?.Icon
     };
 
     /// <summary>
@@ -69,6 +75,7 @@ public class BillSyncDto
         Type = Type,
         CategoryId = CategoryId,
         PaymentChannelId = PaymentChannelId,
+        LedgerId = LedgerId,
         TransactionTime = ToUtc(TransactionTime),
         Note = Note,
         Source = Source,
@@ -87,6 +94,7 @@ public class BillSyncDto
         bill.Type = Type;
         bill.CategoryId = CategoryId;
         bill.PaymentChannelId = PaymentChannelId;
+        bill.LedgerId = LedgerId;
 
         bill.TransactionTime = ToUtc(TransactionTime);
 
@@ -160,6 +168,38 @@ public class BillSyncDto
             Name = string.IsNullOrWhiteSpace(PaymentChannelName) ? "未命名渠道" : PaymentChannelName!,
             Icon = string.IsNullOrWhiteSpace(PaymentChannelIcon) ? "mdi-credit-card" : PaymentChannelIcon!,
             IsPreset = PaymentChannelIsPreset,
+            SortOrder = 99
+        });
+        await context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// 确保目标库中存在账单归属的账本；不存在则按 DTO 携带的信息补建（避免外键违例）。
+    /// LedgerId 为空表示未归属账本，直接返回。
+    /// 立即 SaveChanges：保证后续 AnyAsync 能查到，避免同批重复 Add 相同主键。
+    /// </summary>
+    public async Task EnsureLedgerExistsAsync(IApplicationDbContext context, Guid userId)
+    {
+        if (LedgerId == null || LedgerId.Value == Guid.Empty)
+        {
+            return;
+        }
+
+        // IgnoreQueryFilters：只要行存在（含软删除）即满足外键，避免重复 Add 相同主键
+        var exists = await context.Ledgers
+            .IgnoreQueryFilters()
+            .AnyAsync(l => l.Id == LedgerId.Value);
+        if (exists)
+        {
+            return;
+        }
+
+        context.Ledgers.Add(new Ledger
+        {
+            Id = LedgerId.Value,
+            UserId = userId,
+            Name = string.IsNullOrWhiteSpace(LedgerName) ? "未命名账本" : LedgerName!,
+            Icon = string.IsNullOrWhiteSpace(LedgerIcon) ? "mdi-book" : LedgerIcon!,
             SortOrder = 99
         });
         await context.SaveChangesAsync();
