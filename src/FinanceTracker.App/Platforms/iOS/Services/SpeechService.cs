@@ -22,8 +22,16 @@ public class SpeechService : ISpeechService
     {
         get
         {
-            var recognizer = SFSpeechRecognizer.FromLocale(new NSLocale(SpeechLocale));
-            return recognizer?.Available == true;
+            try
+            {
+                var locale = new NSLocale(SpeechLocale);
+                var recognizer = new SFSpeechRecognizer(locale);
+                return recognizer?.Available == true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
@@ -31,13 +39,15 @@ public class SpeechService : ISpeechService
     {
         try
         {
-            var micGranted = await AVAudioSession.SharedInstance().RequestRecordPermissionAsync();
+            // 请求麦克风权限
+            var micGranted = await RequestMicrophonePermissionAsync();
             if (!micGranted)
             {
                 return false;
             }
 
-            var speechStatus = await SFSpeechRecognizer.RequestAuthorizationAsync();
+            // 请求语音识别权限
+            var speechStatus = await RequestSpeechAuthorizationAsync();
             return speechStatus == SFSpeechRecognizerAuthorizationStatus.Authorized;
         }
         catch (Exception ex)
@@ -47,9 +57,30 @@ public class SpeechService : ISpeechService
         }
     }
 
+    private Task<bool> RequestMicrophonePermissionAsync()
+    {
+        var tcs = new TaskCompletionSource<bool>();
+        AVAudioSession.SharedInstance().RequestRecordPermission(granted =>
+        {
+            tcs.TrySetResult(granted);
+        });
+        return tcs.Task;
+    }
+
+    private Task<SFSpeechRecognizerAuthorizationStatus> RequestSpeechAuthorizationAsync()
+    {
+        var tcs = new TaskCompletionSource<SFSpeechRecognizerAuthorizationStatus>();
+        SFSpeechRecognizer.RequestAuthorization(status =>
+        {
+            tcs.TrySetResult(status);
+        });
+        return tcs.Task;
+    }
+
     public async Task<string?> RecognizeOnceAsync(CancellationToken cancellationToken = default)
     {
-        var recognizer = SFSpeechRecognizer.FromLocale(new NSLocale(SpeechLocale));
+        var locale = new NSLocale(SpeechLocale);
+        var recognizer = new SFSpeechRecognizer(locale);
         if (recognizer is null || !recognizer.Available)
         {
             return null;
