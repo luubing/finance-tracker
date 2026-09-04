@@ -59,6 +59,13 @@ public class SpeechService : ISpeechService
 
     private Task<bool> RequestMicrophonePermissionAsync()
     {
+        // iOS 17+ 上 AVAudioSession.RequestRecordPermission 已过时，改用 AVAudioApplication；
+        // 旧版本回退到 AVAudioSession 的回调 API。
+        if (OperatingSystem.IsIOSVersionAtLeast(17))
+        {
+            return AVAudioApplication.RequestRecordPermissionAsync();
+        }
+
         var tcs = new TaskCompletionSource<bool>();
         AVAudioSession.SharedInstance().RequestRecordPermission(granted =>
         {
@@ -95,8 +102,8 @@ public class SpeechService : ISpeechService
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var recognitionTask = recognizer.GetRecognitionTask(request, (result, error) =>
         {
-            // 最终结果：Finished 标记为 true 时返回完整转写文本
-            if (result?.Finished == true)
+            // 最终结果：Final 标记为 true 时返回完整转写文本
+            if (result?.Final == true)
             {
                 var best = result.BestTranscription.FormattedString;
                 tcs.TrySetResult(string.IsNullOrWhiteSpace(best) ? null : best);
