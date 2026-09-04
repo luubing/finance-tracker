@@ -122,10 +122,16 @@ jobs:
         env:
           CODE_SIGN_KEYSTORE_PASSWORD: ""
         run: |
+          # -p:PublishAot=false + -p:MtouchInterpreter=all: iOS 发布包默认 Mono 全 AOT 且不启用解释器，
+          #   运行时 IsDynamicCodeSupported=false，EF Core 首次访问实体属性时抛出
+          #   "Model building is not supported when publishing with NativeAOT. Use a compiled model."
+          #   启用解释器恢复动态代码支持（与 csproj 中 iOS 目标设置一致，全局属性为双保险）。
           dotnet publish ${{ env.PROJECT_PATH }} \
             -f net10.0-ios \
             -c Release \
             -o ${{ env.OUTPUT_PATH }} \
+            -p:PublishAot=false \
+            -p:MtouchInterpreter=all \
             -p:ArchiveOnBuild=true \
             -p:RuntimeIdentifier=ios-arm64 \
             -p:CodesignKey="Apple Distribution" \

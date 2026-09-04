@@ -139,8 +139,11 @@ public static class MauiProgram
         }
         catch (Exception ex)
         {
-            // 记录错误但不阻止应用启动
-            System.Diagnostics.Debug.WriteLine($"数据库初始化失败: {ex.Message}");
+            // 记录错误但不阻止应用启动。
+            // 注意：必须输出完整异常（含类型与调用栈），之前只输出 ex.Message，导致
+            // iOS 上的 EF Core 初始化错误（NativeAOT 模型构建失败）被掩盖，
+            // 直到用户登录时才以"登录失败"的形式暴露出来。
+            System.Diagnostics.Debug.WriteLine($"数据库初始化失败: {ex}");
         }
     }
 }

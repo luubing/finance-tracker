@@ -118,3 +118,10 @@ build/config.env
 build/*.keystore
 build/*.jks
 build/output/
+
+## 证书和私钥（敏感文件）
+build/certificates/*.key
+build/certificates/*.p12
+build/certificates/*.pem
+build/certificates/*.cer
+build/certificates/*.mobileprovision

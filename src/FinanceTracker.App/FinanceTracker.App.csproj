@@ -26,6 +26,17 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">28.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
 
+	<!-- iOS 发布包默认运行 Mono 全 AOT 且不启用解释器（PublishAot 并未默认为 true），
+	     此时运行时 IsDynamicCodeSupported=false，EF Core 会在首次访问实体属性 getter/setter 时抛出
+	     "Model building is not supported when publishing with NativeAOT. Use a compiled model."
+	     （该异常的真实判定条件是 RuntimeFeature.IsDynamicCodeSupported，错误消息有误导性）。
+	     必须启用 Mono 解释器以恢复动态代码支持，EF 运行时模型构建与 LINQ 查询才能工作。
+	     说明：EF 编译模型方案不可行——它不支持本项目用于软删除的全局查询过滤器（HasQueryFilter）。 -->
+	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+		<PublishAot>false</PublishAot>
+		<MtouchInterpreter>all</MtouchInterpreter>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<!-- Splash Screen -->
 		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
