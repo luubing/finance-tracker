@@ -32,17 +32,37 @@
                     <div class="voice-bar d-flex align-center mb-4">
                         <MIcon Class="mr-2" Color="@(_voiceBrowserSupported ? "primary" : "grey")">mdi-microphone</MIcon>
                         <div class="flex-grow-1 text-body-2 text--secondary">
-                            @(_voiceStatus ?? "点击麦克风说出账单，例如：昨天午饭花了三十五块，微信支付")
+                            @( _voiceStatus ?? (VoiceInputService.SupportsHoldToTalk
+                                ? "按住麦克风说出账单，例如：昨天午饭花了三十五块，微信支付"
+                                : "点击麦克风说出账单，例如：昨天午饭花了三十五块，微信支付") )
                         </div>
-                        <MButton Color="primary"
-                                 Small
-                                 Dark
-                                 Class="ml-2"
-                                 Loading="@(_voicePhase == BillVoiceInputPhase.Listening)"
-                                 Disabled="@(!_voiceBrowserSupported || _voicePhase != BillVoiceInputPhase.Idle)"
-                                 OnClick="StartVoiceInput">
-                            <MIcon Small>mdi-microphone</MIcon>
-                        </MButton>
+                        @if (VoiceInputService.SupportsHoldToTalk)
+                        {
+                            <!-- 原生流式识别：按住录音、松开结束 -->
+                            <div class="voice-hold-btn @( _voicePhase == BillVoiceInputPhase.Listening ? "voice-hold-btn--active" : null )"
+                                 role="button"
+                                 aria-label="按住说话"
+                                 @onpointerdown="OnMicPointerDown"
+                                 @onpointerup="OnMicPointerUp"
+                                 @onpointerleave="OnMicPointerLeave"
+                                 @onpointercancel="OnMicPointerCancel">
+                                <MIcon Small Color="white">mdi-microphone</MIcon>
+                                <span class="ml-1">@( _voicePhase == BillVoiceInputPhase.Listening ? "松开 结束" : "按住 说话" )</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- 浏览器 Web Speech：点击开始，自动断句结束 -->
+                            <MButton Color="primary"
+                                     Small
+                                     Dark
+                                     Class="ml-2"
+                                     Loading="@(_voicePhase == BillVoiceInputPhase.Listening)"
+                                     Disabled="@(!_voiceBrowserSupported || _voicePhase != BillVoiceInputPhase.Idle)"
+                                     OnClick="StartVoiceInput">
+                                <MIcon Small>mdi-microphone</MIcon>
+                            </MButton>
+                        }
                     </div>
                     @if (_voiceMatchHint != null)
                     {
@@ -230,6 +250,27 @@
         padding: 10px 12px;
     }
 
+    .voice-hold-btn {
+        display: inline-flex;
+        align-items: center;
+        background-color: #1976D2;
+        color: white;
+        border-radius: 20px;
+        padding: 6px 14px;
+        font-size: 13px;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        touch-action: none;
+        cursor: pointer;
+        transition: background-color 0.15s ease, transform 0.1s ease;
+    }
+
+    .voice-hold-btn--active {
+        background-color: #EF5350;
+        transform: scale(1.05);
+    }
+
     .voice-matched-hint {
         font-size: 12px;
         color: #4CAF50;
@@ -268,6 +309,21 @@
 
     /// <summary>语音识别取消令牌来源（识别超时控制）</summary>
     private CancellationTokenSource? _voiceCts;
+
+    /// <summary>按住录音最长时长（秒）：超时自动结束，防止一直占用麦克风</summary>
+    private const int VoiceMaxHoldSeconds = 60;
+
+    /// <summary>按住录音的取消令牌（最长按住时长控制）</summary>
+    private CancellationTokenSource? _voiceHoldCts;
+
+    /// <summary>按住录音结束通知：true=松开按钮结束，false=滑出取消</summary>
+    private TaskCompletionSource<bool>? _voiceReleaseTcs;
+
+    /// <summary>当前按住录音的指针 Id（防止多指/重复触发）</summary>
+    private long? _micPointerId;
+
+    /// <summary>按住录音过程中收到的最新部分识别文本</summary>
+    private string? _voicePartial;
 
     /// <summary>语音能力初始化标记（OnAfterRenderAsync 只执行一次）</summary>
     private bool _voiceInitialized;
@@ -350,6 +406,7 @@
         {
             VoiceInputService.VoiceTextReceived += OnVoiceTextReceived;
             VoiceInputService.ErrorOccurred += OnVoiceErrorOccurred;
+            VoiceInputService.PartialTextReceived += OnVoicePartialReceived;
         }
         else
         {
@@ -543,6 +600,128 @@
         }
     }
 
+    /// <summary>按住麦克风：开始录音（原生流式识别，实时显示部分识别文本）</summary>
+    private async Task OnMicPointerDown(PointerEventArgs e)
+    {
+        if (_voicePhase != BillVoiceInputPhase.Idle || _micPointerId is not null)
+        {
+            return;
+        }
+
+        _micPointerId = e.PointerId;
+        _voicePhase = BillVoiceInputPhase.Listening;
+        _voicePartial = null;
+        _voiceStatus = "正在聆听，请说出账单内容…";
+        _voiceMatchHint = null;
+        _voiceReleaseTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        StateHasChanged();
+
+        // 后台执行"开始录音 → 等待松开 → 结束并解析"，期间 UI 保持监听态
+        _voiceHoldCts = new CancellationTokenSource(TimeSpan.FromSeconds(VoiceMaxHoldSeconds));
+        _ = ProcessHoldRecordingAsync(_voiceHoldCts.Token);
+        await Task.CompletedTask;
+    }
+
+    /// <summary>按住录音全流程：请求权限 → 开始录音 → 等待松开/超时 → 结束并解析（或取消）</summary>
+    private async Task ProcessHoldRecordingAsync(CancellationToken token)
+    {
+        try
+        {
+            var started = await VoiceInputService.StartHoldRecordingAsync();
+            if (!started)
+            {
+                // 失败原因已通过 ErrorOccurred 提示，恢复空闲状态
+                await ResetVoiceToIdleAsync();
+                return;
+            }
+
+            // 权限弹窗期间用户可能已经松开：此时直接取消，避免误识别出错误提示
+            if (_voiceReleaseTcs?.Task.IsCompleted == true)
+            {
+                await VoiceInputService.CancelHoldRecordingAsync();
+                await ResetVoiceToIdleAsync();
+                return;
+            }
+
+            var release = true;
+            try
+            {
+                // 等待松开按钮；按住超过上限时自动结束（识别器会产出已有内容）
+                release = await (_voiceReleaseTcs?.Task ?? Task.FromResult(true)).WaitAsync(token);
+            }
+            catch (Exception)
+            {
+                // 超时/取消：按松开处理
+                release = true;
+            }
+
+            if (!release)
+            {
+                // 手指滑出：取消录音并丢弃结果
+                _voicePartial = null;
+                await VoiceInputService.CancelHoldRecordingAsync();
+                await ResetVoiceToIdleAsync();
+                return;
+            }
+
+            _voiceStatus = "松开了，正在识别…";
+            await InvokeAsync(StateHasChanged);
+
+            // 结束录音并等待最终结果（服务层内部已有 10 秒兜底超时）
+            await VoiceInputService.StopHoldRecordingAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"按住录音流程异常: {ex.Message}");
+            await VoiceInputService.CancelHoldRecordingAsync();
+            await ResetVoiceToIdleAsync();
+        }
+        finally
+        {
+            _micPointerId = null;
+            var cts = _voiceHoldCts;
+            _voiceHoldCts = null;
+            cts?.Dispose();
+        }
+    }
+
+    /// <summary>松开麦克风：结束录音并解析</summary>
+    private void OnMicPointerUp(PointerEventArgs e)
+    {
+        if (_micPointerId is null || e.PointerId != _micPointerId)
+        {
+            return;
+        }
+        _micPointerId = null;
+        _voiceReleaseTcs?.TrySetResult(true);
+    }
+
+    /// <summary>手指滑出麦克风：取消本次录音并丢弃结果</summary>
+    private void OnMicPointerLeave(PointerEventArgs e)
+    {
+        if (_micPointerId is null || e.PointerId != _micPointerId)
+        {
+            return;
+        }
+        _micPointerId = null;
+        _voiceReleaseTcs?.TrySetResult(false);
+    }
+
+    /// <summary>指针取消（来电、手势冲突等系统打断）：取消本次录音</summary>
+    private void OnMicPointerCancel(PointerEventArgs e) => OnMicPointerLeave(e);
+
+    /// <summary>恢复语音栏空闲状态（仅当仍处于监听/识别中的残留状态时生效）</summary>
+    private async Task ResetVoiceToIdleAsync()
+    {
+        _voicePartial = null;
+        _voiceStatus = null;
+        if (_voicePhase != BillVoiceInputPhase.Idle)
+        {
+            _voicePhase = BillVoiceInputPhase.Idle;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
     /// <summary>语音识别完成：解析文本并预填表单（不直接保存，由用户确认）</summary>
     private async Task OnVoiceTextReceived(string text)
     {
@@ -588,9 +767,23 @@
         }
     }
 
+    /// <summary>按住录音过程中实时显示部分识别文本</summary>
+    private async Task OnVoicePartialReceived(string text)
+    {
+        if (_voicePhase != BillVoiceInputPhase.Listening)
+        {
+            return;
+        }
+
+        _voicePartial = text;
+        _voiceStatus = $"听到：{text}…";
+        await InvokeAsync(StateHasChanged);
+    }
+
     /// <summary>语音识别失败：恢复状态并提示</summary>
     private async Task OnVoiceErrorOccurred(string message)
     {
+        _voicePartial = null;
         _voicePhase = BillVoiceInputPhase.Idle;
         _voiceStatus = null;
         await InvokeAsync(StateHasChanged);
@@ -652,7 +845,9 @@
     {
         VoiceInputService.VoiceTextReceived -= OnVoiceTextReceived;
         VoiceInputService.ErrorOccurred -= OnVoiceErrorOccurred;
+        VoiceInputService.PartialTextReceived -= OnVoicePartialReceived;
         _voiceCts?.Dispose();
+        _voiceHoldCts?.Dispose();
     }
 
     private class BillModel

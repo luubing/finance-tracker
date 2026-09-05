@@ -29,6 +29,9 @@ public sealed class BillVoiceInputService : IAsyncDisposable
     /// <summary>语音识别出错时触发（含用户可读的错误信息）</summary>
     public event Func<string, Task>? ErrorOccurred;
 
+    /// <summary>按住录音过程中收到部分识别文本时触发（实时上屏）</summary>
+    public event Func<string, Task>? PartialTextReceived;
+
     /// <summary>
     /// 页面初始化时调用：注册宿主的原生语音服务。
     /// 传入 null（或 <see cref="NoOpSpeechService"/>）表示无原生能力，识别走浏览器 Web Speech API。
@@ -118,6 +121,119 @@ public sealed class BillVoiceInputService : IAsyncDisposable
 
     /// <summary>识别中标记（防止并发识别）</summary>
     private bool _isRecognizing;
+
+    /// <summary>原生语音服务是否支持"按住录音、松开结束"模式</summary>
+    public bool SupportsHoldToTalk => _voiceService is { SupportsHoldToTalk: true };
+
+    /// <summary>
+    /// 按住录音：开始录音（内部先请求权限）。返回 false 表示未开始（原因已通过 <see cref="ErrorOccurred"/> 通知）。
+    /// </summary>
+    public async Task<bool> StartHoldRecordingAsync()
+    {
+        if (_isRecognizing)
+        {
+            return false;
+        }
+
+        var nativeService = _voiceService;
+        if (nativeService is null || !nativeService.SupportsHoldToTalk)
+        {
+            return false;
+        }
+
+        _isRecognizing = true;
+        try
+        {
+            if (!await nativeService.RequestPermissionAsync())
+            {
+                await NotifyErrorAsync("未获得麦克风权限，请到系统设置中开启后重试");
+                return false;
+            }
+
+            nativeService.PartialResultReceived -= OnNativePartialResult;
+            nativeService.PartialResultReceived += OnNativePartialResult;
+
+            var started = await nativeService.StartRecordingAsync();
+            if (!started)
+            {
+                nativeService.PartialResultReceived -= OnNativePartialResult;
+                await NotifyErrorAsync("无法启动录音，请检查设备后重试");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            nativeService.PartialResultReceived -= OnNativePartialResult;
+            _isRecognizing = false;
+            await NotifyErrorAsync($"无法启动录音：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 按住录音：结束录音并等待最终识别结果，结果通过 <see cref="VoiceTextReceived"/> / <see cref="ErrorOccurred"/> 返回。
+    /// </summary>
+    public async Task StopHoldRecordingAsync(CancellationToken cancellationToken = default)
+    {
+        var nativeService = _voiceService;
+        if (nativeService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var text = await nativeService.StopRecordingAsync(cancellationToken);
+            await PublishResultAsync(text);
+        }
+        catch (OperationCanceledException)
+        {
+            // 等待最终结果被取消，按未识别到内容处理
+            await PublishResultAsync(null);
+        }
+        catch (Exception ex)
+        {
+            await NotifyErrorAsync($"语音识别失败：{ex.Message}");
+        }
+        finally
+        {
+            nativeService.PartialResultReceived -= OnNativePartialResult;
+            _isRecognizing = false;
+        }
+    }
+
+    /// <summary>按住录音：取消本次录音并丢弃结果（手指滑出按钮等取消手势），幂等</summary>
+    public async Task CancelHoldRecordingAsync()
+    {
+        var nativeService = _voiceService;
+        if (nativeService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await nativeService.CancelRecordingAsync();
+        }
+        catch
+        {
+            // 取消失败不影响页面状态恢复
+        }
+        finally
+        {
+            nativeService.PartialResultReceived -= OnNativePartialResult;
+            _isRecognizing = false;
+        }
+    }
+
+    /// <summary>原生服务部分识别文本 → 页面事件转发</summary>
+    private void OnNativePartialResult(string text)
+    {
+        var handler = PartialTextReceived;
+        _ = handler is null ? Task.CompletedTask : handler(text);
+    }
 
     /// <summary>发布识别结果（null/空白视为未识别到内容）</summary>
     private async Task PublishResultAsync(string? text)
