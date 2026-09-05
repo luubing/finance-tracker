@@ -10,6 +10,7 @@
     <title>记账本</title>
     <base href="~/" />
     <link href="_content/Masa.Blazor/css/masa-blazor.min.css" rel="stylesheet" />
+    <link href="_content/FinanceTracker.Web/css/app.css" rel="stylesheet" />
     <style>
         /* Blazor 错误提示条：默认隐藏，仅在运行时发生未处理异常时由 blazor.server.js 显示 */
         #blazor-error-ui {
@@ -51,5 +52,11 @@
 
     <script src="_framework/blazor.server.js"></script>
     <script src="_content/Masa.Blazor/js/masa-blazor.js"></script>
+    <script>
+        // 阻止长按/右键上下文菜单，防止触发系统级文字复制入口
+        document.addEventListener('contextmenu', function (e) {
+            e.preventDefault();
+        });
+    </script>
 </body>
 </html>

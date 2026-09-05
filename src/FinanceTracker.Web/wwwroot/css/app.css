@@ -1,0 +1,27 @@
+/* ============================================
+   全局样式（Web.Server 与 MAUI App 共用）
+   ============================================ */
+
+/* 禁止长按选择/复制文字：
+   - user-select: none 阻止长按选中文本弹出"复制"菜单
+   - -webkit-touch-callout: none 阻止 iOS 长按弹出系统菜单（拷贝/分享等） */
+html,
+body {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* 输入类控件豁免：保证正常输入、光标选择与粘贴 */
+input,
+textarea,
+select,
+[contenteditable='true'] {
+    -webkit-user-select: auto;
+    -moz-user-select: auto;
+    -ms-user-select: auto;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
