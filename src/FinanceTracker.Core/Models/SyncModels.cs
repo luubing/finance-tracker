@@ -262,6 +262,12 @@ public class LedgerSyncDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    /// <summary>
+    /// 账本所有者（共享账本拉取到成员端时，账本归属他人，客户端据此建立正确的归属关系与用户存根）。
+    /// 为空时兼容旧行为：以接收方用户ID作为所有者。
+    /// </summary>
+    public Guid? OwnerId { get; set; }
+
     public static LedgerSyncDto FromEntity(Ledger ledger) => new()
     {
         Id = ledger.Id,
@@ -270,13 +276,14 @@ public class LedgerSyncDto
         SortOrder = ledger.SortOrder,
         IsDeleted = ledger.IsDeleted,
         CreatedAt = ledger.CreatedAt,
-        UpdatedAt = ledger.UpdatedAt
+        UpdatedAt = ledger.UpdatedAt,
+        OwnerId = ledger.UserId
     };
 
     public Ledger ToEntity(Guid userId) => new()
     {
         Id = Id,
-        UserId = userId,
+        UserId = OwnerId ?? userId,
         Name = Name,
         Icon = Icon,
         SortOrder = SortOrder,

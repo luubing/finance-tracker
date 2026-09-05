@@ -81,6 +81,51 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                     b.ToTable("Bills");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.Budget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LedgerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("LedgerId");
+
+                    b.HasIndex("UserId", "Year", "Month");
+
+                    b.ToTable("Budgets");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.Category", b =>
                 {
                     b.Property<Guid>("Id")
@@ -161,6 +206,43 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Ledgers");
+                });
+
+            modelBuilder.Entity("FinanceTracker.Core.Entities.LedgerMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LedgerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("LedgerId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("LedgerMembers");
                 });
 
             modelBuilder.Entity("FinanceTracker.Core.Entities.PaymentChannel", b =>
@@ -304,6 +386,31 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.Budget", b =>
+                {
+                    b.HasOne("FinanceTracker.Core.Entities.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.Ledger", "Ledger")
+                        .WithMany()
+                        .HasForeignKey("LedgerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.User", "User")
+                        .WithMany("Budgets")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Ledger");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.Category", b =>
                 {
                     b.HasOne("FinanceTracker.Core.Entities.User", "User")
@@ -321,6 +428,25 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("FinanceTracker.Core.Entities.LedgerMember", b =>
+                {
+                    b.HasOne("FinanceTracker.Core.Entities.Ledger", "Ledger")
+                        .WithMany("Members")
+                        .HasForeignKey("LedgerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FinanceTracker.Core.Entities.User", "User")
+                        .WithMany("LedgerMemberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Ledger");
 
                     b.Navigation("User");
                 });
@@ -343,6 +469,8 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
             modelBuilder.Entity("FinanceTracker.Core.Entities.Ledger", b =>
                 {
                     b.Navigation("Bills");
+
+                    b.Navigation("Members");
                 });
 
             modelBuilder.Entity("FinanceTracker.Core.Entities.PaymentChannel", b =>
@@ -354,7 +482,11 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                 {
                     b.Navigation("Bills");
 
+                    b.Navigation("Budgets");
+
                     b.Navigation("Categories");
+
+                    b.Navigation("LedgerMemberships");
 
                     b.Navigation("Ledgers");
 

@@ -179,11 +179,45 @@ PUT    /api/payment-channels/{id}   # 更新渠道
 DELETE /api/payment-channels/{id}   # 删除渠道
 ```
 
+### 预算相关
+```
+GET    /api/budgets                            # 获取预算列表（?year=&month=&ledgerId=）
+GET    /api/budgets/status                     # 预算执行情况（预算额/已用/剩余/百分比）
+POST   /api/budgets                            # 创建预算
+PUT    /api/budgets/{id}                       # 更新预算
+DELETE /api/budgets/{id}                       # 删除预算（软删除）
+```
+
+### 共享账本相关
+```
+GET    /api/ledgers/{id}/members               # 获取账本成员列表
+POST   /api/ledgers/{id}/members               # 邀请成员（Owner，按手机号）
+PUT    /api/ledgers/{id}/members/{memberId}/role  # 修改成员角色（Owner）
+DELETE /api/ledgers/{id}/members/{memberId}    # 移除成员（Owner）
+POST   /api/ledgers/{id}/transfer-ownership    # 转让所有权（Owner）
+POST   /api/ledgers/{id}/exit                  # 退出共享账本
+GET    /api/invitations                        # 当前用户待处理邀请
+POST   /api/invitations/{memberId}/respond     # 响应邀请（接受/拒绝）
+```
+
 ### 统计相关
 ```
 GET    /api/statistics/monthly      # 月度统计
 GET    /api/statistics/trend        # 趋势数据
 GET    /api/statistics/category     # 分类统计
+GET    /api/statistics/annual       # 年度统计
+GET    /api/statistics/year-over-year          # 同比分析
+GET    /api/statistics/custom                  # 自定义时间范围报表
+GET    /api/statistics/category-comparison     # 分类环比对比
+```
+
+### 同步相关（补充）
+```
+POST   /api/sync/push                # 批量推送账单（含共享账本写权限校验）
+POST   /api/sync/pull                # 拉取账单（含共享账本内成员账单）
+POST   /api/sync/ledgers/push        # 推送账本
+POST   /api/sync/ledgers/pull        # 拉取账本（含共享账本）
+POST   /api/sync/ledgermembers/pull  # 拉取账本成员关系（客户端缓存）
 ```
 
 ---
@@ -355,17 +389,8 @@ GET    /api/statistics/category     # 分类统计
    - 数据导出
 
 ### 第三版功能
-1. **预算管理**
-   - 设置月度预算
-   - 超支提醒
-   - 预算执行情况
+> 拆解后的执行任务见 `.scratch/finance-tracker/issues/`（issue 16–20），已全部完成（2026-09-05）
 
-2. **多账本**
-   - 支持多个账本
-   - 账本间数据隔离
-   - 共享账本
-
-3. **数据可视化增强**
-   - 更多图表类型
-   - 自定义报表
-   - 数据对比分析
+1. **预算管理** ✅ 已实现（issue 16、17：Budget 实体/预算 CRUD API/预算页面/执行进度/超支提醒与本地通知）
+2. **多账本** ✅ 已实现（多账本与数据隔离为既有能力；共享账本见 issue 18：LedgerMember 实体/邀请确认/角色权限/成员管理页面/共享账单拉取，ADR 0004）
+3. **数据可视化增强** ✅ 已实现（issue 19：可复用图表组件、分类排行、日历热力图、累计曲线、构成对比；issue 20：自定义报表、分类环比对比、CSV 导出、报表分享）

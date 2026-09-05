@@ -13,10 +13,12 @@ namespace FinanceTracker.Api.Controllers;
 public class SyncController : BaseApiController
 {
     private readonly IApplicationDbContext _context;
+    private readonly ILedgerMemberService _ledgerMemberService;
 
-    public SyncController(IApplicationDbContext context)
+    public SyncController(IApplicationDbContext context, ILedgerMemberService ledgerMemberService)
     {
         _context = context;
+        _ledgerMemberService = ledgerMemberService;
     }
 
     /// <summary>
@@ -36,10 +38,19 @@ public class SyncController : BaseApiController
         {
             try
             {
-                // 先补建账单引用的账本/分类/支付渠道（远端缺失时），避免 Bills 外键违例
+                // 先补建账单引用的账本/分类/支付渠道（远端缺失时），避免 Bills 外键违例。
+                // 注意：补建必须在写权限校验之前——账本在云端尚不存在时（如账本推送曾失败），
+                // 校验会因"账本不存在"抛异常导致该账单永远无法推送；补建仅会以推送者身份
+                // 创建全新账本（已存在的账本不会被创建），不存在越权风险。
                 await dto.EnsureLedgerExistsAsync(_context, userId);
                 await dto.EnsureCategoryExistsAsync(_context, userId);
                 await dto.EnsurePaymentChannelExistsAsync(_context, userId);
+
+                if (dto.LedgerId.HasValue && dto.LedgerId.Value != Guid.Empty)
+                {
+                    // 共享账本写权限校验：Viewer/非成员不能把账单归属到共享账本
+                    await _ledgerMemberService.EnsureCanWriteAsync(dto.LedgerId.Value, userId);
+                }
 
                 // IgnoreQueryFilters：云端账单可能处于软删除状态（IsDeleted=true），
                 // 若被全局过滤器过滤掉会被误判为“新建”，导致主键冲突
@@ -114,24 +125,83 @@ public class SyncController : BaseApiController
         var userId = GetUserId();
         var since = request?.Since;
 
+        // 共享账本范围：用户作为生效成员参与的账本（成员可拉取账本内全部成员的账单，只读展示）
+        var sharedLedgerIds = await _context.LedgerMembers
+            .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active && !m.IsDeleted)
+            .Select(m => m.LedgerId)
+            .ToListAsync();
+
         // IgnoreQueryFilters：软删除的账单也要返回，删除操作才能同步到其他设备
         // （客户端会按 IsDeleted 标记本地数据，全局过滤由客户端各页面自行处理）
-        var query = _context.Bills.IgnoreQueryFilters().Where(b => b.UserId == userId);
+        var query = _context.Bills.IgnoreQueryFilters()
+            .Where(b => b.UserId == userId ||
+                (b.LedgerId != null && sharedLedgerIds.Contains(b.LedgerId.Value)));
         if (since.HasValue)
         {
             query = query.Where(b => b.UpdatedAt >= since.Value);
         }
 
-        // Include 导航属性：让 DTO 携带分类/渠道信息，客户端据此"缺则补建"
+        // Include 导航属性：让 DTO 携带分类/渠道/账本信息，客户端据此"缺则补建"
         var bills = await query
             .OrderBy(b => b.UpdatedAt)
             .Include(b => b.Category)
             .Include(b => b.PaymentChannel)
+            .Include(b => b.Ledger)
             .ToListAsync();
 
         return Ok(new SyncPullResponse
         {
             Bills = bills.Select(BillSyncDto.FromEntity).ToList()
+        });
+    }
+
+    /// <summary>
+    /// 拉取账本成员关系（客户端缓存，用于本地账单可见性判定与"我的共享账本"展示）
+    /// </summary>
+    [HttpPost("ledgermembers/pull")]
+    public async Task<IActionResult> PullLedgerMembers([FromBody] LedgerMemberSyncPullRequest? request)
+    {
+        var userId = GetUserId();
+        var since = request?.Since;
+
+        // 历史账本懒补 Owner 成员行（幂等）：共享功能上线前创建的账本尚无成员行，
+        // 不补齐的话下面按成员行过滤的查询拉不到自己账本的 Owner 行，
+        // 客户端本地缓存将永远缺失 Owner 身份（成员列表/邀请入口不可用）
+        var ownedLedgerIds = await _context.Ledgers
+            .Where(l => l.UserId == userId && !l.IsDeleted)
+            .Select(l => l.Id)
+            .ToListAsync();
+
+        foreach (var ownedLedgerId in ownedLedgerIds)
+        {
+            await _ledgerMemberService.EnsureOwnerMemberRowAsync(ownedLedgerId);
+        }
+
+        // 我参与的成员关系（含待确认邀请）+ 我所在共享账本的全部成员关系（展示成员列表用）。
+        // 注意：必须排除已删除（被移除/退出/拒绝）的成员关系，否则被移除成员仍可拉取该账本的成员列表（信息泄露）
+        var myLedgerIds = await _context.LedgerMembers
+            .Where(m => m.UserId == userId && !m.IsDeleted)
+            .Select(m => m.LedgerId)
+            .ToListAsync();
+
+        var query = _context.LedgerMembers
+            .Where(m => m.UserId == userId ||
+                (m.Status == LedgerMemberStatus.Active && !m.IsDeleted && myLedgerIds.Contains(m.LedgerId)));
+
+        if (since.HasValue)
+        {
+            query = query.Where(m => m.UpdatedAt >= since.Value);
+        }
+
+        var members = await query
+            .OrderBy(m => m.UpdatedAt)
+            .Include(m => m.User)
+            .Include(m => m.Ledger)
+            .ToListAsync();
+
+        return Ok(new LedgerMemberSyncPullResponse
+        {
+            Members = members.Select(LedgerMemberSyncDto.FromEntity).ToList()
         });
     }
 
@@ -397,9 +467,15 @@ public class SyncController : BaseApiController
         var userId = GetUserId();
         var since = request?.Since;
 
+        // 共享账本范围：用户作为生效成员参与的账本（成员端拉取账本实体，用于本地外键与展示）
+        var sharedLedgerIds = await _context.LedgerMembers
+            .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active && !m.IsDeleted)
+            .Select(m => m.LedgerId)
+            .ToListAsync();
+
         var query = _context.Ledgers
             .IgnoreQueryFilters()
-            .Where(l => l.UserId == userId);
+            .Where(l => l.UserId == userId || sharedLedgerIds.Contains(l.Id));
 
         if (since.HasValue)
         {

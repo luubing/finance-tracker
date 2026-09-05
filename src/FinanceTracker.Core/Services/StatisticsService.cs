@@ -1,3 +1,4 @@
+using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -226,5 +227,135 @@ public class StatisticsService : IStatisticsService
             PreviousYearExpense = previousBills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
             PreviousYearIncome = previousBills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount)
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<CustomStatistics> GetCustomStatisticsAsync(Guid userId, DateTime startDate, DateTime endDate, Guid? ledgerId = null)
+    {
+        // 归一化为"含当天"的日期范围
+        var start = startDate.Date;
+        var end = endDate.Date.AddDays(1).AddSeconds(-1);
+
+        var bills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= start &&
+                       b.TransactionTime <= end &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
+            .Include(b => b.Category)
+            .ToListAsync();
+
+        var result = new CustomStatistics
+        {
+            StartDate = start,
+            EndDate = endDate.Date,
+            TotalExpense = bills.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+            TotalIncome = bills.Where(b => b.Type == BillType.Income).Sum(b => b.Amount),
+            BillCount = bills.Count,
+            DailyTrend = bills
+                .GroupBy(b => b.TransactionTime.Date)
+                .OrderBy(g => g.Key)
+                .Select(g => new TrendData
+                {
+                    Date = g.Key,
+                    Expense = g.Where(b => b.Type == BillType.Expense).Sum(b => b.Amount),
+                    Income = g.Where(b => b.Type == BillType.Income).Sum(b => b.Amount)
+                })
+                .ToList()
+        };
+
+        result.ExpenseCategoryStats = BuildCategoryStats(bills.Where(b => b.Type == BillType.Expense));
+        result.IncomeCategoryStats = BuildCategoryStats(bills.Where(b => b.Type == BillType.Income));
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<List<CategoryComparisonData>> GetCategoryComparisonAsync(Guid userId, DateTime startDate, DateTime endDate, Guid? ledgerId = null)
+    {
+        var start = startDate.Date;
+
+        // 上一等长周期：按整数天数紧邻回推（含当天口径，避免浮点天数带来的边界秒级偏差）
+        var dayCount = (int)(endDate.Date - startDate.Date).TotalDays + 1;
+        var end = start.AddDays(dayCount).AddSeconds(-1);
+        var previousEnd = start.AddSeconds(-1);
+        var previousStart = start.AddDays(-dayCount);
+
+        var currentBills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= start &&
+                       b.TransactionTime <= end &&
+                       b.Type == BillType.Expense &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
+            .Include(b => b.Category)
+            .ToListAsync();
+
+        var previousBills = await _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= previousStart &&
+                       b.TransactionTime <= previousEnd &&
+                       b.Type == BillType.Expense &&
+                       (!ledgerId.HasValue || b.LedgerId == ledgerId))
+            .Include(b => b.Category)
+            .ToListAsync();
+
+        var currentStats = BuildCategoryStats(currentBills);
+        var previousDict = BuildCategoryStats(previousBills)
+            .ToDictionary(s => s.CategoryId, s => s.Amount);
+
+        // 并集：本期有或上期有的分类都参与对比（上期金额缺省 0）
+        var categoryIds = currentStats.Select(s => s.CategoryId)
+            .Union(previousDict.Keys)
+            .Distinct();
+
+        var comparison = new List<CategoryComparisonData>();
+        var currentDict = currentStats.ToDictionary(s => s.CategoryId);
+
+        foreach (var categoryId in categoryIds)
+        {
+            var current = currentDict.GetValueOrDefault(categoryId);
+            comparison.Add(new CategoryComparisonData
+            {
+                CategoryId = categoryId,
+                CategoryName = current?.CategoryName ?? "未知分类",
+                CategoryIcon = current?.CategoryIcon ?? "mdi-tag",
+                CurrentAmount = current?.Amount ?? 0,
+                PreviousAmount = previousDict.GetValueOrDefault(categoryId)
+            });
+        }
+
+        // 按变化绝对值降序（变化最大的分类排前面）
+        return comparison
+            .OrderByDescending(c => Math.Abs(c.ChangeAmount))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 按分类聚合账单并计算占比（金额降序）
+    /// </summary>
+    private static List<CategoryStatistics> BuildCategoryStats(IEnumerable<Bill> bills)
+    {
+        var stats = bills
+            .GroupBy(b => new { b.CategoryId, b.Category!.Name, b.Category.Icon })
+            .Select(g => new CategoryStatistics
+            {
+                CategoryId = g.Key.CategoryId,
+                CategoryName = g.Key.Name,
+                CategoryIcon = g.Key.Icon,
+                Amount = g.Sum(b => b.Amount),
+                Count = g.Count()
+            })
+            .OrderByDescending(s => s.Amount)
+            .ToList();
+
+        var totalAmount = stats.Sum(s => s.Amount);
+        if (totalAmount > 0)
+        {
+            foreach (var stat in stats)
+            {
+                stat.Percentage = Math.Round(stat.Amount / totalAmount * 100, 2);
+            }
+        }
+
+        return stats;
     }
 }

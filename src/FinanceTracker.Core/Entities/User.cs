@@ -25,4 +25,6 @@ public class User : BaseEntity
     public ICollection<Category> Categories { get; set; } = new List<Category>();
     public ICollection<PaymentChannel> PaymentChannels { get; set; } = new List<PaymentChannel>();
     public ICollection<Ledger> Ledgers { get; set; } = new List<Ledger>();
+    public ICollection<Budget> Budgets { get; set; } = new List<Budget>();
+    public ICollection<LedgerMember> LedgerMemberships { get; set; } = new List<LedgerMember>();
 }

@@ -1,8 +1,11 @@
 @page "/ledgers"
+@using FinanceTracker.Core.Enums
 @using FinanceTracker.Core.Interfaces
 @inject ILedgerService LedgerService
+@inject ILedgerMemberService LedgerMemberService
+@inject AuthenticationService AuthStateService
 @inject IJSRuntime JSRuntime
-@inject NavigationManager Navigation
+@inject PageStackNavController NavController
 @inject IPopupService PopupService
 
 <PStackPageBar Title="账本"
@@ -11,12 +14,49 @@
                Color="primary" />
 
 <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    <!-- 待处理邀请 -->
+    @if (_pendingInvitations.Any())
+    {
+        <MRow>
+            <MCol Cols="12">
+                <MCard Class="mb-4">
+                    <MCardTitle>
+                        <MIcon Class="mr-2" Color="warning">mdi-email-outline</MIcon>
+                        共享账本邀请
+                    </MCardTitle>
+                    <MCardText>
+                        <MList Dense>
+                            @foreach (var invitation in _pendingInvitations)
+                            {
+                                <MListItem>
+                                    <MListItemIcon>
+                                        <MIcon>@(invitation.Ledger?.Icon ?? "mdi-book")</MIcon>
+                                    </MListItemIcon>
+                                    <MListItemContent>
+                                        <MListItemTitle>@(invitation.Ledger?.Name ?? "未知账本")</MListItemTitle>
+                                        <MListItemSubtitle>
+                                            @FormatRole(invitation.Role) · 来自 @MaskPhoneNumber(invitation.Ledger?.User?.PhoneNumber)
+                                        </MListItemSubtitle>
+                                    </MListItemContent>
+                                    <MListItemAction>
+                                        <MButton Small Color="primary" OnClick="() => RespondInvitation(invitation, true)">接受</MButton>
+                                        <MButton Small Text Color="error" OnClick="() => RespondInvitation(invitation, false)">拒绝</MButton>
+                                    </MListItemAction>
+                                </MListItem>
+                            }
+                        </MList>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
+
     <MRow>
         <MCol Cols="12">
             <MCard>
                 <MCardTitle>
                     <MIcon Class="mr-2">mdi-book-multiple</MIcon>
-                    账本管理
+                    我的账本
                     <MSpacer />
                     <MButton Color="primary" OnClick="ShowCreateDialog">
                         <MIcon Class="mr-2">mdi-plus</MIcon>
@@ -25,7 +65,13 @@
                 </MCardTitle>
 
                 <MCardText>
-                    @if (!_ledgers.Any())
+                    @if (_isLoading)
+                    {
+                        <MContainer Class="d-flex justify-center align-center" Style="height: 120px;">
+                            <MProgressCircular Indeterminate Size="48" Color="primary" />
+                        </MContainer>
+                    }
+                    else if (!_ledgers.Any())
                     {
                         <div class="text-center py-8">
                             <MIcon Size="64" Color="grey lighten-1">mdi-book-outline</MIcon>
@@ -45,6 +91,9 @@
                                         <MListItemTitle>@ledger.Name</MListItemTitle>
                                     </MListItemContent>
                                     <MListItemAction>
+                                        <MButton Icon OnClick="() => ShowShareLedger(ledger)">
+                                            <MIcon>mdi-share-variant</MIcon>
+                                        </MButton>
                                         <MButton Icon OnClick="() => ShowEditDialog(ledger)">
                                             <MIcon>mdi-pencil</MIcon>
                                         </MButton>
@@ -60,7 +109,79 @@
             </MCard>
         </MCol>
     </MRow>
+
+    <!-- 共享账本 -->
+    @if (_sharedLedgers.Any())
+    {
+        <MRow>
+            <MCol Cols="12">
+                <MCard Class="mt-4">
+                    <MCardTitle>
+                        <MIcon Class="mr-2">mdi-account-group</MIcon>
+                        共享账本
+                    </MCardTitle>
+                    <MCardText>
+                        <MList>
+                            @foreach (var shared in _sharedLedgers)
+                            {
+                                <MListItem>
+                                    <MListItemIcon>
+                                        <MIcon>@shared.Ledger.Icon</MIcon>
+                                    </MListItemIcon>
+                                    <MListItemContent>
+                                        <MListItemTitle>@shared.Ledger.Name</MListItemTitle>
+                                        <MListItemSubtitle>@FormatRole(shared.Role)</MListItemSubtitle>
+                                    </MListItemContent>
+                                    <MListItemAction>
+                                        <MButton Icon OnClick="() => NavigateToMembers(shared.Ledger.Id)">
+                                            <MIcon>mdi-account-group</MIcon>
+                                        </MButton>
+                                    </MListItemAction>
+                                </MListItem>
+                            }
+                        </MList>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+    }
 </MContainer>
+
+<!-- 分享账本对话框 -->
+<MDialog @bind-Value="_showShareDialog" MaxWidth="450">
+    <MCard>
+        <MCardTitle>
+            <MIcon Class="mr-2">mdi-share-variant</MIcon>
+            分享账本
+        </MCardTitle>
+        <MCardText>
+            @if (_sharingLedger != null)
+            {
+                <div class="d-flex align-center text-body-1 mb-2">
+                    <MIcon Class="mr-2" Color="primary">@_sharingLedger.Icon</MIcon>
+                    @_sharingLedger.Name
+                </div>
+                <div class="text-body-2 grey--text mb-4">
+                    将账本分享给家人或朋友：邀请对方成为共享成员并确认后，即可共同记账、合并查看账单。
+                </div>
+
+                <MButton Block Color="primary" Class="mb-3" OnClick="() => NavigateToMembers(_sharingLedger!.Id)">
+                    <MIcon Class="mr-2">mdi-account-plus</MIcon>
+                    邀请成员共享
+                </MButton>
+
+                <MButton Block Text OnClick="() => CopyShareInfo(_sharingLedger!.Name)">
+                    <MIcon Class="mr-2">mdi-content-copy</MIcon>
+                    复制账本信息
+                </MButton>
+            }
+        </MCardText>
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="() => _showShareDialog = false">关闭</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
 
 <!-- 创建/编辑对话框 -->
 <MDialog @bind-Value="_showDialog" MaxWidth="500">
@@ -106,31 +227,192 @@
     private LedgerModel _ledgerModel = new();
     private MForm? _form;
     private Guid _userId;
+    private bool _isLoading = true;
 
-    protected override async Task OnInitializedAsync()
+    // 共享账本与待处理邀请
+    private List<SharedLedgerModel> _sharedLedgers = new();
+    private List<LedgerMember> _pendingInvitations = new();
+
+    // 分享账本对话框
+    private bool _showShareDialog;
+    private LedgerModel? _sharingLedger;
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop
+    // 不可用，直接读 localStorage.userId 会抛 "JavaScript interop calls cannot be issued at this
+    // time" 异常，导致首次进入页面时列表加载中断（显示为空，交互后才有数据）。
+    // 与 Index.razor 的既有修复保持一致，把依赖 JS 的初始化移到 OnAfterRenderAsync 首次渲染后执行。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        if (firstRender)
         {
-            _userId = userId;
+            await LoadUserIdAsync();
+            await LoadLedgers();
+
+            // 先渲染本地账本列表，再加载共享数据（云端不可用时不应阻塞列表展示）
+            _isLoading = false;
+            StateHasChanged();
+
+            await LoadSharedData();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadUserIdAsync()
+    {
+        // 优先使用 AuthenticationService（电路级缓存，预渲染阶段安全），失败时回退 JS interop 读 localStorage
+        var cachedUserId = await AuthStateService.GetUserIdAsync();
+        if (cachedUserId.HasValue)
+        {
+            _userId = cachedUserId.Value;
+            return;
         }
 
-        await LoadLedgers();
+        try
+        {
+            var userIdStr = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            {
+                _userId = userId;
+            }
+        }
+        catch (Exception)
+        {
+            // 电路断开等场景下无法访问 localStorage，保持 Guid.Empty（列表为空但不崩溃）
+        }
     }
 
     private async Task LoadLedgers()
     {
-        var ledgers = await LedgerService.GetLedgersAsync(_userId);
+        _isLoading = true;
 
-        _ledgers = ledgers
-            .Select(l => new LedgerModel
+        try
+        {
+            var ledgers = await LedgerService.GetLedgersAsync(_userId);
+
+            _ledgers = ledgers
+                .Select(l => new LedgerModel
+                {
+                    Id = l.Id,
+                    Name = l.Name,
+                    Icon = l.Icon,
+                    SortOrder = l.SortOrder
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载账本失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// 加载共享账本与待处理邀请（云端刷新 + 本地缓存；失败时回退本地缓存）
+    /// </summary>
+    private async Task LoadSharedData()
+    {
+        try
+        {
+            var ledgers = await LedgerMemberService.GetSharedLedgersAsync(_userId);
+
+            _sharedLedgers = new List<SharedLedgerModel>();
+            foreach (var ledger in ledgers)
             {
-                Id = l.Id,
-                Name = l.Name,
-                Icon = l.Icon,
-                SortOrder = l.SortOrder
-            })
-            .ToList();
+                var role = await LedgerMemberService.GetMyRoleAsync(ledger.Id, _userId);
+                _sharedLedgers.Add(new SharedLedgerModel
+                {
+                    Ledger = ledger,
+                    Role = role ?? LedgerMemberRole.Viewer
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            // 云端不可用时回退本地缓存
+            await PopupService.EnqueueSnackbarAsync($"共享账本加载失败: {ex.Message}", AlertTypes.Warning);
+        }
+
+        try
+        {
+            _pendingInvitations = await LedgerMemberService.GetPendingInvitationsAsync(_userId);
+        }
+        catch
+        {
+            _pendingInvitations = new List<LedgerMember>();
+        }
+    }
+
+    private async Task RespondInvitation(LedgerMember invitation, bool accept)
+    {
+        try
+        {
+            await LedgerMemberService.RespondAsync(invitation.Id, _userId, accept);
+            await PopupService.EnqueueSnackbarAsync(accept ? "已接受邀请" : "已拒绝邀请", AlertTypes.Success);
+            await LoadSharedData();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private void NavigateToMembers(Guid ledgerId)
+    {
+        NavController.Push($"/ledgers/{ledgerId}/members");
+    }
+
+    private void ShowShareLedger(LedgerModel ledger)
+    {
+        _sharingLedger = ledger;
+        _showShareDialog = true;
+    }
+
+    /// <summary>
+    /// 复制账本分享信息到剪贴板（JS 剪贴板 API 返回 Promise，JS interop 会自动等待其完成）
+    /// </summary>
+    private async Task CopyShareInfo(string ledgerName)
+    {
+        try
+        {
+            var text = $"我在「记账本」创建了账本「{ledgerName}」，快加入一起记账吧！";
+            await JSRuntime.InvokeAsync<string>("navigator.clipboard.writeText", text);
+            await PopupService.EnqueueSnackbarAsync("账本信息已复制，快去粘贴给好友吧", AlertTypes.Success);
+        }
+        catch (Exception)
+        {
+            await PopupService.EnqueueSnackbarAsync("复制失败，请手动复制账本名称", AlertTypes.Warning);
+        }
+    }
+
+    private string FormatRole(LedgerMemberRole role)
+    {
+        return role switch
+        {
+            LedgerMemberRole.Owner => "所有者",
+            LedgerMemberRole.Editor => "可编辑成员",
+            _ => "只读成员"
+        };
+    }
+
+    private string MaskPhoneNumber(string? phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber))
+        {
+            return "未知用户";
+        }
+
+        return phoneNumber.Length == 11
+            ? $"{phoneNumber[..3]}****{phoneNumber[7..]}"
+            : phoneNumber;
+    }
+
+    private class SharedLedgerModel
+    {
+        public Core.Entities.Ledger Ledger { get; set; } = null!;
+        public LedgerMemberRole Role { get; set; }
     }
 
     private void ShowCreateDialog()

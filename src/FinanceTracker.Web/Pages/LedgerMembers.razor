@@ -1,0 +1,355 @@
+@page "/ledgers/{LedgerId}/members"
+@using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Interfaces
+@inject ILedgerMemberService LedgerMemberService
+@inject ILedgerService LedgerService
+@inject IJSRuntime JSRuntime
+@inject PageStackNavController NavController
+@inject IPopupService PopupService
+
+<PStackPageBar Title="成员管理"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    <MCard>
+        <MCardTitle>
+            <MIcon Class="mr-2">mdi-account-group</MIcon>
+            账本成员
+            <MSpacer />
+            @if (_isOwner)
+            {
+                <MButton Color="primary" OnClick="ShowInviteDialog">
+                    <MIcon Class="mr-2">mdi-account-plus</MIcon>
+                    邀请
+                </MButton>
+            }
+        </MCardTitle>
+
+        <MCardText>
+            @if (_isLoading)
+            {
+                <MContainer Class="d-flex justify-center align-center" Style="height: 120px;">
+                    <MProgressCircular Indeterminate Size="48" Color="primary" />
+                </MContainer>
+            }
+            else if (_members.Count == 0)
+            {
+                <div class="text-center py-8">
+                    <MIcon Size="64" Color="grey lighten-1">mdi-account-group-outline</MIcon>
+                    <div class="text-h6 grey--text text--lighten-1 mt-4">暂无成员</div>
+                </div>
+            }
+            else
+            {
+                <MList>
+                    @foreach (var member in _members)
+                    {
+                        <MListItem>
+                            <MListItemIcon>
+                                <MAvatar Size="36" Color="@GetRoleAvatarColor(member.Role)">
+                                    <MIcon Size="20" Color="white">mdi-account</MIcon>
+                                </MAvatar>
+                            </MListItemIcon>
+                            <MListItemContent>
+                                <MListItemTitle>
+                                    @MaskPhoneNumber(member.User?.PhoneNumber)
+                                    @if (member.Role == LedgerMemberRole.Owner)
+                                    {
+                                        <span class="text-caption primary--text">（所有者）</span>
+                                    }
+                                    else if (member.Role == LedgerMemberRole.Editor)
+                                    {
+                                        <span class="text-caption text--secondary">（可编辑）</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-caption text--secondary">（只读）</span>
+                                    }
+                                </MListItemTitle>
+                            </MListItemContent>
+                            <MListItemAction>
+                                @if (_isOwner && member.Role != LedgerMemberRole.Owner)
+                                {
+                                    <MButton Icon OnClick="() => ShowRoleDialog(member)">
+                                        <MIcon>mdi-pencil</MIcon>
+                                    </MButton>
+                                    <MButton Icon OnClick="() => TransferOwnership(member)">
+                                        <MIcon Color="primary">mdi-crown</MIcon>
+                                    </MButton>
+                                    <MButton Icon OnClick="() => RemoveMember(member)">
+                                        <MIcon Color="error">mdi-delete</MIcon>
+                                    </MButton>
+                                }
+                                else if (!_isOwner && member.UserId == _userId && member.Role != LedgerMemberRole.Owner)
+                                {
+                                    <MButton Icon OnClick="ExitLedger">
+                                        <MIcon Color="error">mdi-exit-to-app</MIcon>
+                                    </MButton>
+                                }
+                            </MListItemAction>
+                        </MListItem>
+                    }
+                </MList>
+            }
+        </MCardText>
+    </MCard>
+</MContainer>
+
+<!-- 邀请对话框 -->
+<MDialog @bind-Value="_showInviteDialog" MaxWidth="450">
+    <MCard>
+        <MCardTitle>邀请成员</MCardTitle>
+        <MCardText>
+            <MTextField @bind-Value="_invitePhoneNumber"
+                        Label="手机号（须已注册）"
+                        Outlined
+                        Dense />
+            <MSelect @bind-Value="_inviteRole"
+                     Items="@_roleOptions.Keys.ToList()"
+                     ItemText="r => _roleOptions[r]"
+                     ItemValue="r => r"
+                     Label="角色"
+                     Outlined
+                     Dense />
+        </MCardText>
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="() => _showInviteDialog = false">取消</MButton>
+            <MButton Color="primary" OnClick="Invite">邀请</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+<!-- 修改角色对话框 -->
+<MDialog @bind-Value="_showRoleDialog" MaxWidth="400">
+    <MCard>
+        <MCardTitle>修改角色</MCardTitle>
+        <MCardText>
+            <MSelect @bind-Value="_selectedRole"
+                     Items="@_roleOptions.Keys.Where(r => r != LedgerMemberRole.Owner).ToList()"
+                     ItemText="r => _roleOptions[r]"
+                     ItemValue="r => r"
+                     Label="角色"
+                     Outlined
+                     Dense />
+        </MCardText>
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="() => _showRoleDialog = false">取消</MButton>
+            <MButton Color="primary" OnClick="ChangeRole">保存</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    [Parameter]
+    public string? LedgerId { get; set; }
+
+    private Guid _ledgerId;
+    private Guid _userId;
+    private bool _isLoading = true;
+    private bool _invalidLedgerReported;
+    private bool _isOwner;
+
+    private List<LedgerMember> _members = new();
+
+    private bool _showInviteDialog;
+    private string _invitePhoneNumber = string.Empty;
+    private LedgerMemberRole _inviteRole = LedgerMemberRole.Editor;
+
+    private bool _showRoleDialog;
+    private LedgerMember? _editingMember;
+    private LedgerMemberRole _selectedRole = LedgerMemberRole.Viewer;
+
+    private Dictionary<LedgerMemberRole, string> _roleOptions = new()
+    {
+        [LedgerMemberRole.Editor] = "可编辑（可记账）",
+        [LedgerMemberRole.Viewer] = "只读（仅查看）"
+    };
+
+    // 注意：Blazor Server（ServerPrerendered 渲染）下 OnInitializedAsync 阶段 JS interop 不可用，
+    // 与 Index.razor/Ledgers.razor 的修复一致，把读取 localStorage 等依赖 JS 的初始化移到首次渲染后执行
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 路由参数校验不依赖 JS；提示与返回只在交互电路中执行一次
+        if (!Guid.TryParse(LedgerId, out _ledgerId))
+        {
+            if (!_invalidLedgerReported)
+            {
+                _invalidLedgerReported = true;
+                await PopupService.EnqueueSnackbarAsync("账本不存在", AlertTypes.Warning);
+                NavController.Pop();
+            }
+
+            return;
+        }
+
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            var userIdStr = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            {
+                _userId = userId;
+            }
+        }
+        catch (Exception)
+        {
+            // 电路断开等场景下无法访问 localStorage，保持 Guid.Empty
+        }
+
+        await LoadMembersAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadMembersAsync()
+    {
+        _isLoading = true;
+        try
+        {
+            _members = await LedgerMemberService.GetMembersAsync(_ledgerId, _userId);
+            var myRole = await LedgerMemberService.GetMyRoleAsync(_ledgerId, _userId);
+
+            // 本地账本归属兜底：账本 UserId 即所有者（ADR 0004）。云端不可用/成员关系尚未
+            // 同步时 GetMyRoleAsync 会返回 null，据此兜底保证"邀请"按钮等 Owner 功能可见
+            var ledger = await LedgerService.GetLedgerByIdAsync(_ledgerId);
+            _isOwner = myRole == LedgerMemberRole.Owner || (ledger != null && ledger.UserId == _userId);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载成员失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void ShowInviteDialog()
+    {
+        _invitePhoneNumber = string.Empty;
+        _inviteRole = LedgerMemberRole.Editor;
+        _showInviteDialog = true;
+    }
+
+    private async Task Invite()
+    {
+        try
+        {
+            await LedgerMemberService.InviteAsync(_ledgerId, _userId, _invitePhoneNumber, _inviteRole);
+            await PopupService.EnqueueSnackbarAsync("邀请已发送，等待对方确认", AlertTypes.Success);
+            _showInviteDialog = false;
+            await LoadMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"邀请失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private void ShowRoleDialog(LedgerMember member)
+    {
+        _editingMember = member;
+        _selectedRole = member.Role;
+        _showRoleDialog = true;
+    }
+
+    private async Task ChangeRole()
+    {
+        if (_editingMember == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await LedgerMemberService.ChangeRoleAsync(_ledgerId, _editingMember.Id, _selectedRole, _userId);
+            await PopupService.EnqueueSnackbarAsync("角色已更新", AlertTypes.Success);
+            _showRoleDialog = false;
+            await LoadMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"修改失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task RemoveMember(LedgerMember member)
+    {
+        try
+        {
+            await LedgerMemberService.RemoveMemberAsync(_ledgerId, member.Id, _userId);
+            await PopupService.EnqueueSnackbarAsync("成员已移除", AlertTypes.Success);
+            await LoadMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"移除失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task TransferOwnership(LedgerMember member)
+    {
+        try
+        {
+            await LedgerMemberService.TransferOwnershipAsync(_ledgerId, _userId, member.UserId);
+            await PopupService.EnqueueSnackbarAsync("所有权已转让，你已成为可编辑成员", AlertTypes.Success);
+            await LoadMembersAsync();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"转让失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private async Task ExitLedger()
+    {
+        try
+        {
+            await LedgerMemberService.ExitAsync(_ledgerId, _userId);
+            await PopupService.EnqueueSnackbarAsync("已退出共享账本", AlertTypes.Success);
+            NavController.Pop();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    private string MaskPhoneNumber(string? phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber))
+        {
+            return "未知成员";
+        }
+
+        // 云端同步的占位用户（stub_ 开头）尚无真实手机号
+        if (phoneNumber.StartsWith("stub_"))
+        {
+            return "（未同步）";
+        }
+
+        if (phoneNumber.Length != 11)
+        {
+            return phoneNumber;
+        }
+
+        return $"{phoneNumber[..3]}****{phoneNumber[7..]}";
+    }
+
+    private string GetRoleAvatarColor(LedgerMemberRole role)
+    {
+        return role switch
+        {
+            LedgerMemberRole.Owner => "primary",
+            LedgerMemberRole.Editor => "success",
+            _ => "grey"
+        };
+    }
+}

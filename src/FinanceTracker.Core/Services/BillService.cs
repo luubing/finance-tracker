@@ -31,6 +31,23 @@ public class BillService : IBillService
         var query = _context.Bills
             .Where(b => b.UserId == userId && !b.IsDeleted);
 
+        if (ledgerId.HasValue)
+        {
+            // 共享账本可见性：当筛选的账本为当前用户的共享账本时，
+            // 账本内全部成员的账单对该用户可见（只读展示，仅排除已删除）
+            var sharedLedgerIds = await GetSharedLedgerIdsAsync(userId);
+
+            if (sharedLedgerIds.Contains(ledgerId.Value))
+            {
+                query = _context.Bills
+                    .Where(b => b.LedgerId == ledgerId.Value && !b.IsDeleted);
+            }
+            else
+            {
+                query = query.Where(b => b.LedgerId == ledgerId.Value);
+            }
+        }
+
         if (startDate.HasValue)
         {
             query = query.Where(b => b.TransactionTime >= startDate.Value);
@@ -49,11 +66,6 @@ public class BillService : IBillService
         if (paymentChannelId.HasValue)
         {
             query = query.Where(b => b.PaymentChannelId == paymentChannelId.Value);
-        }
-
-        if (ledgerId.HasValue)
-        {
-            query = query.Where(b => b.LedgerId == ledgerId.Value);
         }
 
         if (type.HasValue)
@@ -199,6 +211,22 @@ public class BillService : IBillService
         var query = _context.Bills
             .Where(b => b.UserId == userId && !b.IsDeleted);
 
+        if (ledgerId.HasValue)
+        {
+            // 与 GetBillsAsync 保持一致：共享账本内全部成员账单可见
+            var sharedLedgerIds = await GetSharedLedgerIdsAsync(userId);
+
+            if (sharedLedgerIds.Contains(ledgerId.Value))
+            {
+                query = _context.Bills
+                    .Where(b => b.LedgerId == ledgerId.Value && !b.IsDeleted);
+            }
+            else
+            {
+                query = query.Where(b => b.LedgerId == ledgerId.Value);
+            }
+        }
+
         if (startDate.HasValue)
         {
             query = query.Where(b => b.TransactionTime >= startDate.Value);
@@ -219,16 +247,23 @@ public class BillService : IBillService
             query = query.Where(b => b.PaymentChannelId == paymentChannelId.Value);
         }
 
-        if (ledgerId.HasValue)
-        {
-            query = query.Where(b => b.LedgerId == ledgerId.Value);
-        }
-
         if (type.HasValue)
         {
             query = query.Where(b => b.Type == type.Value);
         }
 
         return await query.CountAsync();
+    }
+
+    /// <summary>
+    /// 获取当前用户作为生效成员（非 Owner）参与的共享账本ID列表（含 Owner 角色行：
+    /// Owner 也是成员，但自有账本走 UserId 过滤即可，此处含 Owner 无副作用）
+    /// </summary>
+    private async Task<List<Guid>> GetSharedLedgerIdsAsync(Guid userId)
+    {
+        return await _context.LedgerMembers
+            .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active && !m.IsDeleted)
+            .Select(m => m.LedgerId)
+            .ToListAsync();
     }
 }

@@ -213,4 +213,101 @@ public class StatisticsController : BaseApiController
             incomeChangeRate = data.IncomeChangeRate
         });
     }
+
+    /// <summary>
+    /// 获取自定义时间范围统计数据
+    /// </summary>
+    /// <param name="startDate">开始日期（含当天）</param>
+    /// <param name="endDate">结束日期（含当天）</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
+    /// <returns>自定义范围统计数据</returns>
+    [HttpGet("custom")]
+    public async Task<IActionResult> GetCustomStatistics(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] Guid? ledgerId)
+    {
+        var userId = GetUserId();
+
+        if (startDate.Date > endDate.Date)
+        {
+            return BadRequest(new { message = "开始日期必须早于或等于结束日期" });
+        }
+
+        if (startDate.Date < new DateTime(2000, 1, 1) || endDate.Date > new DateTime(2100, 1, 1))
+        {
+            return BadRequest(new { message = "日期范围无效" });
+        }
+
+        var statistics = await _statisticsService.GetCustomStatisticsAsync(userId, startDate, endDate, ledgerId);
+
+        return Ok(new
+        {
+            startDate = statistics.StartDate,
+            endDate = statistics.EndDate,
+            totalExpense = statistics.TotalExpense,
+            totalIncome = statistics.TotalIncome,
+            netIncome = statistics.NetIncome,
+            billCount = statistics.BillCount,
+            expenseCategoryStats = statistics.ExpenseCategoryStats.Select(s => new
+            {
+                categoryId = s.CategoryId,
+                categoryName = s.CategoryName,
+                categoryIcon = s.CategoryIcon,
+                amount = s.Amount,
+                percentage = s.Percentage,
+                count = s.Count
+            }),
+            incomeCategoryStats = statistics.IncomeCategoryStats.Select(s => new
+            {
+                categoryId = s.CategoryId,
+                categoryName = s.CategoryName,
+                categoryIcon = s.CategoryIcon,
+                amount = s.Amount,
+                percentage = s.Percentage,
+                count = s.Count
+            }),
+            dailyTrend = statistics.DailyTrend.Select(t => new
+            {
+                date = t.Date,
+                expense = t.Expense,
+                income = t.Income,
+                netIncome = t.NetIncome
+            })
+        });
+    }
+
+    /// <summary>
+    /// 获取分类环比对比（当前周期 vs 上一等长周期）
+    /// </summary>
+    /// <param name="startDate">开始日期（含当天）</param>
+    /// <param name="endDate">结束日期（含当天）</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
+    /// <returns>分类环比对比列表</returns>
+    [HttpGet("category-comparison")]
+    public async Task<IActionResult> GetCategoryComparison(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] Guid? ledgerId)
+    {
+        var userId = GetUserId();
+
+        if (startDate.Date > endDate.Date)
+        {
+            return BadRequest(new { message = "开始日期必须早于或等于结束日期" });
+        }
+
+        var comparison = await _statisticsService.GetCategoryComparisonAsync(userId, startDate, endDate, ledgerId);
+
+        return Ok(comparison.Select(c => new
+        {
+            categoryId = c.CategoryId,
+            categoryName = c.CategoryName,
+            categoryIcon = c.CategoryIcon,
+            currentAmount = c.CurrentAmount,
+            previousAmount = c.PreviousAmount,
+            changeAmount = c.ChangeAmount,
+            changeRate = c.ChangeRate
+        }));
+    }
 }

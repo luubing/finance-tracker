@@ -1,0 +1,95 @@
+@namespace FinanceTracker.Web.Components.Charts
+@using FinanceTracker.Core.Interfaces
+
+@if (_option != null)
+{
+    <MECharts Option="_option" Height="260" />
+}
+
+@code {
+    /// <summary>
+    /// 分类统计数据（组件内部按金额取 Top N 并倒序渲染，最大值在最上方）
+    /// </summary>
+    [Parameter]
+    public List<CategoryStatistics> Categories { get; set; } = new();
+
+    /// <summary>展示前 N 个分类</summary>
+    [Parameter]
+    public int TopN { get; set; } = 8;
+
+    /// <summary>系列名称</summary>
+    [Parameter]
+    public string SeriesName { get; set; } = "分类排行";
+
+    private object? _option;
+
+    protected override void OnParametersSet()
+    {
+        _option = BuildOption();
+    }
+
+    /// <summary>
+    /// 构建横向条形图配置（移动端紧凑布局）
+    /// </summary>
+    private object? BuildOption()
+    {
+        var top = Categories
+            .Where(c => c.Amount > 0)
+            .OrderByDescending(c => c.Amount)
+            .Take(TopN)
+            .ToList();
+
+        if (top.Count == 0)
+        {
+            return null;
+        }
+
+        // 倒序：ECharts y 轴自下而上，倒序后最大值显示在最上方
+        var ordered = top.Reverse<CategoryStatistics>().ToList();
+
+        return new
+        {
+            tooltip = new
+            {
+                trigger = "axis",
+                axisPointer = new { type = "shadow" },
+                formatter = "{b}: ¥{c}"
+            },
+            grid = new { left = 8, right = 24, top = 10, bottom = 10, containLabel = true },
+            xAxis = new
+            {
+                type = "value",
+                axisLabel = new { fontSize = 10, formatter = "¥{value}" },
+                splitLine = new { lineStyle = new { opacity = 0.3 } }
+            },
+            yAxis = new
+            {
+                type = "category",
+                data = ordered.Select(c => c.CategoryName).ToArray(),
+                axisLabel = new { fontSize = 10, width = 70, overflow = "truncate" }
+            },
+            series = new[]
+            {
+                new
+                {
+                    name = SeriesName,
+                    type = "bar",
+                    data = ordered.Select(c => (double)c.Amount).ToArray(),
+                    barMaxWidth = 14,
+                    itemStyle = new
+                    {
+                        color = "#2196F3",
+                        borderRadius = new[] { 0, 4, 4, 0 }
+                    },
+                    label = new
+                    {
+                        show = true,
+                        position = "right",
+                        fontSize = 10,
+                        formatter = "¥{c}"
+                    }
+                }
+            }
+        };
+    }
+}

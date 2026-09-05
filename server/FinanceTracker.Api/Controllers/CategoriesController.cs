@@ -103,7 +103,7 @@ public class CategoriesController : BaseApiController
 
         if (existingCategory.IsPreset)
         {
-            return Forbid("不能修改预设分类");
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "不能修改预设分类" });
         }
 
         var category = new Core.Entities.Category
@@ -150,7 +150,7 @@ public class CategoriesController : BaseApiController
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

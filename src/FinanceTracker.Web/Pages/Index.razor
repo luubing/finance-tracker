@@ -12,6 +12,9 @@
 @inject PageStackNavController NavController
 @inject NavigationManager Navigation
 @inject ILogger<Index> Logger
+@inject IBudgetService BudgetService
+@inject BudgetAlertService BudgetAlertService
+@inject IPopupService PopupService
 
 <PStackPageBar Title="记账本"
                CenterTitle
@@ -56,6 +59,51 @@ else if (_user != null)
                 </MRow>
             </MCardText>
         </MCard>
+
+        <!-- 本月预算执行情况 -->
+        @if (_budgetStatuses.Any())
+        {
+            <MCard Class="mb-4">
+                <MCardTitle Class="pb-0">
+                    <MIcon Class="mr-2" Color="primary">mdi-wallet</MIcon>
+                    本月预算
+                    <MSpacer />
+                    <MButton Small Text Color="primary" OnClick="NavigateToBudgets">
+                        管理
+                    </MButton>
+                </MCardTitle>
+                <MCardText>
+                    @foreach (var status in _budgetStatuses.Take(3))
+                    {
+                        <div class="mb-2">
+                            <div class="d-flex justify-space-between text-body-2">
+                                <span>
+                                    @status.CategoryIcon @status.CategoryName
+                                    @if (status.LedgerName != null)
+                                    {
+                                        <span class="text--secondary">（@status.LedgerName）</span>
+                                    }
+                                </span>
+                                <span class="@(status.RemainingAmount < 0 ? "error--text" : null)">
+                                    剩余 ¥@status.RemainingAmount.ToString("N2")
+                                </span>
+                            </div>
+                            <MProgressLinear Value="@((double)Math.Min(status.UsagePercentage, 100m))"
+                                             Color="@GetBudgetProgressColor(status.UsagePercentage)"
+                                             Height="6"
+                                             Rounded
+                                             Class="mt-1" />
+                        </div>
+                    }
+                    @if (_budgetStatuses.Count > 3)
+                    {
+                        <div class="text-caption text--secondary">
+                            共 @_budgetStatuses.Count 项预算，点击"管理"查看全部
+                        </div>
+                    }
+                </MCardText>
+            </MCard>
+        }
 
         <!-- 快捷操作 -->
         <MCard Class="mb-4">
@@ -198,6 +246,9 @@ else if (_user != null)
     // 待确认账单数量（通知栏/短信自动捕获，角标展示）
     private int _pendingCount;
 
+    // 预算执行情况（本月）
+    private List<BudgetStatus> _budgetStatuses = new();
+
     // 手动刷新状态
     private bool _isRefreshing;
 
@@ -236,7 +287,7 @@ else if (_user != null)
         {
             if (_user != null)
             {
-                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -288,7 +339,7 @@ else if (_user != null)
 
             if (_user != null)
             {
-                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
 
                 _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
             }
@@ -323,7 +374,7 @@ else if (_user != null)
             }
 
             // 加载业务数据
-            await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills());
+            await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
 
             // 加载待确认账单数量（角标）
             _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
@@ -409,6 +460,48 @@ else if (_user != null)
     private void NavigateToStatistics()
     {
         NavController.Push("/statistics");
+    }
+
+    private void NavigateToBudgets()
+    {
+        NavController.Push("/budgets");
+    }
+
+    private async Task LoadBudgetStatus()
+    {
+        try
+        {
+            var now = DateTime.Now;
+            _budgetStatuses = await BudgetService.GetBudgetStatusAsync(_user!.Id, now.Year, now.Month);
+
+            // 超支时发送本地通知（每日最多一次）
+            await BudgetAlertService.NotifyIfExceededAsync(_budgetStatuses, now.Year, now.Month);
+
+            // 应用内超支提示
+            var exceeded = _budgetStatuses.Where(s => s.UsagePercentage >= 100).ToList();
+            if (exceeded.Any())
+            {
+                var names = string.Join("、", exceeded.Select(s => s.CategoryName));
+                await PopupService.EnqueueSnackbarAsync($"预算超支提醒：{names} 本月预算已超支", AlertTypes.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载预算执行情况失败");
+        }
+    }
+
+    /// <summary>
+    /// 预算进度条颜色：≥100% 红色超支，≥80% 黄色预警，其余主题色
+    /// </summary>
+    private string GetBudgetProgressColor(decimal usagePercentage)
+    {
+        return usagePercentage switch
+        {
+            >= 100 => "error",
+            >= 80 => "warning",
+            _ => "primary"
+        };
     }
 
     private class BillModel

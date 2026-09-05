@@ -46,4 +46,9 @@ public interface ICloudSyncClient
     /// 拉取云端账本（since 为空则拉取全部，含软删除）
     /// </summary>
     Task<List<LedgerSyncDto>> PullLedgersAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 拉取账本成员关系（客户端缓存，用于本地账单可见性判定与"我的共享账本"展示）
+    /// </summary>
+    Task<List<LedgerMemberSyncDto>> PullLedgerMembersAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default);
 }

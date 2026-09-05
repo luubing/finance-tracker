@@ -30,6 +30,11 @@ public interface ISyncService
     Task SyncLedgersAsync(Guid userId);
 
     /// <summary>
+    /// 同步账本成员关系到本地缓存（共享账本可见性判定用）
+    /// </summary>
+    Task SyncLedgerMembersAsync(Guid userId);
+
+    /// <summary>
     /// 获取待同步的账单
     /// </summary>
     /// <param name="userId">用户ID</param>

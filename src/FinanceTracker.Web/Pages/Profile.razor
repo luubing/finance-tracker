@@ -76,6 +76,36 @@
 
                 <MDivider />
 
+                <MListItem OnClick="@(() => NavController.Push("/budgets"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-wallet</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>预算管理</MListItemTitle>
+                        <MListItemSubtitle>设置月度预算，跟踪预算执行情况</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/custom-report"))">
+                    <MListItemIcon>
+                        <MIcon Color="primary">mdi-file-chart-outline</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>自定义报表</MListItemTitle>
+                        <MListItemSubtitle>自定义时间范围报表，环比对比与导出分享</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                <MDivider />
+
                 <MListItem OnClick="@(() => NavController.Push("/categories"))">
                     <MListItemIcon>
                         <MIcon Color="primary">mdi-tag-multiple</MIcon>

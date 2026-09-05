@@ -49,6 +49,8 @@ public class SyncService : ISyncService
             await SyncLedgersAsync(userId);
             await SyncCategoriesAsync(userId);
             await SyncPaymentChannelsAsync(userId);
+            // 共享账本：同步成员关系缓存（拉取共享账本内他人账单前必须先有本地成员关系与用户存根）
+            await SyncLedgerMembersAsync(userId);
 
             // 获取本地待同步的账单
             var pendingBills = await GetPendingBillsAsync(userId);
@@ -95,14 +97,20 @@ public class SyncService : ISyncService
                 }
             }
 
-            // 2. 拉取云端更新（其他设备新增/修改的账单）合并到本地
-            //    先补建本地缺失的分类/支付渠道，避免合并账单时外键违例
+            // 2. 拉取云端更新（其他设备新增/修改的账单 + 共享账本内其他成员的账单）合并到本地
+            //    先补建本地缺失的分类/支付渠道/用户存根，避免合并账单时外键违例
             var cloudBills = await _cloudSyncClient.PullBillsAsync(userId);
             foreach (var cloudBill in cloudBills)
             {
                 await cloudBill.EnsureLedgerExistsAsync(_context, userId);
                 await cloudBill.EnsureCategoryExistsAsync(_context, userId);
                 await cloudBill.EnsurePaymentChannelExistsAsync(_context, userId);
+
+                // 共享账本内他人账单：本地需要创建者用户存根（仅满足外键与展示，不可登录）
+                if (cloudBill.UserId != Guid.Empty && cloudBill.UserId != userId)
+                {
+                    await EnsureUserStubAsync(cloudBill.UserId);
+                }
             }
 
             foreach (var cloudBill in cloudBills)
@@ -113,8 +121,10 @@ public class SyncService : ISyncService
                     .FirstOrDefaultAsync(b => b.Id == cloudBill.Id);
                 if (existing == null)
                 {
-                    // 本地不存在 → 新增（云端为权威）
-                    var newLocal = cloudBill.ToEntity(userId);
+                    // 本地不存在 → 新增（云端为权威）。
+                    // 共享账本内他人账单保留原作者 UserId（UserId 为空时兜底为本地用户）
+                    var ownerId = cloudBill.UserId != Guid.Empty ? cloudBill.UserId : userId;
+                    var newLocal = cloudBill.ToEntity(ownerId);
                     newLocal.SyncStatus = SyncStatus.Synced;
                     _context.Bills.Add(newLocal);
                     result.SyncedCount++;
@@ -323,6 +333,12 @@ public class SyncService : ISyncService
 
         foreach (var dto in cloudLedgers)
         {
+            // 共享账本（OwnerId 为他人）合并到本地时，需要所有者用户存根满足外键
+            if (dto.OwnerId.HasValue && dto.OwnerId.Value != userId)
+            {
+                await EnsureUserStubAsync(dto.OwnerId.Value);
+            }
+
             var existing = await _context.Ledgers
                 .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(l => l.Id == dto.Id);
@@ -402,6 +418,107 @@ public class SyncService : ISyncService
         return await _context.Bills
             .CountAsync(b => b.UserId == userId &&
                 (b.SyncStatus == SyncStatus.Pending || b.SyncStatus == SyncStatus.Failed));
+    }
+
+    /// <summary>
+    /// 合并云端成员关系到本地缓存（供本地账单可见性判定与"我的共享账本"展示）。
+    /// 顺手补建用户/账本存根，避免本地外键违例。
+    /// </summary>
+    public async Task SyncLedgerMembersAsync(Guid userId)
+    {
+        var cloudMembers = await _cloudSyncClient.PullLedgerMembersAsync(userId);
+        var merged = false;
+
+        foreach (var dto in cloudMembers)
+        {
+            // 他人用户 / 他人账本需要本地存根
+            if (dto.UserId != userId)
+            {
+                await EnsureUserStubAsync(dto.UserId, dto.UserPhoneNumber);
+            }
+
+            if (dto.LedgerOwnerId.HasValue && dto.LedgerOwnerId.Value != userId)
+            {
+                await EnsureUserStubAsync(dto.LedgerOwnerId.Value);
+            }
+
+            var existing = await _context.LedgerMembers
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(m => m.Id == dto.Id);
+
+            if (existing == null)
+            {
+                _context.LedgerMembers.Add(new LedgerMember
+                {
+                    Id = dto.Id,
+                    LedgerId = dto.LedgerId,
+                    UserId = dto.UserId,
+                    Role = dto.Role,
+                    Status = dto.Status,
+                    IsDeleted = dto.IsDeleted,
+                    CreatedAt = dto.CreatedAt,
+                    UpdatedAt = dto.UpdatedAt
+                });
+                merged = true;
+            }
+            else if (dto.UpdatedAt > existing.UpdatedAt && !dto.ContentEquals(existing))
+            {
+                existing.Role = dto.Role;
+                existing.Status = dto.Status;
+                existing.IsDeleted = dto.IsDeleted;
+                merged = true;
+            }
+        }
+
+        if (merged)
+        {
+            await _context.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>
+    /// 确保本地存在指定用户（不存在则创建仅含 Id/手机号的用户存根，满足账单/账本/成员关系外键）。
+    /// 无手机号时生成确定性占位手机号（stub_ + 15 位 hex，满足唯一索引且不会与真实手机号冲突），
+    /// 后续成员同步携带真实手机号时可升级。
+    /// </summary>
+    private async Task EnsureUserStubAsync(Guid userId, string? phoneNumber = null)
+    {
+        var exists = await _context.Users
+            .IgnoreQueryFilters()
+            .AnyAsync(u => u.Id == userId);
+
+        if (!exists)
+        {
+            _context.Users.Add(new User
+            {
+                Id = userId,
+                PhoneNumber = string.IsNullOrEmpty(phoneNumber)
+                    ? BuildStubPhoneNumber(userId)
+                    : phoneNumber
+            });
+            await _context.SaveChangesAsync();
+        }
+        else if (!string.IsNullOrEmpty(phoneNumber))
+        {
+            // 存根已存在但为占位手机号时升级为真实手机号，便于成员列表展示
+            var user = await _context.Users
+                .IgnoreQueryFilters()
+                .FirstAsync(u => u.Id == userId);
+
+            if (user.PhoneNumber.StartsWith("stub_") && user.PhoneNumber != phoneNumber)
+            {
+                user.PhoneNumber = phoneNumber;
+                await _context.SaveChangesAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 生成确定性占位手机号（stub_ + 15 位 hex，共 20 字符，满足唯一索引且与真实 11 位手机号格式天然区分）
+    /// </summary>
+    private static string BuildStubPhoneNumber(Guid userId)
+    {
+        return $"stub_{userId.ToString("N")[..15]}";
     }
 }
 

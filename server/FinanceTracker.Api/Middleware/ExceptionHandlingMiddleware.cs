@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using FinanceTracker.Core.Exceptions;
 
 namespace FinanceTracker.Api.Middleware;
 
@@ -37,6 +38,9 @@ public class ExceptionHandlingMiddleware
         var (statusCode, message) = exception switch
         {
             ArgumentException argEx => (HttpStatusCode.BadRequest, argEx.Message),
+            // 权限拒绝（已认证但无权操作）→ 403；绝不能映射为 401，否则客户端会误判为登录过期而登出
+            ForbiddenAccessException => (HttpStatusCode.Forbidden, exception.Message),
+            // 认证失败 → 401（客户端据此重新登录）
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "未授权访问"),
             KeyNotFoundException => (HttpStatusCode.NotFound, "资源不存在"),
             _ => (HttpStatusCode.InternalServerError, "服务器内部错误")

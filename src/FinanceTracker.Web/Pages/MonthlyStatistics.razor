@@ -2,12 +2,14 @@
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
 @using FinanceTracker.Web.Services
+@using FinanceTracker.Web.Components.Charts
 @implements IDisposable
 @inject IStatisticsService StatisticsService
 @inject ILedgerService LedgerService
 @inject IJSRuntime JSRuntime
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
+@inject IBudgetService BudgetService
 
 <PStackPageBar Title="月度统计"
                CenterTitle
@@ -93,6 +95,56 @@
                 </MCard>
             </MCol>
         </MRow>
+
+        <!-- 预算执行情况 -->
+        @if (_budgetStatuses.Any())
+        {
+            <MRow Class="mt-0 mb-0">
+                <MCol Cols="12">
+                    <MCard>
+                        <MCardTitle>
+                            <MIcon Class="mr-2">mdi-wallet</MIcon>
+                            预算执行情况
+                        </MCardTitle>
+                        <MCardText>
+                            @foreach (var status in _budgetStatuses)
+                            {
+                                <div class="mb-3">
+                                    <div class="d-flex justify-space-between text-body-2">
+                                        <span>
+                                            @status.CategoryIcon @status.CategoryName
+                                            @if (status.LedgerName != null)
+                                            {
+                                                <span class="text--secondary">（@status.LedgerName）</span>
+                                            }
+                                        </span>
+                                        <span class="@(status.RemainingAmount < 0 ? "error--text" : null)">
+                                            @status.UsedAmount.ToString("N2") / @status.Amount.ToString("N2")
+                                        </span>
+                                    </div>
+                                    <MProgressLinear Value="@((double)Math.Min(status.UsagePercentage, 100m))"
+                                                     Color="@GetBudgetProgressColor(status.UsagePercentage)"
+                                                     Height="6"
+                                                     Rounded
+                                                     Class="mt-1" />
+                                    <div class="text-caption text--secondary mt-1">
+                                        已使用 @status.UsagePercentage.ToString("0.0")%，剩余 ¥@status.RemainingAmount.ToString("N2")
+                                        @if (status.UsagePercentage >= 100)
+                                        {
+                                            <span class="error--text">（已超支）</span>
+                                        }
+                                        else if (status.UsagePercentage >= 80)
+                                        {
+                                            <span class="warning--text">（接近预算上限）</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </MCardText>
+                    </MCard>
+                </MCol>
+            </MRow>
+        }
 
         <!-- 支出分类饼图 -->
         <MRow Class="mt-0 mb-0">
@@ -183,6 +235,42 @@
                 </MCard>
             </MCol>
         </MRow>
+
+        <!-- 数据可视化增强（issue 19）：排行 / 热力图 / 累计曲线 / 构成对比 -->
+        <ChartCard Title="分类支出排行"
+                   Subtitle="@($"{_currentYear}年{_currentMonth}月 Top 8")"
+                   Icon="mdi-chart-bar-stacked"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_expenseCategories.Any()">
+            <CategoryRankChart Categories="_expenseCategories" TopN="8" />
+        </ChartCard>
+
+        <ChartCard Title="支出日历热力图"
+                   Subtitle="@($"{_currentYear}年{_currentMonth}月")"
+                   Icon="mdi-calendar-month"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_dailyTrend.Any(t => t.Expense > 0)"
+                   EmptyText="当月暂无支出记录">
+            <CalendarHeatmapChart DailyData="_dailyTrend" Year="_currentYear" Month="_currentMonth" />
+        </ChartCard>
+
+        <ChartCard Title="累计收支曲线"
+                   Subtitle="@($"{_currentYear}年{_currentMonth}月")"
+                   Icon="mdi-chart-areaspline"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_dailyTrend.Any()"
+                   EmptyText="当月暂无收支记录">
+            <CumulativeNetChart DailyData="_dailyTrend" Year="_currentYear" Month="_currentMonth" />
+        </ChartCard>
+
+        <ChartCard Title="支出/收入构成对比"
+                   Subtitle="@($"{_currentYear}年{_currentMonth}月")"
+                   Icon="mdi-chart-donut"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_expenseCategories.Any() && !_incomeCategories.Any()"
+                   EmptyText="当月暂无收支记录">
+            <ExpenseIncomeDonutChart ExpenseCategories="_expenseCategories" IncomeCategories="_incomeCategories" />
+        </ChartCard>
     }
 </MContainer>
 
@@ -192,10 +280,16 @@
     private bool _isLoading = true;
 
     private MonthlyStatisticsModel? _monthlyStats;
-    private List<CategoryStatisticsModel> _expenseCategories = new();
-    private List<CategoryStatisticsModel> _incomeCategories = new();
+    private List<CategoryStatistics> _expenseCategories = new();
+    private List<CategoryStatistics> _incomeCategories = new();
     private object? _expensePieOption;
     private object? _incomePieOption;
+
+    // 预算执行情况（随月份/账本筛选联动）
+    private List<BudgetStatus> _budgetStatuses = new();
+
+    // 日粒度趋势数据（热力图/累计曲线用，随月份/账本筛选联动）
+    private List<TrendData> _dailyTrend = new();
 
     private Guid _userId;
 
@@ -314,31 +408,24 @@
 
             // 加载支出分类统计
             var expenseStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Expense, _selectedLedgerId);
-            _expenseCategories = expenseStats.Select(s => new CategoryStatisticsModel
-            {
-                CategoryId = s.CategoryId,
-                CategoryName = s.CategoryName,
-                CategoryIcon = s.CategoryIcon,
-                Amount = s.Amount,
-                Percentage = s.Percentage,
-                Count = s.Count
-            }).ToList();
+            _expenseCategories = expenseStats;
 
             _expensePieOption = BuildPieOption(_expenseCategories, "支出分类");
 
             // 加载收入分类统计
             var incomeStats = await StatisticsService.GetCategoryStatisticsAsync(_userId, _currentYear, _currentMonth, BillType.Income, _selectedLedgerId);
-            _incomeCategories = incomeStats.Select(s => new CategoryStatisticsModel
-            {
-                CategoryId = s.CategoryId,
-                CategoryName = s.CategoryName,
-                CategoryIcon = s.CategoryIcon,
-                Amount = s.Amount,
-                Percentage = s.Percentage,
-                Count = s.Count
-            }).ToList();
+            _incomeCategories = incomeStats;
 
             _incomePieOption = BuildPieOption(_incomeCategories, "收入分类");
+
+            // 加载预算执行情况
+            _budgetStatuses = await BudgetService.GetBudgetStatusAsync(_userId, _currentYear, _currentMonth, _selectedLedgerId);
+
+            // 加载日粒度趋势数据（热力图/累计曲线）
+            var monthStart = new DateTime(_currentYear, _currentMonth, 1);
+            var monthEnd = monthStart.AddMonths(1).AddSeconds(-1);
+            _dailyTrend = await StatisticsService.GetTrendDataAsync(
+                _userId, monthStart, monthEnd, "day", _selectedLedgerId);
         }
         catch (Exception ex)
         {
@@ -350,7 +437,20 @@
         }
     }
 
-    private object BuildPieOption(List<CategoryStatisticsModel> categories, string title)
+    /// <summary>
+    /// 预算进度条颜色：≥100% 红色超支，≥80% 黄色预警，其余主题色
+    /// </summary>
+    private string GetBudgetProgressColor(decimal usagePercentage)
+    {
+        return usagePercentage switch
+        {
+            >= 100 => "error",
+            >= 80 => "warning",
+            _ => "primary"
+        };
+    }
+
+    private object BuildPieOption(List<CategoryStatistics> categories, string title)
     {
         return new
         {
@@ -407,16 +507,6 @@
         public decimal TotalIncome { get; set; }
         public decimal NetIncome { get; set; }
         public int BillCount { get; set; }
-    }
-
-    private class CategoryStatisticsModel
-    {
-        public Guid CategoryId { get; set; }
-        public string CategoryName { get; set; } = string.Empty;
-        public string CategoryIcon { get; set; } = string.Empty;
-        public decimal Amount { get; set; }
-        public decimal Percentage { get; set; }
-        public int Count { get; set; }
     }
 
     private class LedgerModel

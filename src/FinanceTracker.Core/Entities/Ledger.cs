@@ -38,4 +38,5 @@ public class Ledger : BaseEntity
     // 导航属性
     public User User { get; set; } = null!;
     public ICollection<Bill> Bills { get; set; } = new List<Bill>();
+    public ICollection<LedgerMember> Members { get; set; } = new List<LedgerMember>();
 }

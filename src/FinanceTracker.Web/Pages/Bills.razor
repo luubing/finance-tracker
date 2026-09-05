@@ -9,6 +9,7 @@
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
+@inject ILedgerMemberService LedgerMemberService
 
 <PStackPageBar Title="账单列表"
                CenterTitle
@@ -90,7 +91,7 @@
                         <MCol Cols="12" Sm="6" Md="3">
                             <MSelect @bind-Value="_filter.LedgerId"
                                      Items="_ledgers"
-                                     ItemText="l => l.Name"
+                                     ItemText="@GetLedgerDisplayText"
                                      ItemValue="l => (Guid?)l.Id"
                                      Label="账本"
                                      Outlined
@@ -411,8 +412,26 @@
         {
             Id = l.Id,
             Name = l.Name,
-            Icon = l.Icon
+            Icon = l.Icon,
+            IsShared = false
         }).ToList();
+
+        // 共享账本：筛选时账本内全部成员账单可见（BillService 已处理共享可见性）
+        try
+        {
+            var sharedLedgers = await LedgerMemberService.GetSharedLedgersAsync(_userId);
+            _ledgers.AddRange(sharedLedgers.Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon,
+                IsShared = true
+            }));
+        }
+        catch
+        {
+            // 共享账本加载失败不影响自有账本
+        }
     }
 
     private async Task LoadBills()
@@ -847,5 +866,12 @@
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
+        public bool IsShared { get; set; }
     }
+
+    /// <summary>
+    /// 账本下拉显示文本：共享账本追加（共享）标记
+    /// </summary>
+    private string GetLedgerDisplayText(LedgerModel ledger) =>
+        ledger.IsShared ? $"{ledger.Name}（共享）" : ledger.Name;
 }

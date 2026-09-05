@@ -1,0 +1,65 @@
+@namespace FinanceTracker.Web.Components.Charts
+
+<MCard Class="mb-4">
+    <MCardTitle Class="pb-0">
+        <MIcon Class="mr-2" Color="@IconColor">@Icon</MIcon>
+        @Title
+        @if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <span class="text-caption text--secondary ml-2">@Subtitle</span>
+        }
+    </MCardTitle>
+    <MCardText>
+        @if (IsLoading)
+        {
+            <MContainer Class="d-flex justify-center align-center" Style="height: 160px;">
+                <MProgressCircular Indeterminate Size="48" Color="primary" />
+            </MContainer>
+        }
+        else if (IsEmpty)
+        {
+            <div class="text-center py-8">
+                <MIcon Size="56" Color="grey lighten-1">mdi-chart-arc</MIcon>
+                <div class="text-body-2 grey--text text--lighten-1 mt-3">@EmptyText</div>
+            </div>
+        }
+        else
+        {
+            @ChildContent
+        }
+    </MCardText>
+</MCard>
+
+@code {
+    /// <summary>卡片标题</summary>
+    [Parameter]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>副标题（如筛选范围说明）</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>标题图标（mdi-xxx）</summary>
+    [Parameter]
+    public string Icon { get; set; } = "mdi-chart-bar";
+
+    /// <summary>图标颜色</summary>
+    [Parameter]
+    public string IconColor { get; set; } = "primary";
+
+    /// <summary>是否加载中</summary>
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    /// <summary>是否空数据（展示空状态占位）</summary>
+    [Parameter]
+    public bool IsEmpty { get; set; }
+
+    /// <summary>空状态文案</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "暂无数据";
+
+    /// <summary>图表内容</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

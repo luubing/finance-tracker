@@ -1,4 +1,5 @@
 using FinanceTracker.Core.Enums;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,10 +11,43 @@ namespace FinanceTracker.Api.Controllers;
 public class BillsController : BaseApiController
 {
     private readonly IBillService _billService;
+    private readonly ILedgerMemberService _ledgerMemberService;
 
-    public BillsController(IBillService billService)
+    public BillsController(IBillService billService, ILedgerMemberService ledgerMemberService)
     {
         _billService = billService;
+        _ledgerMemberService = ledgerMemberService;
+    }
+
+    /// <summary>
+    /// 账本写权限校验：账单归属共享账本时，Viewer/非成员不能记账（与 ADR 0004 权限模型一致）。
+    /// 账本为空（未归属账本）或属于本人时直接放行（EnsureCanWrite 内部已覆盖自有账本场景）。
+    /// </summary>
+    private async Task<IActionResult?> ValidateLedgerWritePermissionAsync(Guid userId, Guid? ledgerId)
+    {
+        if (ledgerId.HasValue && ledgerId.Value != Guid.Empty)
+        {
+            try
+            {
+                await _ledgerMemberService.EnsureCanWriteAsync(ledgerId.Value, userId);
+            }
+            catch (ForbiddenAccessException ex)
+            {
+                // 注意：Forbid(string) 的参数是 authenticationScheme 而非消息，误用会导致 500。
+                // 这里显式返回 403 + 错误信息
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -91,6 +125,12 @@ public class BillsController : BaseApiController
             return validationError;
         }
 
+        var ledgerError = await ValidateLedgerWritePermissionAsync(userId, request.LedgerId);
+        if (ledgerError != null)
+        {
+            return ledgerError;
+        }
+
         var bill = new Core.Entities.Bill
         {
             UserId = userId,
@@ -119,10 +159,22 @@ public class BillsController : BaseApiController
     {
         var userId = GetUserId();
 
+        var existingBill = await _billService.GetBillByIdAsync(id);
+        if (existingBill == null || existingBill.UserId != userId)
+        {
+            return NotFound(new { message = "账单不存在" });
+        }
+
         var validationError = ValidateBillRequest(request);
         if (validationError != null)
         {
             return validationError;
+        }
+
+        var ledgerError = await ValidateLedgerWritePermissionAsync(userId, request.LedgerId);
+        if (ledgerError != null)
+        {
+            return ledgerError;
         }
 
         var bill = new Core.Entities.Bill

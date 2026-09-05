@@ -18,6 +18,8 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<PaymentChannel> PaymentChannels => Set<PaymentChannel>();
     public DbSet<Ledger> Ledgers => Set<Ledger>();
+    public DbSet<LedgerMember> LedgerMembers => Set<LedgerMember>();
+    public DbSet<Budget> Budgets => Set<Budget>();
     public DbSet<PendingBill> PendingBills => Set<PendingBill>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -114,6 +116,24 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
+        // 账本成员配置（共享账本）：(LedgerId, UserId) 唯一，拒绝/移除后重新邀请复用原记录
+        modelBuilder.Entity<LedgerMember>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.LedgerId, e.UserId }).IsUnique();
+            entity.HasIndex(e => e.UserId);
+
+            entity.HasOne(e => e.Ledger)
+                .WithMany(l => l.Members)
+                .HasForeignKey(e => e.LedgerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.LedgerMemberships)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // 待确认账单配置（通知栏/短信自动捕获的本地数据，不参与云同步，无外键关系）
         modelBuilder.Entity<PendingBill>(entity =>
         {
@@ -122,6 +142,31 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.Amount).HasPrecision(18, 2);
             entity.Property(e => e.Channel).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Note).HasMaxLength(500);
+        });
+
+        // 预算配置
+        modelBuilder.Entity<Budget>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.UserId, e.Year, e.Month });
+            entity.Property(e => e.Amount).HasPrecision(18, 2);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Budgets)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Ledger)
+                .WithMany()
+                .HasForeignKey(e => e.LedgerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Category)
+                .WithMany()
+                .HasForeignKey(e => e.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
     }
 

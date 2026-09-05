@@ -16,6 +16,8 @@
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
+@inject ILedgerMemberService LedgerMemberService
+@inject IBudgetService BudgetService
 @implements IDisposable
 
 <PStackPageBar Title="@(IsEditing ? "编辑账单" : "记一笔")"
@@ -151,7 +153,7 @@
                             <MCol Cols="12">
                                 <MSelect @bind-Value="_model.LedgerId"
                                          Items="_ledgers"
-                                         ItemText="l => l.Name"
+                                         ItemText="@GetLedgerDisplayText"
                                          ItemValue="l => (Guid?)l.Id"
                                          Label="账本（可选）"
                                          Outlined
@@ -440,8 +442,26 @@
         {
             Id = l.Id,
             Name = l.Name,
-            Icon = l.Icon
+            Icon = l.Icon,
+            IsShared = false
         }).ToList();
+
+        // 共享账本：Editor/Viewer 均可选择（Viewer 记账时由服务端拦截并提示）
+        try
+        {
+            var sharedLedgers = await LedgerMemberService.GetSharedLedgersAsync(_userId);
+            _ledgers.AddRange(sharedLedgers.Select(l => new LedgerModel
+            {
+                Id = l.Id,
+                Name = l.Name,
+                Icon = l.Icon,
+                IsShared = true
+            }));
+        }
+        catch
+        {
+            // 共享账本加载失败不影响自有账本
+        }
     }
 
     private async Task LoadBill(Guid billId)
@@ -503,6 +523,20 @@
             return;
         }
 
+        // 共享账本写权限本地校验（读离线缓存，即时反馈；云端推送仍有兜底校验）
+        if (_model.LedgerId.HasValue)
+        {
+            try
+            {
+                await LedgerMemberService.EnsureCanWriteAsync(_model.LedgerId.Value, _userId);
+            }
+            catch (Exception ex)
+            {
+                await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+                return;
+            }
+        }
+
         _loading = true;
 
         try
@@ -548,6 +582,10 @@
             }
 
             BillEventService.NotifyBillChanged();
+
+            // 支出保存后进行预算预警检查（超支/接近上限提示）
+            await CheckBudgetAlertAsync(transactionTime);
+
             NavController.Pop();
         }
         catch (Exception ex)
@@ -557,6 +595,50 @@
         finally
         {
             _loading = false;
+        }
+    }
+
+    /// <summary>
+    /// 预算预警检查：支出账单保存后，检查相关预算（总预算 + 该分类预算）的使用情况，
+    /// 超支（≥100%）红色提示、接近上限（≥80%）黄色提示。检查失败不影响保存流程。
+    /// </summary>
+    private async Task CheckBudgetAlertAsync(DateTime transactionTime)
+    {
+        if (_model.Type != BillType.Expense)
+        {
+            return;
+        }
+
+        try
+        {
+            var alert = await BudgetService.GetBudgetAlertAsync(
+                _userId,
+                transactionTime.Year,
+                transactionTime.Month,
+                _model.LedgerId,
+                _model.CategoryId);
+
+            if (alert == null)
+            {
+                return;
+            }
+
+            if (alert.IsExceeded)
+            {
+                await PopupService.EnqueueSnackbarAsync(
+                    $"预算超支提醒：{alert.CategoryName}已使用 {alert.UsagePercentage:0.0}%（超支 {Math.Abs(alert.RemainingAmount):N2} 元）",
+                    AlertTypes.Error);
+            }
+            else if (alert.IsWarning)
+            {
+                await PopupService.EnqueueSnackbarAsync(
+                    $"预算预警：{alert.CategoryName}已使用 {alert.UsagePercentage:0.0}%，剩余 {alert.RemainingAmount:N2} 元，请注意控制支出",
+                    AlertTypes.Warning);
+            }
+        }
+        catch (Exception)
+        {
+            // 预算预警失败不影响保存流程
         }
     }
 
@@ -881,5 +963,12 @@
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
+        public bool IsShared { get; set; }
     }
+
+    /// <summary>
+    /// 账本下拉显示文本：共享账本追加（共享）标记
+    /// </summary>
+    private string GetLedgerDisplayText(LedgerModel ledger) =>
+        ledger.IsShared ? $"{ledger.Name}（共享）" : ledger.Name;
 }

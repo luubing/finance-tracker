@@ -46,12 +46,18 @@ builder.Services.AddSingleton<ISmsService, NoOpSmsService>();
 builder.Services.AddSingleton<INotificationListenerPermissionService, NoOpNotificationListenerPermissionService>();
 builder.Services.AddSingleton<IPendingBillService, NoOpPendingBillService>();
 
+// 注册预算超支通知服务（Web 端无本地通知，使用空实现）与预算预警服务
+builder.Services.AddSingleton<IBudgetNotificationService, NoOpBudgetNotificationService>();
+
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
 builder.Services.AddScoped<ILedgerService, LedgerService>();
+builder.Services.AddScoped<IBudgetService, BudgetService>();
+// 账本成员服务：管理操作走云端 API，权限判定读本地缓存（云端数据库为真相源）
+builder.Services.AddScoped<ILedgerMemberService, HttpLedgerMemberService>();
 builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
@@ -71,6 +77,7 @@ var apiBaseUrl = builder.Configuration["ApiSettings:BaseUrl"] ?? "http://localho
 // 注册应用服务
 builder.Services.AddScoped<AuthenticationService>();
 builder.Services.AddScoped<BillEventService>();
+builder.Services.AddScoped<BudgetAlertService>();
 builder.Services.AddScoped<HttpService>();
 builder.Services.AddScoped<ICloudSyncClient>(sp =>
     new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), apiBaseUrl));

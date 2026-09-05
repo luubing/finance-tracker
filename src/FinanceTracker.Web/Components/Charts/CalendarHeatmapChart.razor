@@ -1,0 +1,116 @@
+@namespace FinanceTracker.Web.Components.Charts
+@using FinanceTracker.Core.Interfaces
+
+@if (_option != null)
+{
+    <MECharts Option="_option" Height="240" />
+}
+
+@code {
+    /// <summary>
+    /// 日粒度趋势数据（服务端只返回有账单的日期，组件内部补齐整月）
+    /// </summary>
+    [Parameter]
+    public List<TrendData> DailyData { get; set; } = new();
+
+    /// <summary>年份</summary>
+    [Parameter]
+    public int Year { get; set; }
+
+    /// <summary>月份</summary>
+    [Parameter]
+    public int Month { get; set; }
+
+    private object? _option;
+
+    protected override void OnParametersSet()
+    {
+        _option = BuildOption();
+    }
+
+    /// <summary>
+    /// 构建月视图日历热力图配置（颜色越深表示当日支出越高）
+    /// </summary>
+    private object? BuildOption()
+    {
+        if (Year < 2000 || Month is < 1 or > 12)
+        {
+            return null;
+        }
+
+        var expenseByDate = DailyData
+            .GroupBy(t => t.Date.Date)
+            .ToDictionary(g => g.Key, g => g.Sum(t => t.Expense));
+
+        var rangeStart = new DateTime(Year, Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(Year, Month);
+        var rangeEnd = new DateTime(Year, Month, daysInMonth);
+
+        var data = new List<object>();
+        var maxExpense = 0m;
+
+        for (var day = 1; day <= daysInMonth; day++)
+        {
+            var date = new DateTime(Year, Month, day);
+            var expense = expenseByDate.GetValueOrDefault(date);
+
+            if (expense > maxExpense)
+            {
+                maxExpense = expense;
+            }
+
+            data.Add(new
+            {
+                date = date.ToString("yyyy-MM-dd"),
+                value = new object[] { date.ToString("yyyy-MM-dd"), (double)expense }
+            });
+        }
+
+        if (maxExpense <= 0)
+        {
+            return null;
+        }
+
+        return new
+        {
+            tooltip = new
+            {
+                formatter = "{b}<br/>支出: ¥{c}"
+            },
+            visualMap = new
+            {
+                min = 0,
+                max = (double)maxExpense,
+                calculable = false,
+                orient = "horizontal",
+                left = "center",
+                bottom = 0,
+                itemWidth = 10,
+                itemHeight = 60,
+                textStyle = new { fontSize = 10 },
+                inRange = new { color = new[] { "#E3F2FD", "#FFB74D", "#E53935" } }
+            },
+            calendar = new
+            {
+                top = 30,
+                left = 30,
+                right = 8,
+                cellSize = new object[] { "auto", 16 },
+                range = new[] { rangeStart.ToString("yyyy-MM-dd"), rangeEnd.ToString("yyyy-MM-dd") },
+                itemStyle = new { color = "#FAFAFA", borderColor = "#E0E0E0", borderWidth = 1 },
+                yearLabel = new { show = false },
+                monthLabel = new { show = false },
+                dayLabel = new { firstDay = 1, nameMap = new[] { "日", "一", "二", "三", "四", "五", "六" }, fontSize = 10 }
+            },
+            series = new[]
+            {
+                new
+                {
+                    type = "heatmap",
+                    coordinateSystem = "calendar",
+                    data
+                }
+            }
+        };
+    }
+}

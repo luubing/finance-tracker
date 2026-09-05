@@ -79,6 +79,8 @@ builder.Services.AddScoped<IPresetDataService, PresetDataService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
 builder.Services.AddScoped<ILedgerService, LedgerService>();
+builder.Services.AddScoped<IBudgetService, BudgetService>();
+builder.Services.AddScoped<ILedgerMemberService, LedgerMemberService>();
 builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ITokenService, TokenService>();

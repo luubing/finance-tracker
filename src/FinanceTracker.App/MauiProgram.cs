@@ -76,10 +76,16 @@ public static class MauiProgram
         builder.Services.AddScoped<ICategoryService, CategoryService>();
         builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
         builder.Services.AddScoped<ILedgerService, LedgerService>();
+        builder.Services.AddScoped<IBudgetService, BudgetService>();
+        // 账本成员服务：管理操作走云端 API，权限判定读本地缓存（云端数据库为真相源）
+        builder.Services.AddScoped<ILedgerMemberService, HttpLedgerMemberService>();
         builder.Services.AddScoped<IBillService, BillService>();
         builder.Services.AddScoped<IStatisticsService, StatisticsService>();
         builder.Services.AddScoped<ISyncService, SyncService>();
         builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
+
+        // 预算超支本地通知（App 端原生实现：Android/iOS，其他平台内部静默跳过）
+        builder.Services.AddSingleton<IBudgetNotificationService, BudgetNotificationService>();
 
         // 注册平台服务
         builder.Services.AddSingleton<INetworkService, NetworkService>();
@@ -109,6 +115,7 @@ public static class MauiProgram
         // 注册应用服务
         builder.Services.AddScoped<AuthenticationService>();
         builder.Services.AddScoped<BillEventService>();
+        builder.Services.AddScoped<BudgetAlertService>();
         builder.Services.AddScoped<HttpService>();
         // 语音记账：文本解析（中文口语 → 账单草稿）+ 语音录入桥接服务
         // （App 端 SpeechService 注册进 BillVoiceInputService 后走原生识别，见 ISpeechService 注册）

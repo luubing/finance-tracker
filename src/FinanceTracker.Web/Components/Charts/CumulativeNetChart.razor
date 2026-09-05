@@ -1,0 +1,130 @@
+@namespace FinanceTracker.Web.Components.Charts
+@using FinanceTracker.Core.Interfaces
+
+@if (_option != null)
+{
+    <MECharts Option="_option" Height="260" />
+}
+
+@code {
+    /// <summary>
+    /// 日粒度趋势数据（组件内部按日累计；服务端只返回有账单的日期，组件内部补齐整月）
+    /// </summary>
+    [Parameter]
+    public List<TrendData> DailyData { get; set; } = new();
+
+    /// <summary>年份</summary>
+    [Parameter]
+    public int Year { get; set; }
+
+    /// <summary>月份</summary>
+    [Parameter]
+    public int Month { get; set; }
+
+    private object? _option;
+
+    protected override void OnParametersSet()
+    {
+        _option = BuildOption();
+    }
+
+    /// <summary>
+    /// 构建每日累计支出/收入/净收支曲线配置
+    /// </summary>
+    private object? BuildOption()
+    {
+        if (Year < 2000 || Month is < 1 or > 12)
+        {
+            return null;
+        }
+
+        var byDate = DailyData
+            .GroupBy(t => t.Date.Date)
+            .ToDictionary(g => g.Key, g => (Expense: g.Sum(t => t.Expense), Income: g.Sum(t => t.Income)));
+
+        var daysInMonth = DateTime.DaysInMonth(Year, Month);
+
+        var dates = new List<string>();
+        var cumExpense = new List<double>();
+        var cumIncome = new List<double>();
+        var cumNet = new List<double>();
+
+        double totalExpense = 0;
+        double totalIncome = 0;
+
+        for (var day = 1; day <= daysInMonth; day++)
+        {
+            var date = new DateTime(Year, Month, day);
+            var (expense, income) = byDate.GetValueOrDefault(date, (0m, 0m));
+
+            totalExpense += (double)expense;
+            totalIncome += (double)income;
+
+            dates.Add(day.ToString());
+            cumExpense.Add(Math.Round(totalExpense, 2));
+            cumIncome.Add(Math.Round(totalIncome, 2));
+            cumNet.Add(Math.Round(totalIncome - totalExpense, 2));
+        }
+
+        if (totalExpense == 0 && totalIncome == 0)
+        {
+            return null;
+        }
+
+        return new
+        {
+            tooltip = new { trigger = "axis" },
+            legend = new
+            {
+                data = new[] { "累计支出", "累计收入", "累计净收支" },
+                bottom = 0,
+                textStyle = new { fontSize = 10 },
+                itemWidth = 14,
+                itemHeight = 8
+            },
+            grid = new { left = 8, right = 8, top = 20, bottom = 40, containLabel = true },
+            xAxis = new
+            {
+                type = "category",
+                boundaryGap = false,
+                data = dates,
+                axisLabel = new { fontSize = 10, interval = Math.Max(0, daysInMonth / 8 - 1) }
+            },
+            yAxis = new { type = "value", axisLabel = new { fontSize = 10, formatter = "¥{value}" } },
+            series = new object[]
+            {
+                new
+                {
+                    name = "累计支出",
+                    type = "line",
+                    data = cumExpense,
+                    smooth = true,
+                    showSymbol = false,
+                    lineStyle = new { width = 2, color = "#FF5252" },
+                    itemStyle = new { color = "#FF5252" }
+                },
+                new
+                {
+                    name = "累计收入",
+                    type = "line",
+                    data = cumIncome,
+                    smooth = true,
+                    showSymbol = false,
+                    lineStyle = new { width = 2, color = "#4CAF50" },
+                    itemStyle = new { color = "#4CAF50" }
+                },
+                new
+                {
+                    name = "累计净收支",
+                    type = "line",
+                    data = cumNet,
+                    smooth = true,
+                    showSymbol = false,
+                    areaStyle = new { opacity = 0.15 },
+                    lineStyle = new { width = 2, color = "#2196F3" },
+                    itemStyle = new { color = "#2196F3" }
+                }
+            }
+        };
+    }
+}

@@ -86,6 +86,9 @@ server/
 2. **认证方式**: 手机号手动输入，无验证码，本地存储会话状态
 3. **API 风格**: REST，标准 CRUD 操作
 4. **数据来源**: 手动录入、导入(微信/支付宝CSV)、短信识别、通知栏、语音识别（语音仅预填表单，用户确认后保存，来源标记为 BillSource.Voice）
+5. **预算管理**: Budget 实体（总预算+分类预算，可按账本独立设置），唯一性由应用层校验；超支本地通知每日最多一次（ADR 见 issue 16/17）
+6. **共享账本**: 成员关系以云端数据库为真相源（LedgerMember 实体，Owner/Editor/Viewer 三角色，邀请确认制），客户端仅缓存成员关系用于本地可见性判定；架构详见 docs/adr/0004-shared-ledger-permissions.md
+7. **错误码语义分离**: 401（认证失败，客户端触发重新登录）与 403（已认证但无权操作，ForbiddenAccessException）严格区分——服务层权限错误必须抛 ForbiddenAccessException，绝不能抛 UnauthorizedAccessException（否则客户端会误判为登录过期而登出）；控制器中禁止使用 Forbid(string)（参数是认证方案名而非消息，误用会导致 500），统一用 StatusCode(StatusCodes.Status403Forbidden, new { message })
 
 ## 开发注意事项
 

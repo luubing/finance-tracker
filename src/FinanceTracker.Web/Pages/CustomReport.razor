@@ -1,0 +1,446 @@
+@page "/custom-report"
+@using System.Text
+@using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Components.Charts
+@using FinanceTracker.Web.Services
+@inject IStatisticsService StatisticsService
+@inject ILedgerService LedgerService
+@inject IJSRuntime JSRuntime
+@inject IPopupService PopupService
+
+<PStackPageBar Title="自定义报表"
+               CenterTitle
+               Flat
+               Color="primary" />
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    <!-- 筛选条件 -->
+    <MCard Class="mb-4">
+        <MCardText>
+            <MRow Dense>
+                <MCol Cols="12" Sm="6">
+                    <MTextField @bind-Value="_startDateText"
+                                Label="开始日期（yyyy-MM-dd）"
+                                Outlined
+                                Dense
+                                HideDetails="true" />
+                </MCol>
+                <MCol Cols="12" Sm="6">
+                    <MTextField @bind-Value="_endDateText"
+                                Label="结束日期（yyyy-MM-dd）"
+                                Outlined
+                                Dense
+                                HideDetails="true" />
+                </MCol>
+                <MCol Cols="12">
+                    <MSelect @bind-Value="_selectedLedgerId"
+                             Items="_ledgers"
+                             ItemText="l => l.Name"
+                             ItemValue="l => (Guid?)l.Id"
+                             Label="账本（不选为全部账本）"
+                             Outlined
+                             Dense
+                             Clearable
+                             HideDetails="true" />
+                </MCol>
+                <MCol Cols="12" Sm="8">
+                    <MButtonGroup Value="_quickRange">
+                        <MButton Value="@("this-month")" OnClick="@(() => ApplyQuickRange("this-month"))">本月</MButton>
+                        <MButton Value="@("last-month")" OnClick="@(() => ApplyQuickRange("last-month"))">上月</MButton>
+                        <MButton Value="@("last-30")" OnClick="@(() => ApplyQuickRange("last-30"))">近30天</MButton>
+                        <MButton Value="@("last-90")" OnClick="@(() => ApplyQuickRange("last-90"))">近90天</MButton>
+                    </MButtonGroup>
+                </MCol>
+                <MCol Cols="12" Sm="4" Class="text-right">
+                    <MButton Color="primary" Disabled="_isLoading" OnClick="LoadReport">
+                        <MIcon Class="mr-2">mdi-magnify</MIcon>
+                        生成报表
+                    </MButton>
+                </MCol>
+            </MRow>
+        </MCardText>
+    </MCard>
+
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else if (_stats == null)
+    {
+        <MCard>
+            <MCardText Class="text-center py-8">
+                <MIcon Size="64" Color="grey lighten-1">mdi-file-chart-outline</MIcon>
+                <div class="text-h6 grey--text text--lighten-1 mt-4">选择日期范围后点击"生成报表"</div>
+            </MCardText>
+        </MCard>
+    }
+    else
+    {
+        <!-- 汇总卡片 -->
+        <MRow Dense Class="mb-0">
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="error" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总支出</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.TotalExpense.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="success" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">总收入</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.TotalIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+            <MCol Cols="4" Class="d-flex">
+                <MCard Color="@(_stats.NetIncome >= 0 ? "success" : "error")" Dark Class="flex-grow-1">
+                    <MCardText Class="text-center py-2">
+                        <div class="text-caption">净收支</div>
+                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.NetIncome.ToString("N2")</div>
+                    </MCardText>
+                </MCard>
+            </MCol>
+        </MRow>
+        <div class="text-caption text--secondary mb-4">
+            @_stats.StartDate.ToString("yyyy-MM-dd") ~ @_stats.EndDate.ToString("yyyy-MM-dd") · 共 @_stats.BillCount 笔账单
+        </div>
+
+        <!-- 分类环比对比 -->
+        <ChartCard Title="分类支出环比"
+                   Subtitle="当前周期 vs 上一等长周期"
+                   Icon="mdi-compare-horizontal"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_comparisons.Any()"
+                   EmptyText="所选范围内暂无支出数据">
+            <MList Dense>
+                @foreach (var comparison in _comparisons)
+                {
+                    <MListItem Class="px-0">
+                        <MListItemIcon>
+                            <MIcon>@comparison.CategoryIcon</MIcon>
+                        </MListItemIcon>
+                        <MListItemContent>
+                            <MListItemTitle>@comparison.CategoryName</MListItemTitle>
+                            <MListItemSubtitle>
+                                ¥@comparison.CurrentAmount.ToString("N2")（上期 ¥@comparison.PreviousAmount.ToString("N2")）
+                            </MListItemSubtitle>
+                        </MListItemContent>
+                        <MListItemAction>
+                            @if (comparison.ChangeRate.HasValue)
+                            {
+                                <span class="@GetChangeClass(comparison.ChangeAmount)">
+                                    @if (comparison.ChangeAmount >= 0)
+                                    {
+                                        <MIcon Small>mdi-arrow-up</MIcon>
+                                    }
+                                    else
+                                    {
+                                        <MIcon Small>mdi-arrow-down</MIcon>
+                                    }
+                                    @Math.Abs(comparison.ChangeRate.Value)%
+                                </span>
+                            }
+                            else if (comparison.CurrentAmount > 0)
+                            {
+                                <span class="error--text text-caption">新增</span>
+                            }
+                            else
+                            {
+                                <span class="success--text text-caption">归零</span>
+                            }
+                        </MListItemAction>
+                    </MListItem>
+                }
+            </MList>
+        </ChartCard>
+
+        <!-- 分类排行 -->
+        <ChartCard Title="分类支出排行"
+                   Subtitle="Top 8"
+                   Icon="mdi-chart-bar-stacked"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_stats.ExpenseCategoryStats.Any()">
+            <CategoryRankChart Categories="_stats.ExpenseCategoryStats" TopN="8" />
+        </ChartCard>
+
+        <!-- 支出/收入构成对比 -->
+        <ChartCard Title="支出/收入构成对比"
+                   Icon="mdi-chart-donut"
+                   IsLoading="_isLoading"
+                   IsEmpty="!_stats.ExpenseCategoryStats.Any() && !_stats.IncomeCategoryStats.Any()">
+            <ExpenseIncomeDonutChart ExpenseCategories="_stats.ExpenseCategoryStats" IncomeCategories="_stats.IncomeCategoryStats" />
+        </ChartCard>
+
+        <!-- 导出与分享 -->
+        <MRow Class="mb-4">
+            <MCol Cols="6">
+                <MButton Block Outlined Color="primary" OnClick="ExportCsv">
+                    <MIcon Class="mr-2">mdi-download</MIcon>
+                    导出 CSV
+                </MButton>
+            </MCol>
+            <MCol Cols="6">
+                <MButton Block Outlined Color="secondary" OnClick="ShareReport">
+                    <MIcon Class="mr-2">mdi-share-variant</MIcon>
+                    分享摘要
+                </MButton>
+            </MCol>
+        </MRow>
+    }
+</MContainer>
+@code {
+    private bool _isLoading;
+    private CustomStatistics? _stats;
+    private List<CategoryComparisonData> _comparisons = new();
+
+    private string _startDateText = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1).ToString("yyyy-MM-dd");
+    private string _endDateText = DateTime.Now.ToString("yyyy-MM-dd");
+    private string? _quickRange;
+
+    private Guid _userId;
+    private Guid? _selectedLedgerId;
+    private List<LedgerModel> _ledgers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
+        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+        {
+            _userId = userId;
+        }
+
+        try
+        {
+            var ledgers = await LedgerService.GetLedgersAsync(_userId);
+            _ledgers = ledgers
+                .Select(l => new LedgerModel { Id = l.Id, Name = l.Name, Icon = l.Icon })
+                .ToList();
+        }
+        catch
+        {
+            // 账本加载失败不影响报表功能
+        }
+    }
+
+    /// <summary>
+    /// 应用快捷日期范围
+    /// </summary>
+    private void ApplyQuickRange(string range)
+    {
+        var today = DateTime.Now;
+
+        switch (range)
+        {
+            case "this-month":
+                _startDateText = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd");
+                _endDateText = today.ToString("yyyy-MM-dd");
+                break;
+            case "last-month":
+                var lastMonth = today.AddMonths(-1);
+                _startDateText = new DateTime(lastMonth.Year, lastMonth.Month, 1).ToString("yyyy-MM-dd");
+                _endDateText = new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month)).ToString("yyyy-MM-dd");
+                break;
+            case "last-30":
+                _startDateText = today.AddDays(-30).ToString("yyyy-MM-dd");
+                _endDateText = today.ToString("yyyy-MM-dd");
+                break;
+            case "last-90":
+                _startDateText = today.AddDays(-90).ToString("yyyy-MM-dd");
+                _endDateText = today.ToString("yyyy-MM-dd");
+                break;
+        }
+
+        _quickRange = range;
+    }
+
+    /// <summary>
+    /// 生成报表
+    /// </summary>
+    private async Task LoadReport()
+    {
+        if (!TryParseRange(out var startDate, out var endDate))
+        {
+            return;
+        }
+
+        _isLoading = true;
+
+        try
+        {
+            _stats = await StatisticsService.GetCustomStatisticsAsync(_userId, startDate, endDate, _selectedLedgerId);
+            _comparisons = await StatisticsService.GetCategoryComparisonAsync(_userId, startDate, endDate, _selectedLedgerId);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载报表失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// 解析并校验日期范围
+    /// </summary>
+    private bool TryParseRange(out DateTime startDate, out DateTime endDate)
+    {
+        startDate = default;
+        endDate = default;
+
+        if (!DateTime.TryParse(_startDateText, out startDate) ||
+            !DateTime.TryParse(_endDateText, out endDate))
+        {
+            PopupService.EnqueueSnackbarAsync("日期格式无效，请使用 yyyy-MM-dd", AlertTypes.Warning);
+            return false;
+        }
+
+        if (startDate > endDate)
+        {
+            PopupService.EnqueueSnackbarAsync("开始日期不能晚于结束日期", AlertTypes.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 环比变化颜色：支出增加红色（恶化）、减少绿色（改善）
+    /// </summary>
+    private string GetChangeClass(decimal changeAmount)
+    {
+        return changeAmount >= 0 ? "error--text" : "success--text";
+    }
+
+    /// <summary>
+    /// 导出支出分类统计为 CSV（BOM 头保证 Excel 中文不乱码）
+    /// </summary>
+    private async Task ExportCsv()
+    {
+        if (_stats == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var csv = new StringBuilder();
+            csv.AppendLine($"自定义报表 {_stats.StartDate:yyyy-MM-dd} ~ {_stats.EndDate:yyyy-MM-dd}");
+            csv.AppendLine($"总支出,{_stats.TotalExpense:N2}");
+            csv.AppendLine($"总收入,{_stats.TotalIncome:N2}");
+            csv.AppendLine($"净收支,{_stats.NetIncome:N2}");
+            csv.AppendLine($"账单数量,{_stats.BillCount}");
+            csv.AppendLine();
+            csv.AppendLine("分类,金额,笔数,占比(%)");
+            foreach (var category in _stats.ExpenseCategoryStats)
+            {
+                csv.AppendLine($"{category.CategoryName},{category.Amount:N2},{category.Count},{category.Percentage}");
+            }
+
+            var dataUri = "data:text/csv;charset=utf-8,\uFEFF" + Uri.EscapeDataString(csv.ToString());
+
+            await JSRuntime.InvokeVoidAsync("eval",
+                "(() => {" +
+                "const a = document.createElement('a');" +
+                $"a.href = '{dataUri}';" +
+                "a.download = 'custom_report.csv';" +
+                "document.body.appendChild(a);" +
+                "a.click();" +
+                "a.remove();" +
+                "})();");
+
+            await PopupService.EnqueueSnackbarAsync("报表已导出", AlertTypes.Success);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"导出失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    /// <summary>
+    /// 生成报表文本摘要并分享（优先系统分享面板，回退复制到剪贴板）
+    /// </summary>
+    private async Task ShareReport()
+    {
+        if (_stats == null)
+        {
+            return;
+        }
+
+        var shareText = $"【记账报表】{_stats.StartDate:yyyy-MM-dd} ~ {_stats.EndDate:yyyy-MM-dd}\n{BuildSummary()}";
+
+        try
+        {
+            // Web Share API（Android/iOS 系统分享面板）
+            await JSRuntime.InvokeVoidAsync("navigator.share", new { title = "记账报表", text = shareText });
+            return;
+        }
+        catch (JSException)
+        {
+            // Web Share 不可用，回退到剪贴板
+        }
+        catch (Exception)
+        {
+            // 用户取消分享
+            return;
+        }
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", shareText);
+            await PopupService.EnqueueSnackbarAsync("报表摘要已复制到剪贴板", AlertTypes.Success);
+        }
+        catch
+        {
+            await PopupService.EnqueueSnackbarAsync("当前环境不支持分享，可截图保存", AlertTypes.Warning);
+        }
+    }
+
+    /// <summary>
+    /// 生成报表文本摘要（总览 + 支出 Top 3 + 环比亮点）
+    /// </summary>
+    private string BuildSummary()
+    {
+        var summary = $"总支出 ¥{_stats!.TotalExpense:N2}，总收入 ¥{_stats.TotalIncome:N2}，净收支 ¥{_stats.NetIncome:N2}（共 {_stats.BillCount} 笔账单）";
+
+        var top3 = _stats.ExpenseCategoryStats.Take(3).ToList();
+        if (top3.Any())
+        {
+            summary += "\n支出 Top3：" + string.Join("、", top3.Select(c => $"{c.CategoryName} ¥{c.Amount:N2}"));
+        }
+
+        var biggestIncrease = _comparisons
+            .Where(c => c.ChangeAmount > 0)
+            .OrderByDescending(c => c.ChangeAmount)
+            .FirstOrDefault();
+        if (biggestIncrease != null)
+        {
+            var rateText = biggestIncrease.ChangeRate.HasValue ? $"，+{biggestIncrease.ChangeRate.Value:0.0}%" : "";
+            summary += $"\n环比增长最多：{biggestIncrease.CategoryName}（+¥{biggestIncrease.ChangeAmount:N2}{rateText}）";
+        }
+
+        var biggestDecrease = _comparisons
+            .Where(c => c.ChangeAmount < 0)
+            .OrderBy(c => c.ChangeAmount)
+            .FirstOrDefault();
+        if (biggestDecrease != null)
+        {
+            var rateText = biggestDecrease.ChangeRate.HasValue ? $"，-{Math.Abs(biggestDecrease.ChangeRate.Value):0.0}%" : "";
+            summary += $"\n环比减少最多：{biggestDecrease.CategoryName}（-¥{Math.Abs(biggestDecrease.ChangeAmount):N2}{rateText}）";
+        }
+
+        return summary;
+    }
+
+    private class LedgerModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+    }
+}

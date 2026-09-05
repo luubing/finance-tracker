@@ -119,4 +119,15 @@ public class HttpCloudSyncClient : ICloudSyncClient
         var response = await _http.PostAsync<LedgerSyncPullResponse>(BuildApiUrl("sync/ledgers/pull"), request);
         return response?.Ledgers ?? new List<LedgerSyncDto>();
     }
+
+    public async Task<List<LedgerMemberSyncDto>> PullLedgerMembersAsync(Guid userId, DateTime? since = null, CancellationToken cancellationToken = default)
+    {
+        var request = new LedgerMemberSyncPullRequest
+        {
+            Since = since
+        };
+
+        var response = await _http.PostAsync<LedgerMemberSyncPullResponse>(BuildApiUrl("sync/ledgermembers/pull"), request);
+        return response?.Members ?? new List<LedgerMemberSyncDto>();
+    }
 }

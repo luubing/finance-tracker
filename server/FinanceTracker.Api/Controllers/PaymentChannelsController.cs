@@ -100,7 +100,7 @@ public class PaymentChannelsController : BaseApiController
 
         if (existingChannel.IsPreset)
         {
-            return Forbid("不能修改预设支付渠道");
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "不能修改预设支付渠道" });
         }
 
         var channel = new Core.Entities.PaymentChannel
@@ -146,7 +146,7 @@ public class PaymentChannelsController : BaseApiController
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Forbid(ex.Message);
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

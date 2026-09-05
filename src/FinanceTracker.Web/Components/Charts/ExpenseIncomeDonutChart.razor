@@ -1,0 +1,103 @@
+@namespace FinanceTracker.Web.Components.Charts
+@using FinanceTracker.Core.Interfaces
+
+@if (_option != null)
+{
+    <MECharts Option="_option" Height="260" />
+}
+
+@code {
+    /// <summary>支出分类统计</summary>
+    [Parameter]
+    public List<CategoryStatistics> ExpenseCategories { get; set; } = new();
+
+    /// <summary>收入分类统计</summary>
+    [Parameter]
+    public List<CategoryStatistics> IncomeCategories { get; set; } = new();
+
+    /// <summary>每个环形展示的分类数量上限</summary>
+    [Parameter]
+    public int TopN { get; set; } = 6;
+
+    private object? _option;
+
+    protected override void OnParametersSet()
+    {
+        _option = BuildOption();
+    }
+
+    /// <summary>
+    /// 构建支出/收入构成对比环形图配置（左右并排双环）
+    /// </summary>
+    private object? BuildOption()
+    {
+        var expenseTop = ExpenseCategories
+            .Where(c => c.Amount > 0)
+            .OrderByDescending(c => c.Amount)
+            .Take(TopN)
+            .ToList();
+        var incomeTop = IncomeCategories
+            .Where(c => c.Amount > 0)
+            .OrderByDescending(c => c.Amount)
+            .Take(TopN)
+            .ToList();
+
+        if (expenseTop.Count == 0 && incomeTop.Count == 0)
+        {
+            return null;
+        }
+
+        var palette = new[] { "#2196F3", "#4CAF50", "#FF9800", "#9C27B0", "#00BCD4", "#FF5252", "#8BC34A", "#FFC107" };
+
+        object BuildSlice(CategoryStatistics c, int index) => new
+        {
+            name = c.CategoryName,
+            value = (double)c.Amount,
+            itemStyle = new { color = palette[index % palette.Length] }
+        };
+
+        var expenseData = expenseTop.Select((c, i) => BuildSlice(c, i)).ToArray();
+        var incomeData = incomeTop.Select((c, i) => BuildSlice(c, i + 2)).ToArray();
+
+        return new
+        {
+            tooltip = new
+            {
+                trigger = "item",
+                formatter = "{a}<br/>{b}: ¥{c} ({d}%)"
+            },
+            legend = new
+            {
+                bottom = 0,
+                textStyle = new { fontSize = 10 },
+                itemWidth = 12,
+                itemHeight = 8
+            },
+            series = new object[]
+            {
+                new
+                {
+                    name = "支出构成",
+                    type = "pie",
+                    radius = new[] { "38%", "60%" },
+                    center = new[] { "27%", "45%" },
+                    avoidLabelOverlap = true,
+                    label = new { show = false },
+                    labelLine = new { show = false },
+                    data = expenseData
+                },
+                new
+                {
+                    name = "收入构成",
+                    type = "pie",
+                    radius = new[] { "38%", "60%" },
+                    center = new[] { "73%", "45%" },
+                    avoidLabelOverlap = true,
+                    label = new { show = false },
+                    labelLine = new { show = false },
+                    data = incomeData
+                }
+            }
+        };
+    }
+}
