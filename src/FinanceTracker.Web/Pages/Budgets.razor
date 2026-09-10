@@ -315,6 +315,12 @@
             return;
         }
 
+        if (!_budgetModel.Amount.HasValue || _budgetModel.Amount.Value <= 0)
+        {
+            await PopupService.EnqueueSnackbarAsync("请输入预算金额", AlertTypes.Warning);
+            return;
+        }
+
         _saving = true;
 
         try
@@ -327,7 +333,7 @@
                     UserId = _userId,
                     Year = _budgetModel.Year,
                     Month = _budgetModel.Month,
-                    Amount = _budgetModel.Amount,
+                    Amount = _budgetModel.Amount.Value,
                     LedgerId = _budgetModel.LedgerId,
                     CategoryId = _budgetModel.CategoryId
                 };
@@ -342,7 +348,7 @@
                     UserId = _userId,
                     Year = _budgetModel.Year,
                     Month = _budgetModel.Month,
-                    Amount = _budgetModel.Amount,
+                    Amount = _budgetModel.Amount.Value,
                     LedgerId = _budgetModel.LedgerId,
                     CategoryId = _budgetModel.CategoryId
                 };
@@ -391,7 +397,7 @@
         public Guid Id { get; set; }
         public int Year { get; set; } = DateTime.Now.Year;
         public int Month { get; set; } = DateTime.Now.Month;
-        public decimal Amount { get; set; }
+        public decimal? Amount { get; set; }
         public Guid? LedgerId { get; set; }
         public Guid? CategoryId { get; set; }
     }

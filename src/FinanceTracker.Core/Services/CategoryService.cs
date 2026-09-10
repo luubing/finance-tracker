@@ -12,6 +12,9 @@ public class CategoryService : ICategoryService
 {
     private readonly IApplicationDbContext _context;
 
+    // 串行化写操作（SQLite 不支持并发写）
+    private static readonly SemaphoreSlim _writeMutex = new(1, 1);
+
     public CategoryService(IApplicationDbContext context)
     {
         _context = context;
@@ -41,68 +44,92 @@ public class CategoryService : ICategoryService
 
     public async Task<Category> CreateCategoryAsync(Category category)
     {
-        // 确保是用户自定义分类
-        category.IsPreset = false;
-        category.Id = Guid.NewGuid();
+        await _writeMutex.WaitAsync();
+        try
+        {
+            // 确保是用户自定义分类
+            category.IsPreset = false;
+            category.Id = Guid.NewGuid();
 
-        _context.Categories.Add(category);
-        await _context.SaveChangesAsync();
+            _context.Categories.Add(category);
+            await _context.SaveChangesAsync();
 
-        return category;
+            return category;
+        }
+        finally
+        {
+            _writeMutex.Release();
+        }
     }
 
     public async Task<Category> UpdateCategoryAsync(Category category)
     {
-        var existingCategory = await _context.Categories
-            .FirstOrDefaultAsync(c => c.Id == category.Id && c.UserId == category.UserId);
-
-        if (existingCategory == null)
+        await _writeMutex.WaitAsync();
+        try
         {
-            throw new ArgumentException("分类不存在");
-        }
+            var existingCategory = await _context.Categories
+                .FirstOrDefaultAsync(c => c.Id == category.Id && c.UserId == category.UserId);
 
-        if (existingCategory.IsPreset)
+            if (existingCategory == null)
+            {
+                throw new ArgumentException("分类不存在");
+            }
+
+            if (existingCategory.IsPreset)
+            {
+                throw new UnauthorizedAccessException("不能修改预设分类");
+            }
+
+            existingCategory.Name = category.Name;
+            existingCategory.Icon = category.Icon;
+            existingCategory.Type = category.Type;
+            existingCategory.SortOrder = category.SortOrder;
+
+            await _context.SaveChangesAsync();
+
+            return existingCategory;
+        }
+        finally
         {
-            throw new UnauthorizedAccessException("不能修改预设分类");
+            _writeMutex.Release();
         }
-
-        existingCategory.Name = category.Name;
-        existingCategory.Icon = category.Icon;
-        existingCategory.Type = category.Type;
-        existingCategory.SortOrder = category.SortOrder;
-
-        await _context.SaveChangesAsync();
-
-        return existingCategory;
     }
 
     public async Task<bool> DeleteCategoryAsync(Guid categoryId, Guid userId)
     {
-        var category = await _context.Categories
-            .FirstOrDefaultAsync(c => c.Id == categoryId && c.UserId == userId);
-
-        if (category == null)
+        await _writeMutex.WaitAsync();
+        try
         {
-            return false;
-        }
+            var category = await _context.Categories
+                .FirstOrDefaultAsync(c => c.Id == categoryId && c.UserId == userId);
 
-        if (category.IsPreset)
+            if (category == null)
+            {
+                return false;
+            }
+
+            if (category.IsPreset)
+            {
+                throw new UnauthorizedAccessException("不能删除预设分类");
+            }
+
+            // 检查是否有关联的账单
+            var hasBills = await _context.Bills
+                .AnyAsync(b => b.CategoryId == categoryId);
+
+            if (hasBills)
+            {
+                throw new InvalidOperationException("该分类下有账单记录，无法删除");
+            }
+
+            category.IsDeleted = true;
+            await _context.SaveChangesAsync();
+
+            return true;
+        }
+        finally
         {
-            throw new UnauthorizedAccessException("不能删除预设分类");
+            _writeMutex.Release();
         }
-
-        // 检查是否有关联的账单
-        var hasBills = await _context.Bills
-            .AnyAsync(b => b.CategoryId == categoryId);
-
-        if (hasBills)
-        {
-            throw new InvalidOperationException("该分类下有账单记录，无法删除");
-        }
-
-        category.IsDeleted = true;
-        await _context.SaveChangesAsync();
-
-        return true;
     }
 }

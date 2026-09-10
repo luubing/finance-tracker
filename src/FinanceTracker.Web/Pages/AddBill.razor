@@ -1,8 +1,8 @@
 @page "/add-bill"
 @page "/add-bill/{BillId}"
+@using FinanceTracker.Core.Entities
 @using FinanceTracker.Core.Enums
 @using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Core.Services
 @using FinanceTracker.Web.Services
 @inject IBillService BillService
 @inject ICategoryService CategoryService
@@ -18,6 +18,7 @@
 @inject BillEventService BillEventService
 @inject ILedgerMemberService LedgerMemberService
 @inject IBudgetService BudgetService
+@inject IUserDefaultService UserDefaultService
 @implements IDisposable
 
 <PStackPageBar Title="@(IsEditing ? "编辑账单" : "记一笔")"
@@ -340,15 +341,18 @@
     private bool _loading;
     private Guid _userId;
 
-    private List<Func<decimal, StringBoolean>> _amountRules = new()
+    private List<Func<decimal?, StringBoolean>> _amountRules = new()
     {
-        v => v > 0 ? true : "金额必须大于0",
-        v => decimal.Round(v, 2) == v ? true : "最多保留两位小数"
+        v => v.HasValue && v.Value > 0 ? true : "金额必须大于0",
+        v => !v.HasValue || decimal.Round(v.Value, 2) == v.Value ? true : "最多保留两位小数"
     };
 
     private void OnAmountBlur(FocusEventArgs e)
     {
-        _model.Amount = decimal.Round(_model.Amount, 2);
+        if (_model.Amount.HasValue)
+        {
+            _model.Amount = decimal.Round(_model.Amount.Value, 2);
+        }
     }
 
     protected override async Task OnInitializedAsync()
@@ -455,12 +459,83 @@
                 Id = l.Id,
                 Name = l.Name,
                 Icon = l.Icon,
-                IsShared = true
+                IsShared = true,
+                IsDefault = false // 共享账本不能设为默认
             }));
         }
         catch
         {
             // 共享账本加载失败不影响自有账本
+        }
+
+        // 设置默认值：优先使用默认值，没有默认值则选中第一条
+        await SetDefaultValuesAsync();
+
+        // 通知 UI 更新
+        StateHasChanged();
+    }
+
+    private async Task SetDefaultValuesAsync()
+    {
+        // 获取用户默认值偏好
+        var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
+
+        // 设置默认分类：优先使用用户偏好，没有偏好则选中第一条
+        if (_model.Type == BillType.Expense && userDefault?.DefaultExpenseCategoryId.HasValue == true)
+        {
+            var defaultCategory = _categories.FirstOrDefault(c => c.Id == userDefault.DefaultExpenseCategoryId.Value);
+            if (defaultCategory != null)
+            {
+                _model.CategoryId = defaultCategory.Id;
+            }
+        }
+        else if (_model.Type == BillType.Income && userDefault?.DefaultIncomeCategoryId.HasValue == true)
+        {
+            var defaultCategory = _categories.FirstOrDefault(c => c.Id == userDefault.DefaultIncomeCategoryId.Value);
+            if (defaultCategory != null)
+            {
+                _model.CategoryId = defaultCategory.Id;
+            }
+        }
+
+        // 如果没有设置默认分类，则选中第一条
+        if (_model.CategoryId == Guid.Empty)
+        {
+            var firstCategory = _categories.FirstOrDefault(c => c.Type == _model.Type);
+            if (firstCategory != null)
+            {
+                _model.CategoryId = firstCategory.Id;
+            }
+        }
+
+        // 设置默认支付渠道：优先使用用户偏好，没有偏好则选中第一条
+        if (userDefault?.DefaultPaymentChannelId.HasValue == true)
+        {
+            var defaultChannel = _paymentChannels.FirstOrDefault(c => c.Id == userDefault.DefaultPaymentChannelId.Value);
+            if (defaultChannel != null)
+            {
+                _model.PaymentChannelId = defaultChannel.Id;
+            }
+        }
+
+        // 如果没有设置默认支付渠道，则选中第一条
+        if (_model.PaymentChannelId == Guid.Empty)
+        {
+            var firstChannel = _paymentChannels.FirstOrDefault();
+            if (firstChannel != null)
+            {
+                _model.PaymentChannelId = firstChannel.Id;
+            }
+        }
+
+        // 设置默认账本：优先使用用户偏好，没有偏好则不选中
+        if (userDefault?.DefaultLedgerId.HasValue == true)
+        {
+            var defaultLedger = _ledgers.FirstOrDefault(l => l.Id == userDefault.DefaultLedgerId.Value);
+            if (defaultLedger != null)
+            {
+                _model.LedgerId = defaultLedger.Id;
+            }
         }
     }
 
@@ -511,6 +586,12 @@
             return;
         }
 
+        if (!_model.Amount.HasValue || _model.Amount.Value <= 0)
+        {
+            await PopupService.EnqueueSnackbarAsync("请输入金额", AlertTypes.Warning);
+            return;
+        }
+
         if (_model.CategoryId == Guid.Empty)
         {
             await PopupService.EnqueueSnackbarAsync("请选择分类", AlertTypes.Warning);
@@ -549,7 +630,7 @@
                 {
                     Id = billId,
                     UserId = _userId,
-                    Amount = _model.Amount,
+                    Amount = _model.Amount.Value,
                     Type = _model.Type,
                     CategoryId = _model.CategoryId,
                     PaymentChannelId = _model.PaymentChannelId,
@@ -566,7 +647,7 @@
                 var bill = new Core.Entities.Bill
                 {
                     UserId = _userId,
-                    Amount = _model.Amount,
+                    Amount = _model.Amount.Value,
                     Type = _model.Type,
                     CategoryId = _model.CategoryId,
                     PaymentChannelId = _model.PaymentChannelId,
@@ -934,7 +1015,7 @@
 
     private class BillModel
     {
-        public decimal Amount { get; set; }
+        public decimal? Amount { get; set; }
         public BillType Type { get; set; } = BillType.Expense;
         public Guid CategoryId { get; set; }
         public Guid PaymentChannelId { get; set; }
@@ -949,6 +1030,7 @@
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
         public BillType Type { get; set; }
+        public bool IsDefault { get; set; }
     }
 
     private class PaymentChannelModel
@@ -956,6 +1038,7 @@
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
+        public bool IsDefault { get; set; }
     }
 
     private class LedgerModel
@@ -964,6 +1047,7 @@
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
         public bool IsShared { get; set; }
+        public bool IsDefault { get; set; }
     }
 
     /// <summary>

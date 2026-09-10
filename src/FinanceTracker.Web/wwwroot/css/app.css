@@ -25,3 +25,8 @@ select,
     user-select: text;
     -webkit-touch-callout: default;
 }
+
+.m-toolbar__content .m-btn.m-btn--icon.m-size--default, .m-toolbar__extension .m-btn.m-btn--icon.m-size--default {
+     height: unset!important; 
+     width:  unset!important; 
+}

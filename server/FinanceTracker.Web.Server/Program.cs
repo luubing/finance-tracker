@@ -62,6 +62,7 @@ builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
 builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
+builder.Services.AddScoped<IUserDefaultService, UserDefaultService>();
 
 // 注册语音记账服务：
 // - 文本解析（中文口语 → 账单草稿）使用规则解析器，服务端/客户端通用

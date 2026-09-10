@@ -16,8 +16,15 @@
                Flat
                Color="primary">
     <ActionContent>
+    
+        <MButton Icon OnClick="PushAddBill">
+            <MIcon Color="white">mdi-plus</MIcon>
+        </MButton>
         <MButton Icon Disabled="_isRefreshing" OnClick="RefreshData">
             <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
+        <MButton Icon OnClick="() => _showFilterDrawer = !_showFilterDrawer">
+            <MIcon Color="white">mdi-filter</MIcon>
         </MButton>
         <MButton Icon OnClick="ToggleSelectMode">
             <MIcon Color="white">@(_selectMode ? "mdi-close" : "mdi-checkbox-multiple-marked-outline")</MIcon>
@@ -25,92 +32,78 @@
     </ActionContent>
 </PStackPageBar>
 
+<!-- 筛选条件抽屉 -->
+<PDrawer Value="_showFilterDrawer"
+         ValueChanged="OnFilterDrawerChanged"
+         Class="bill-pdrawer justify-end transparent"
+         ContentStyle="max-width:80%!important;"
+         Title="筛选条件"
+         Right
+         SaveText="查询"
+         CancelText="重置"
+         OnSave="ApplyFilters"
+         OnCancel="ResetFilters"
+         BodyClass="pa-4">
+    <div class="mb-4">
+        <MTextField @bind-Value="_filter.StartDate"
+                    Label="开始日期"
+                    Type="date"
+                    Outlined
+                    Dense
+                    HideDetails="true" />
+    </div>
+    <div class="mb-4">
+        <MTextField @bind-Value="_filter.EndDate"
+                    Label="结束日期"
+                    Type="date"
+                    Outlined
+                    Dense
+                    HideDetails="true" />
+    </div>
+    <div class="mb-4">
+        <MSelect @bind-Value="_filter.CategoryId"
+                 Items="_categories"
+                 ItemText="c => c.Name"
+                 ItemValue="c => (Guid?)c.Id"
+                 Label="分类"
+                 Outlined
+                 Dense
+                 Clearable
+                 HideDetails="true" />
+    </div>
+    <div class="mb-4">
+        <MSelect @bind-Value="_filter.PaymentChannelId"
+                 Items="_paymentChannels"
+                 ItemText="c => c.Name"
+                 ItemValue="c => (Guid?)c.Id"
+                 Label="支付渠道"
+                 Outlined
+                 Dense
+                 Clearable
+                 HideDetails="true" />
+    </div>
+    <div class="mb-4">
+        <MSelect @bind-Value="_filter.LedgerId"
+                 Items="_ledgers"
+                 ItemText="@GetLedgerDisplayText"
+                 ItemValue="l => (Guid?)l.Id"
+                 Label="账本"
+                 Outlined
+                 Dense
+                 Clearable
+                 HideDetails="true" />
+    </div>
+    <div class="mb-2">
+        <div class="text-caption text--secondary mb-2">账单类型</div>
+        <MButtonGroup @bind-Value="_filterTypeValue" @bind-Value:after="OnFilterTypeChanged" Class="d-flex" Style="gap: 8px;">
+            <MButton Value="@((StringNumber?)"")" Color="default" Class="flex-grow-1">全部</MButton>
+            <MButton Value="@((StringNumber?)"Expense")" Color="error" Class="flex-grow-1">支出</MButton>
+            <MButton Value="@((StringNumber?)"Income")" Color="success" Class="flex-grow-1">收入</MButton>
+        </MButtonGroup>
+    </div>
+</PDrawer>
+
 <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <!-- 筛选区域 -->
-    <MRow>
-        <MCol Cols="12">
-            <MCard Class="mb-4">
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-filter</MIcon>
-                    筛选条件
-                    <MSpacer />
-                    <MButton  Color="primary" OnClick="ResetFilters">
-                        重置
-                    </MButton>
-                </MCardTitle>
-
-                <MCardText>
-                    <MRow>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MTextField @bind-Value="_filter.StartDate"
-                                        Label="开始日期"
-                                        Type="date"
-                                        Outlined
-                                        Dense
-                                        HideDetails="true" />
-                        </MCol>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MTextField @bind-Value="_filter.EndDate"
-                                        Label="结束日期"
-                                        Type="date"
-                                        Outlined
-                                        Dense
-                                        HideDetails="true" />
-                        </MCol>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MSelect @bind-Value="_filter.CategoryId"
-                                     Items="_categories"
-                                     ItemText="c => c.Name"
-                                     ItemValue="c => (Guid?)c.Id"
-                                     Label="分类"
-                                     Outlined
-                                     Dense
-                                     Clearable
-                                     HideDetails="true" />
-                        </MCol>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MSelect @bind-Value="_filter.PaymentChannelId"
-                                     Items="_paymentChannels"
-                                     ItemText="c => c.Name"
-                                     ItemValue="c => (Guid?)c.Id"
-                                     Label="支付渠道"
-                                     Outlined
-                                     Dense
-                                     Clearable
-                                     HideDetails="true" />
-                        </MCol>
-                    </MRow>
-                    <MRow>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MButtonGroup Value="_filter.Type?.ToString()" ValueChanged="OnFilterTypeChanged">
-                                <MButton Value="@((string?)null)" Color="default">全部</MButton>
-                                <MButton Value="@("Expense")" Color="error">支出</MButton>
-                                <MButton Value="@("Income")" Color="success">收入</MButton>
-                            </MButtonGroup>
-                        </MCol>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MSelect @bind-Value="_filter.LedgerId"
-                                     Items="_ledgers"
-                                     ItemText="@GetLedgerDisplayText"
-                                     ItemValue="l => (Guid?)l.Id"
-                                     Label="账本"
-                                     Outlined
-                                     Dense
-                                     Clearable
-                                     HideDetails="true" />
-                        </MCol>
-                        <MCol Cols="12" Sm="6" Md="3">
-                            <MButton Color="primary" OnClick="LoadBills">
-                                <MIcon Class="mr-2">mdi-magnify</MIcon>
-                                查询
-                            </MButton>
-                        </MCol>
-                    </MRow>
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-
     <!-- 批量操作栏（批量选择模式） -->
     @if (_selectMode)
     {
@@ -170,21 +163,6 @@
                 <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
                     <MProgressCircular Indeterminate Size="64" Color="primary" />
                 </MContainer>
-            }
-            else if (!_groupedBills.Any())
-            {
-                <MCard>
-                    <MCardText Class="text-center">
-                        <MIcon Size="64" Color="grey lighten-1">mdi-receipt</MIcon>
-                        <div class="text-h6 grey--text text--lighten-1 mt-4">暂无账单记录</div>
-                        <PPageStackLink Href="/add-bill">
-                            <MButton Color="primary" Class="mt-4">
-                                <MIcon Class="mr-2">mdi-plus</MIcon>
-                                记一笔
-                            </MButton>
-                        </PPageStackLink>
-                    </MCardText>
-                </MCard>
             }
             else
             {
@@ -348,6 +326,10 @@
 
     // 手动刷新状态
     private bool _isRefreshing;
+
+    // 筛选抽屉
+    private bool _showFilterDrawer;
+    private StringNumber? _filterTypeValue;
 
     // 批量选择模式
     private bool _selectMode;
@@ -606,9 +588,19 @@
         _totalIncome = _groupedBills.Sum(g => g.TotalIncome);
     }
 
-    private void OnFilterTypeChanged(StringNumber value)
+    private void OnFilterDrawerChanged(bool value)
     {
-        _filter.Type = value?.ToString() switch
+        _showFilterDrawer = value;
+    }
+
+    private void PushAddBill()
+    {
+        NavController.Push("/add-bill");
+    }
+
+    private void OnFilterTypeChanged()
+    {
+        _filter.Type = _filterTypeValue?.ToString() switch
         {
             "Expense" => BillType.Expense,
             "Income" => BillType.Income,
@@ -619,6 +611,17 @@
     private async Task ResetFilters()
     {
         _filter = new FilterModel();
+        _filterTypeValue = null;
+        _showFilterDrawer = false;
+        await LoadBills();
+    }
+
+    /// <summary>
+    /// 应用筛选条件并关闭抽屉
+    /// </summary>
+    private async Task ApplyFilters()
+    {
+        _showFilterDrawer = false;
         await LoadBills();
     }
 

@@ -3,6 +3,7 @@
 @using FinanceTracker.Core.Interfaces
 @inject ILedgerService LedgerService
 @inject ILedgerMemberService LedgerMemberService
+@inject IUserDefaultService UserDefaultService
 @inject AuthenticationService AuthStateService
 @inject IJSRuntime JSRuntime
 @inject PageStackNavController NavController
@@ -90,7 +91,10 @@
                                     <MListItemContent>
                                         <MListItemTitle>@ledger.Name</MListItemTitle>
                                     </MListItemContent>
-                                    <MListItemAction>
+                                    <MListItemAction Class="d-flex align-center">
+                                        <MButton Icon OnClick="() => SetDefaultLedger(ledger)">
+                                            <MIcon Color="@(ledger.IsDefault ? "warning" : "default")">mdi-star</MIcon>
+                                        </MButton>
                                         <MButton Icon OnClick="() => ShowShareLedger(ledger)">
                                             <MIcon>mdi-share-variant</MIcon>
                                         </MButton>
@@ -288,6 +292,7 @@
         try
         {
             var ledgers = await LedgerService.GetLedgersAsync(_userId);
+            var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
 
             _ledgers = ledgers
                 .Select(l => new LedgerModel
@@ -295,6 +300,7 @@
                     Id = l.Id,
                     Name = l.Name,
                     Icon = l.Icon,
+                    IsDefault = userDefault?.DefaultLedgerId == l.Id,
                     SortOrder = l.SortOrder
                 })
                 .ToList();
@@ -510,11 +516,34 @@
         }
     }
 
+    private async Task SetDefaultLedger(LedgerModel ledger)
+    {
+        try
+        {
+            var result = await UserDefaultService.SetDefaultLedgerAsync(
+                _userId,
+                ledger.IsDefault ? null : ledger.Id);
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync(
+                    ledger.IsDefault ? "已取消默认账本" : "已设置为默认账本",
+                    AlertTypes.Success);
+                await LoadLedgers();
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
     private class LedgerModel
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Icon { get; set; }
+        public bool IsDefault { get; set; }
         public int SortOrder { get; set; }
     }
 }

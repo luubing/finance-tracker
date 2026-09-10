@@ -85,6 +85,7 @@ builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<ICsvParserService, CsvParserService>();
+builder.Services.AddScoped<IUserDefaultService, UserDefaultService>();
 
 // 配置 CORS
 builder.Services.AddCors(options =>

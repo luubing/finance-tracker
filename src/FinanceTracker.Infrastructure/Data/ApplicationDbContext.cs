@@ -21,6 +21,7 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public DbSet<LedgerMember> LedgerMembers => Set<LedgerMember>();
     public DbSet<Budget> Budgets => Set<Budget>();
     public DbSet<PendingBill> PendingBills => Set<PendingBill>();
+    public DbSet<UserDefault> UserDefaults => Set<UserDefault>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -167,6 +168,38 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // 用户默认值配置
+        modelBuilder.Entity<UserDefault>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId).IsUnique();
+
+            entity.HasOne(e => e.User)
+                .WithOne()
+                .HasForeignKey<UserDefault>(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.DefaultExpenseCategory)
+                .WithMany()
+                .HasForeignKey(e => e.DefaultExpenseCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DefaultIncomeCategory)
+                .WithMany()
+                .HasForeignKey(e => e.DefaultIncomeCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DefaultPaymentChannel)
+                .WithMany()
+                .HasForeignKey(e => e.DefaultPaymentChannelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DefaultLedger)
+                .WithMany()
+                .HasForeignKey(e => e.DefaultLedgerId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

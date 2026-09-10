@@ -2,6 +2,7 @@
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
 @inject ICategoryService CategoryService
+@inject IUserDefaultService UserDefaultService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
@@ -43,7 +44,10 @@
                                         <MListItemContent>
                                             <MListItemTitle>@category.Name</MListItemTitle>
                                         </MListItemContent>
-                                        <MListItemAction>
+                                        <MListItemAction Class="d-flex align-center">
+                                            <MButton Icon OnClick="() => SetDefaultCategory(category)">
+                                                <MIcon Color="@(category.IsDefault ? "warning" : "default")">mdi-star</MIcon>
+                                            </MButton>
                                             @if (!category.IsPreset)
                                             {
                                                 <MButton Icon OnClick="() => ShowEditDialog(category)">
@@ -75,6 +79,9 @@
                                             <MListItemTitle>@category.Name</MListItemTitle>
                                         </MListItemContent>
                                         <MListItemAction>
+                                            <MButton Icon OnClick="() => SetDefaultCategory(category)">
+                                                <MIcon Color="@(category.IsDefault ? "warning" : "default")">mdi-star</MIcon>
+                                            </MButton>
                                             @if (!category.IsPreset)
                                             {
                                                 <MButton Icon OnClick="() => ShowEditDialog(category)">
@@ -175,6 +182,7 @@
     private async Task LoadCategories()
     {
         var categories = await CategoryService.GetCategoriesAsync(_userId);
+        var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
 
         _expenseCategories = categories
             .Where(c => c.Type == BillType.Expense)
@@ -185,6 +193,7 @@
                 Icon = c.Icon,
                 Type = c.Type,
                 IsPreset = c.IsPreset,
+                IsDefault = userDefault?.DefaultExpenseCategoryId == c.Id,
                 SortOrder = c.SortOrder
             })
             .ToList();
@@ -198,6 +207,7 @@
                 Icon = c.Icon,
                 Type = c.Type,
                 IsPreset = c.IsPreset,
+                IsDefault = userDefault?.DefaultIncomeCategoryId == c.Id,
                 SortOrder = c.SortOrder
             })
             .ToList();
@@ -307,6 +317,38 @@
         }
     }
 
+    private async Task SetDefaultCategory(CategoryModel category)
+    {
+        try
+        {
+            bool result;
+            if (category.Type == BillType.Expense)
+            {
+                result = await UserDefaultService.SetDefaultExpenseCategoryAsync(
+                    _userId,
+                    category.IsDefault ? null : category.Id);
+            }
+            else
+            {
+                result = await UserDefaultService.SetDefaultIncomeCategoryAsync(
+                    _userId,
+                    category.IsDefault ? null : category.Id);
+            }
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync(
+                    category.IsDefault ? "已取消默认分类" : "已设置为默认分类",
+                    AlertTypes.Success);
+                await LoadCategories();
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
     private class CategoryModel
     {
         public Guid Id { get; set; }
@@ -314,6 +356,7 @@
         public string? Icon { get; set; }
         public BillType Type { get; set; }
         public bool IsPreset { get; set; }
+        public bool IsDefault { get; set; }
         public int SortOrder { get; set; }
     }
 }

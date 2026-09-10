@@ -15,8 +15,8 @@ public interface IApplicationDbContext
     DbSet<Ledger> Ledgers { get; }
     DbSet<LedgerMember> LedgerMembers { get; }
     DbSet<Budget> Budgets { get; }
-
     DbSet<PendingBill> PendingBills { get; }
+    DbSet<UserDefault> UserDefaults { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

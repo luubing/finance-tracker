@@ -77,6 +77,7 @@ public static class MauiProgram
         builder.Services.AddScoped<IPaymentChannelService, PaymentChannelService>();
         builder.Services.AddScoped<ILedgerService, LedgerService>();
         builder.Services.AddScoped<IBudgetService, BudgetService>();
+        builder.Services.AddScoped<IUserDefaultService, UserDefaultService>();
         // 账本成员服务：管理操作走云端 API，权限判定读本地缓存（云端数据库为真相源）
         builder.Services.AddScoped<ILedgerMemberService, HttpLedgerMemberService>();
         builder.Services.AddScoped<IBillService, BillService>();

@@ -357,6 +357,49 @@ namespace FinanceTracker.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("FinanceTracker.Core.Entities.UserDefault", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DefaultExpenseCategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DefaultIncomeCategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DefaultLedgerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DefaultPaymentChannelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefaultExpenseCategoryId");
+
+                    b.HasIndex("DefaultIncomeCategoryId");
+
+                    b.HasIndex("DefaultLedgerId");
+
+                    b.HasIndex("DefaultPaymentChannelId");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserDefaults");
+                });
+
             modelBuilder.Entity("FinanceTracker.Core.Entities.Bill", b =>
                 {
                     b.HasOne("FinanceTracker.Core.Entities.Category", "Category")
@@ -462,6 +505,45 @@ namespace FinanceTracker.Infrastructure.Migrations
                         .WithMany("PaymentChannels")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("FinanceTracker.Core.Entities.UserDefault", b =>
+                {
+                    b.HasOne("FinanceTracker.Core.Entities.Category", "DefaultExpenseCategory")
+                        .WithMany()
+                        .HasForeignKey("DefaultExpenseCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.Category", "DefaultIncomeCategory")
+                        .WithMany()
+                        .HasForeignKey("DefaultIncomeCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.Ledger", "DefaultLedger")
+                        .WithMany()
+                        .HasForeignKey("DefaultLedgerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.PaymentChannel", "DefaultPaymentChannel")
+                        .WithMany()
+                        .HasForeignKey("DefaultPaymentChannelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FinanceTracker.Core.Entities.User", "User")
+                        .WithOne()
+                        .HasForeignKey("FinanceTracker.Core.Entities.UserDefault", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DefaultExpenseCategory");
+
+                    b.Navigation("DefaultIncomeCategory");
+
+                    b.Navigation("DefaultLedger");
+
+                    b.Navigation("DefaultPaymentChannel");
 
                     b.Navigation("User");
                 });
