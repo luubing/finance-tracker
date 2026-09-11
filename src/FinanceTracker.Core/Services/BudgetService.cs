@@ -2,6 +2,7 @@ using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FinanceTracker.Core.Services;
 
@@ -11,10 +12,12 @@ namespace FinanceTracker.Core.Services;
 public class BudgetService : IBudgetService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ILogger<BudgetService> _logger;
 
-    public BudgetService(IApplicationDbContext context)
+    public BudgetService(IApplicationDbContext context, ILogger<BudgetService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<List<Budget>> GetBudgetsAsync(Guid userId, int year, int month, Guid? ledgerId = null)
@@ -48,80 +51,104 @@ public class BudgetService : IBudgetService
 
     public async Task<Budget> CreateBudgetAsync(Budget budget)
     {
-        ValidateBudget(budget);
-
-        // 同一用户、同一年月、同一账本范围下，同一分类的预算不可重复（CategoryId/LedgerId 均为 null 表示总预算）
-        var exists = await _context.Budgets
-            .AnyAsync(b => b.UserId == budget.UserId
-                           && b.Year == budget.Year
-                           && b.Month == budget.Month
-                           && b.LedgerId == budget.LedgerId
-                           && b.CategoryId == budget.CategoryId);
-
-        if (exists)
+        try
         {
-            throw new InvalidOperationException("该月份已存在相同的预算，请直接编辑");
+            ValidateBudget(budget);
+
+            // 同一用户、同一年月、同一账本范围下，同一分类的预算不可重复（CategoryId/LedgerId 均为 null 表示总预算）
+            var exists = await _context.Budgets
+                .AnyAsync(b => b.UserId == budget.UserId
+                               && b.Year == budget.Year
+                               && b.Month == budget.Month
+                               && b.LedgerId == budget.LedgerId
+                               && b.CategoryId == budget.CategoryId);
+
+            if (exists)
+            {
+                throw new InvalidOperationException("该月份已存在相同的预算，请直接编辑");
+            }
+
+            budget.Id = Guid.NewGuid();
+
+            _context.Budgets.Add(budget);
+            await _context.SaveChangesAsync();
+
+            return budget;
         }
-
-        budget.Id = Guid.NewGuid();
-
-        _context.Budgets.Add(budget);
-        await _context.SaveChangesAsync();
-
-        return budget;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "创建预算失败，用户: {UserId}, 年月: {Year}-{Month}", budget.UserId, budget.Year, budget.Month);
+            throw;
+        }
     }
 
     public async Task<Budget> UpdateBudgetAsync(Budget budget)
     {
-        ValidateBudget(budget);
-
-        var existingBudget = await _context.Budgets
-            .FirstOrDefaultAsync(b => b.Id == budget.Id && b.UserId == budget.UserId);
-
-        if (existingBudget == null)
+        try
         {
-            throw new ArgumentException("预算不存在");
+            ValidateBudget(budget);
+
+            var existingBudget = await _context.Budgets
+                .FirstOrDefaultAsync(b => b.Id == budget.Id && b.UserId == budget.UserId);
+
+            if (existingBudget == null)
+            {
+                throw new ArgumentException("预算不存在");
+            }
+
+            // 排除自身后查重
+            var exists = await _context.Budgets
+                .AnyAsync(b => b.Id != budget.Id
+                               && b.UserId == budget.UserId
+                               && b.Year == budget.Year
+                               && b.Month == budget.Month
+                               && b.LedgerId == budget.LedgerId
+                               && b.CategoryId == budget.CategoryId);
+
+            if (exists)
+            {
+                throw new InvalidOperationException("该月份已存在相同的预算，请直接编辑");
+            }
+
+            existingBudget.Year = budget.Year;
+            existingBudget.Month = budget.Month;
+            existingBudget.Amount = budget.Amount;
+            existingBudget.LedgerId = budget.LedgerId;
+            existingBudget.CategoryId = budget.CategoryId;
+
+            await _context.SaveChangesAsync();
+
+            return existingBudget;
         }
-
-        // 排除自身后查重
-        var exists = await _context.Budgets
-            .AnyAsync(b => b.Id != budget.Id
-                           && b.UserId == budget.UserId
-                           && b.Year == budget.Year
-                           && b.Month == budget.Month
-                           && b.LedgerId == budget.LedgerId
-                           && b.CategoryId == budget.CategoryId);
-
-        if (exists)
+        catch (Exception ex)
         {
-            throw new InvalidOperationException("该月份已存在相同的预算，请直接编辑");
+            _logger.LogError(ex, "更新预算失败，预算Id: {BudgetId}, 用户: {UserId}", budget.Id, budget.UserId);
+            throw;
         }
-
-        existingBudget.Year = budget.Year;
-        existingBudget.Month = budget.Month;
-        existingBudget.Amount = budget.Amount;
-        existingBudget.LedgerId = budget.LedgerId;
-        existingBudget.CategoryId = budget.CategoryId;
-
-        await _context.SaveChangesAsync();
-
-        return existingBudget;
     }
 
     public async Task<bool> DeleteBudgetAsync(Guid budgetId, Guid userId)
     {
-        var budget = await _context.Budgets
-            .FirstOrDefaultAsync(b => b.Id == budgetId && b.UserId == userId);
-
-        if (budget == null)
+        try
         {
-            return false;
+            var budget = await _context.Budgets
+                .FirstOrDefaultAsync(b => b.Id == budgetId && b.UserId == userId);
+
+            if (budget == null)
+            {
+                return false;
+            }
+
+            budget.IsDeleted = true;
+            await _context.SaveChangesAsync();
+
+            return true;
         }
-
-        budget.IsDeleted = true;
-        await _context.SaveChangesAsync();
-
-        return true;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除预算失败，预算Id: {BudgetId}, 用户: {UserId}", budgetId, userId);
+            throw;
+        }
     }
 
     public async Task<List<BudgetStatus>> GetBudgetStatusAsync(Guid userId, int year, int month, Guid? ledgerId = null)

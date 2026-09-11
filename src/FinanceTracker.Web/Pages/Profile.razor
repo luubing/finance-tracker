@@ -223,6 +223,21 @@
                         <MIcon>mdi-chevron-right</MIcon>
                     </MListItemAction>
                 </MListItem>
+
+                <MDivider />
+
+                <MListItem OnClick="@(() => NavController.Push("/log-viewer"))">
+                    <MListItemIcon>
+                        <MIcon Color="error">mdi-alert-circle</MIcon>
+                    </MListItemIcon>
+                    <MListItemContent>
+                        <MListItemTitle>错误日志</MListItemTitle>
+                        <MListItemSubtitle>查看应用错误日志，调试问题</MListItemSubtitle>
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>mdi-chevron-right</MIcon>
+                    </MListItemAction>
+                </MListItem>
             </MList>
         </MCard>
 

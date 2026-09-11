@@ -2,6 +2,7 @@ using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FinanceTracker.Core.Services;
 
@@ -11,13 +12,15 @@ namespace FinanceTracker.Core.Services;
 public class CategoryService : ICategoryService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ILogger<CategoryService> _logger;
 
     // 串行化写操作（SQLite 不支持并发写）
     private static readonly SemaphoreSlim _writeMutex = new(1, 1);
 
-    public CategoryService(IApplicationDbContext context)
+    public CategoryService(IApplicationDbContext context, ILogger<CategoryService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<List<Category>> GetCategoriesAsync(Guid? userId, BillType? type = null)
@@ -56,6 +59,11 @@ public class CategoryService : ICategoryService
 
             return category;
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "创建分类失败，用户: {UserId}, 分类名: {Name}", category.UserId, category.Name);
+            throw;
+        }
         finally
         {
             _writeMutex.Release();
@@ -88,6 +96,11 @@ public class CategoryService : ICategoryService
             await _context.SaveChangesAsync();
 
             return existingCategory;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "更新分类失败，分类Id: {CategoryId}, 用户: {UserId}", category.Id, category.UserId);
+            throw;
         }
         finally
         {
@@ -126,6 +139,11 @@ public class CategoryService : ICategoryService
             await _context.SaveChangesAsync();
 
             return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除分类失败，分类Id: {CategoryId}, 用户: {UserId}", categoryId, userId);
+            throw;
         }
         finally
         {

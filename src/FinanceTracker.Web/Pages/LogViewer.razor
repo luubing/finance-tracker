@@ -1,0 +1,607 @@
+@page "/log-viewer"
+@using FinanceTracker.Web.Services
+@implements IDisposable
+@inject ILogViewerService LogViewerService
+@inject IPopupService PopupService
+@inject PageStackNavController NavController
+@inject IJSRuntime JSRuntime
+
+<PStackPageBar Title="错误日志"
+               CenterTitle
+               Flat
+               Color="primary">
+    <ActionContent>
+        <MButton Icon Disabled="@_isLoading" OnClick="LoadLogsAsync">
+            <MIcon Color="white" Class="@(_isLoading ? "mdi-spin" : null)">mdi-refresh</MIcon>
+        </MButton>
+        <MButton Icon OnClick="ShowFilterDialog">
+            <MIcon Color="white">mdi-filter</MIcon>
+        </MButton>
+        <MMenu>
+            <ActivatorContent>
+                <MButton Icon @attributes="@context.Attrs">
+                    <MIcon Color="white">mdi-dots-vertical</MIcon>
+                </MButton>
+            </ActivatorContent>
+            <ChildContent>
+                <MList>
+                    <MListItem OnClick="ExportLogsAsync">
+                        <MListItemIcon>
+                            <MIcon>mdi-export</MIcon>
+                        </MListItemIcon>
+                        <MListItemContent>
+                            <MListItemTitle>导出日志</MListItemTitle>
+                        </MListItemContent>
+                    </MListItem>
+                    <MListItem OnClick="ShowClearConfirm">
+                        <MListItemIcon>
+                            <MIcon Color="error">mdi-delete</MIcon>
+                        </MListItemIcon>
+                        <MListItemContent>
+                            <MListItemTitle Class="error--text">清除日志</MListItemTitle>
+                        </MListItemContent>
+                    </MListItem>
+                </MList>
+            </ChildContent>
+        </MMenu>
+    </ActionContent>
+</PStackPageBar>
+
+<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
+    <!-- 统计信息卡片 -->
+    @if (_statistics != null)
+    {
+        <MCard Class="mb-4">
+            <MCardText Class="pa-4">
+                <MRow>
+                    <MCol Cols="4">
+                        <div class="text-caption text--secondary">总日志数</div>
+                        <div class="text-h6 primary--text">@_statistics.TotalCount</div>
+                    </MCol>
+                    <MCol Cols="4">
+                        <div class="text-caption text--secondary">今日日志</div>
+                        <div class="text-h6 @(_statistics.TodayCount > 0 ? "warning--text" : "success--text")">
+                            @_statistics.TodayCount
+                        </div>
+                    </MCol>
+                    <MCol Cols="4">
+                        <div class="text-caption text--secondary">本周日志</div>
+                        <div class="text-h6 info--text">@_statistics.WeekCount</div>
+                    </MCol>
+                </MRow>
+
+                @if (_statistics.LevelCounts.Count > 0)
+                {
+                    <MDivider Class="my-2" />
+                    <div class="text-caption text--secondary mb-2">按级别分布:</div>
+                    <MRow>
+                        @foreach (var level in _statistics.LevelCounts.OrderByDescending(x => x.Value))
+                        {
+                            var levelColor = GetLevelColor(level.Key);
+                            var levelIcon = GetLevelIcon(level.Key);
+                            <MCol Cols="4">
+                                <div class="d-flex align-center">
+                                    <MIcon Class="mr-1" Style="@($"font-size: 12px; color: {levelColor};")">
+                                        @levelIcon
+                                    </MIcon>
+                                    <span class="text-caption">@level.Key: @level.Value</span>
+                                </div>
+                            </MCol>
+                        }
+                    </MRow>
+                }
+
+                @if (_statistics.TotalCount > 0)
+                {
+                    <MDivider Class="my-2" />
+                    <div class="text-caption text--secondary">
+                        时间范围: @(_statistics.EarliestLog?.ToString("MM-dd HH:mm") ?? "无") - @(_statistics.LatestLog?.ToString("MM-dd HH:mm") ?? "无")
+                    </div>
+                }
+            </MCardText>
+        </MCard>
+    }
+
+    <!-- 搜索栏 -->
+    <MTextField @bind-Value="_searchText"
+                Label="搜索日志"
+                PrependInnerIcon="mdi-magnify"
+                Clearable
+                Class="mb-4"
+                OnClearClick="OnSearchChanged"
+                @bind-Value:after="OnSearchChanged" />
+
+    <!-- 日志级别筛选 -->
+    <MChipGroup Class="mb-4" Multiple @bind-Values="_selectedLevelNumbers" OnValuesChange="OnFilterChanged">
+        <MChip Filter Value="@("Error")" Color="error">Error</MChip>
+        <MChip Filter Value="@("Critical")" Color="purple">Critical</MChip>
+        <MChip Filter Value="@("Warning")" Color="warning">Warning</MChip>
+        <MChip Filter Value="@("Information")" Color="info">Information</MChip>
+        <MChip Filter Value="@("Debug")" Color="success">Debug</MChip>
+    </MChipGroup>
+
+    <!-- 筛选标签 -->
+    @if (_hasActiveFilters)
+    {
+        <MChipGroup Class="mb-4">
+            @if (_startDate.HasValue)
+            {
+                <MChip Closeable OnCloseClick="() => { _startDate = null; OnFilterChanged(); }">
+                    开始: @_startDate.Value.ToString("MM-dd")
+                </MChip>
+            }
+            @if (_endDate.HasValue)
+            {
+                <MChip Closeable OnCloseClick="() => { _endDate = null; OnFilterChanged(); }">
+                    结束: @_endDate.Value.ToString("MM-dd")
+                </MChip>
+            }
+            @if (_selectedLevelNumbers.Count > 0)
+            {
+                <MChip Closeable OnCloseClick="() => { _selectedLevelNumbers = new List<StringNumber>(); OnFilterChanged(); }">
+                    级别: @string.Join(", ", _selectedLevelNumbers.Select(x => x.Value))
+                </MChip>
+            }
+            <MChip Closeable OnCloseClick="ClearAllFilters">
+                清除所有筛选
+            </MChip>
+        </MChipGroup>
+    }
+
+    <!-- 日志列表 -->
+    @if (_isLoading)
+    {
+        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
+            <MProgressCircular Indeterminate Size="64" Color="primary" />
+        </MContainer>
+    }
+    else if (_logs.Count == 0)
+    {
+        <MCard>
+            <MCardText Class="text-center py-8">
+                <MIcon Size="64" Color="success">mdi-check-circle</MIcon>
+                <div class="text-h6 success--text mt-4">暂无错误日志</div>
+                <div class="text-caption text--secondary mt-2">太棒了！没有发现任何错误</div>
+            </MCardText>
+        </MCard>
+    }
+    else
+    {
+        <MList>
+            @foreach (var log in _logs)
+            {
+                <MListItem OnClick="@(() => ToggleLogDetail(log))"
+                           Class="@(log.ShowDetail ? "grey lighten-4" : "")">
+                    <MListItemContent>
+                        <MListItemTitle Class="d-flex align-center">
+                            <MIcon Class="mr-2" Style="@($"font-size: 16px; color: {GetLevelColor(log.Level)};")">
+                                @GetLevelIcon(log.Level)
+                            </MIcon>
+                            <span class="text-caption text--secondary mr-2">@log.Timestamp.ToString("MM-dd HH:mm:ss")</span>
+                            <MChip Small Style="@($"background-color: {GetLevelColor(log.Level)}; color: white;")" Class="mr-2">
+                                @log.Level
+                            </MChip>
+                            @if (!string.IsNullOrEmpty(log.ExceptionType))
+                            {
+                                <MChip Small Color="error" Class="mr-2">@log.ExceptionType</MChip>
+                            }
+                        </MListItemTitle>
+                        <MListItemSubtitle Class="text-truncate" Style="max-width: 100%;">
+                            @log.Message
+                        </MListItemSubtitle>
+                        @if (!string.IsNullOrEmpty(log.Source))
+                        {
+                            <div class="text-caption text--secondary mt-1">
+                                <MIcon Class="mr-1" Style="font-size: 12px;">mdi-source-branch</MIcon>
+                                @log.Source
+                            </div>
+                        }
+                    </MListItemContent>
+                    <MListItemAction>
+                        <MIcon>@(log.ShowDetail ? "mdi-chevron-up" : "mdi-chevron-down")</MIcon>
+                    </MListItemAction>
+                </MListItem>
+
+                @if (log.ShowDetail)
+                {
+                    <MCard Class="mb-2 ml-4 mr-4" Style="background: #f5f5f5;">
+                        <MCardText Class="pa-4">
+                            <!-- 基本信息 -->
+                            <MRow Dense Class="mb-2">
+                                <MCol Cols="6">
+                                    <div class="text-caption text--secondary">时间</div>
+                                    <div class="text-body-2">@log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</div>
+                                </MCol>
+                                <MCol Cols="6">
+                                    <div class="text-caption text--secondary">来源</div>
+                                    <div class="text-body-2">@(log.Source ?? "未知")</div>
+                                </MCol>
+                            </MRow>
+
+                            <!-- 错误消息 -->
+                            <div class="text-caption font-weight-bold mb-2">错误消息:</div>
+                            <div class="text-body-2 mb-3" style="word-break: break-all;">
+                                @log.Message
+                            </div>
+
+                            <!-- 完整异常信息 -->
+                            @if (!string.IsNullOrEmpty(log.FullMessage) && log.FullMessage != log.Message)
+                            {
+                                <div class="text-caption font-weight-bold mb-2">完整异常信息:</div>
+                                <pre class="text-caption pa-2" style="white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; background: #fff; border-radius: 4px; border: 1px solid #e0e0e0;">@log.FullMessage</pre>
+                            }
+
+                            <!-- 上下文属性 -->
+                            @if (log.Properties.Count > 0)
+                            {
+                                <MDivider Class="my-3" />
+                                <div class="text-caption font-weight-bold mb-2">上下文信息:</div>
+                                <MRow Dense>
+                                    @foreach (var prop in log.Properties)
+                                    {
+                                        <MCol Cols="6" Sm="4">
+                                            <div class="text-caption text--secondary">@prop.Key</div>
+                                            <div class="text-body-2 text-truncate" title="@prop.Value">@prop.Value</div>
+                                        </MCol>
+                                    }
+                                </MRow>
+                            }
+
+                            <!-- 操作按钮 -->
+                            <MDivider Class="my-3" />
+                            <div class="d-flex justify-end">
+                                <MButton Small Text OnClick="@(() => CopyLogAsync(log))">
+                                    <MIcon Small Class="mr-1">mdi-content-copy</MIcon>
+                                    复制
+                                </MButton>
+                            </div>
+                        </MCardText>
+                    </MCard>
+                }
+            }
+        </MList>
+
+        <!-- 分页 -->
+        @if (_totalPages > 1)
+        {
+            <MContainer Class="d-flex justify-center mt-4">
+                <MPagination @bind-Value="_currentPage"
+                             Length="@_totalPages"
+                             TotalVisible="7"
+                             OnInput="OnPageChanged" />
+            </MContainer>
+        }
+    }
+</MContainer>
+
+<!-- 筛选对话框 -->
+<MDialog @bind-Value="_showFilterDialog" MaxWidth="400">
+    <MCard>
+        <MCardTitle Class="text-h6">
+            筛选日志
+        </MCardTitle>
+
+        <MCardText>
+            <MDatePicker @bind-Value="_filterStartDate"
+                         Label="开始日期"
+                         Class="mb-4" />
+            <MDatePicker @bind-Value="_filterEndDate"
+                         Label="结束日期" />
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CancelFilter">取消</MButton>
+            <MButton Color="primary" OnClick="ApplyFilter">应用</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+<!-- 清除确认对话框 -->
+<MDialog @bind-Value="_showClearDialog" MaxWidth="320">
+    <MCard>
+        <MCardTitle Class="text-h6">
+            确认清除
+        </MCardTitle>
+
+        <MCardText>
+            确定要清除所有错误日志吗？此操作不可恢复。
+        </MCardText>
+
+        <MCardActions>
+            <MSpacer />
+            <MButton Text OnClick="CancelClear">取消</MButton>
+            <MButton Color="error" OnClick="ConfirmClearAsync">清除</MButton>
+        </MCardActions>
+    </MCard>
+</MDialog>
+
+@code {
+    private List<LogEntry> _logs = new();
+    private LogStatistics? _statistics;
+    private bool _isLoading = true;
+    private int _currentPage = 1;
+    private int _totalPages = 1;
+    private int _pageSize = 20;
+    private int _totalCount = 0;
+    private string _searchText = string.Empty;
+
+    // 筛选条件
+    private DateTime? _startDate;
+    private DateTime? _endDate;
+    private DateTime? _filterStartDate;
+    private DateTime? _filterEndDate;
+    private List<StringNumber> _selectedLevelNumbers = new();
+
+    // 对话框状态
+    private bool _showFilterDialog;
+    private bool _showClearDialog;
+
+    // 防抖定时器
+    private System.Threading.Timer? _searchTimer;
+
+    private bool _hasActiveFilters => _startDate.HasValue || _endDate.HasValue || _selectedLevelNumbers.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLogsAsync();
+    }
+
+    public void Dispose()
+    {
+        _searchTimer?.Dispose();
+    }
+
+    /// <summary>
+    /// 加载日志数据
+    /// </summary>
+    private async Task LoadLogsAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var selectedLevels = _selectedLevelNumbers
+                .Where(x => x.Value != null)
+                .Select(x => x.Value!.ToString()!)
+                .ToList();
+
+            var (logs, totalCount) = await LogViewerService.GetLogsAsync(
+                _startDate,
+                _endDate,
+                _searchText,
+                _currentPage,
+                _pageSize,
+                selectedLevels.Count > 0 ? selectedLevels : null);
+
+            _logs = logs;
+            _totalCount = totalCount;
+            _totalPages = (int)Math.Ceiling((double)totalCount / _pageSize);
+
+            _statistics = await LogViewerService.GetStatisticsAsync();
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载日志失败: {ex.Message}", AlertTypes.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// 切换日志详情显示
+    /// </summary>
+    private void ToggleLogDetail(LogEntry log)
+    {
+        log.ShowDetail = !log.ShowDetail;
+    }
+
+    /// <summary>
+    /// 搜索文本变化（带防抖）
+    /// </summary>
+    private void OnSearchChanged()
+    {
+        _searchTimer?.Dispose();
+        _searchTimer = new System.Threading.Timer(async _ =>
+        {
+            _currentPage = 1;
+            await InvokeAsync(async () =>
+            {
+                await LoadLogsAsync();
+                StateHasChanged();
+            });
+        }, null, 300, System.Threading.Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// 筛选条件变化
+    /// </summary>
+    private void OnFilterChanged()
+    {
+        _currentPage = 1;
+        _ = LoadLogsAsync();
+    }
+
+    /// <summary>
+    /// 清除所有筛选
+    /// </summary>
+    private void ClearAllFilters()
+    {
+        _startDate = null;
+        _endDate = null;
+        _selectedLevelNumbers = new List<StringNumber>();
+        OnFilterChanged();
+    }
+
+    /// <summary>
+    /// 获取日志级别颜色
+    /// </summary>
+    private string GetLevelColor(string level)
+    {
+        return level switch
+        {
+            "Error" => "#F44336",
+            "Critical" => "#9C27B0",
+            "Warning" => "#FF9800",
+            "Information" => "#2196F3",
+            "Debug" => "#4CAF50",
+            _ => "#757575"
+        };
+    }
+
+    /// <summary>
+    /// 获取日志级别图标
+    /// </summary>
+    private string GetLevelIcon(string level)
+    {
+        return level switch
+        {
+            "Error" => "mdi-alert-circle",
+            "Critical" => "mdi-alert-octagon",
+            "Warning" => "mdi-alert",
+            "Information" => "mdi-information",
+            "Debug" => "mdi-bug",
+            _ => "mdi-help-circle"
+        };
+    }
+
+    /// <summary>
+    /// 显示筛选对话框
+    /// </summary>
+    private void ShowFilterDialog()
+    {
+        _filterStartDate = _startDate;
+        _filterEndDate = _endDate;
+        _showFilterDialog = true;
+    }
+
+    /// <summary>
+    /// 取消筛选
+    /// </summary>
+    private void CancelFilter()
+    {
+        _showFilterDialog = false;
+    }
+
+    /// <summary>
+    /// 应用筛选
+    /// </summary>
+    private void ApplyFilter()
+    {
+        _startDate = _filterStartDate;
+        _endDate = _filterEndDate;
+        _showFilterDialog = false;
+        OnFilterChanged();
+    }
+
+    /// <summary>
+    /// 分页变化
+    /// </summary>
+    private void OnPageChanged(int page)
+    {
+        _currentPage = page;
+        _ = LoadLogsAsync();
+    }
+
+    /// <summary>
+    /// 复制日志信息
+    /// </summary>
+    private async Task CopyLogAsync(LogEntry log)
+    {
+        try
+        {
+            var text = $"时间: {log.Timestamp:yyyy-MM-dd HH:mm:ss}\n" +
+                      $"类型: {log.ExceptionType}\n" +
+                      $"消息: {log.Message}\n" +
+                      $"来源: {log.Source}\n" +
+                      $"完整信息:\n{log.FullMessage}";
+
+            // 使用 JSRuntime 复制到剪贴板
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+
+            await PopupService.EnqueueSnackbarAsync("已复制到剪贴板", AlertTypes.Success);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"复制失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    /// <summary>
+    /// 导出日志
+    /// </summary>
+    private async Task ExportLogsAsync()
+    {
+        try
+        {
+            var fileName = $"finance-tracker-logs-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+#if ANDROID || IOS
+            var filePath = Path.Combine(FileSystem.CacheDirectory, fileName);
+#else
+            var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FinanceTracker", "Cache", fileName);
+#endif
+
+            var success = await LogViewerService.ExportLogsAsync(filePath, _startDate, _endDate);
+
+            if (success)
+            {
+                await PopupService.EnqueueSnackbarAsync($"日志已导出到: {filePath}", AlertTypes.Success);
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("导出失败", AlertTypes.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"导出失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+
+    /// <summary>
+    /// 显示清除确认
+    /// </summary>
+    private void ShowClearConfirm()
+    {
+        _showClearDialog = true;
+    }
+
+    /// <summary>
+    /// 取消清除
+    /// </summary>
+    private void CancelClear()
+    {
+        _showClearDialog = false;
+    }
+
+    /// <summary>
+    /// 确认清除
+    /// </summary>
+    private async Task ConfirmClearAsync()
+    {
+        _showClearDialog = false;
+
+        try
+        {
+            var success = await LogViewerService.ClearLogsAsync();
+
+            if (success)
+            {
+                await PopupService.EnqueueSnackbarAsync("日志已清除", AlertTypes.Success);
+                await LoadLogsAsync();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("清除失败", AlertTypes.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"清除失败: {ex.Message}", AlertTypes.Error);
+        }
+    }
+}

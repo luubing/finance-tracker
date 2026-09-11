@@ -2,6 +2,7 @@ using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FinanceTracker.Core.Services;
 
@@ -11,10 +12,12 @@ namespace FinanceTracker.Core.Services;
 public class BillService : IBillService
 {
     private readonly IApplicationDbContext _context;
+    private readonly ILogger<BillService> _logger;
 
-    public BillService(IApplicationDbContext context)
+    public BillService(IApplicationDbContext context, ILogger<BillService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<List<Bill>> GetBillsAsync(
@@ -94,109 +97,143 @@ public class BillService : IBillService
 
     public async Task<Bill> CreateBillAsync(Bill bill)
     {
-        bill.Id = Guid.NewGuid();
-        bill.SyncStatus = SyncStatus.Pending;
-        // 数据来源（Source）由调用方决定（手动录入/导入/短信识别/通知栏/语音识别），
-        // 不在此处强制覆盖，否则语音等非手动来源的账单会被错误标记为手动录入
-
-        // 确保 TransactionTime 为 UTC 时间
-        if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+        try
         {
-            bill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+            bill.Id = Guid.NewGuid();
+            bill.SyncStatus = SyncStatus.Pending;
+            // 数据来源（Source）由调用方决定（手动录入/导入/短信识别/通知栏/语音识别），
+            // 不在此处强制覆盖，否则语音等非手动来源的账单会被错误标记为手动录入
+
+            // 确保 TransactionTime 为 UTC 时间
+            if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+            {
+                bill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+            }
+
+            _context.Bills.Add(bill);
+            await _context.SaveChangesAsync();
+
+            // 重新加载包含导航属性的数据
+            return await GetBillByIdAsync(bill.Id) ?? bill;
         }
-
-        _context.Bills.Add(bill);
-        await _context.SaveChangesAsync();
-
-        // 重新加载包含导航属性的数据
-        return await GetBillByIdAsync(bill.Id) ?? bill;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "创建账单失败，用户: {UserId}, 金额: {Amount}, 分类: {CategoryId}",
+                bill.UserId, bill.Amount, bill.CategoryId);
+            throw;
+        }
     }
 
     public async Task<Bill> UpdateBillAsync(Bill bill)
     {
-        var existingBill = await _context.Bills
-            .FirstOrDefaultAsync(b => b.Id == bill.Id && b.UserId == bill.UserId);
-
-        if (existingBill == null)
+        try
         {
-            throw new ArgumentException("账单不存在");
+            var existingBill = await _context.Bills
+                .FirstOrDefaultAsync(b => b.Id == bill.Id && b.UserId == bill.UserId);
+
+            if (existingBill == null)
+            {
+                throw new ArgumentException("账单不存在");
+            }
+
+            existingBill.Amount = bill.Amount;
+            existingBill.Type = bill.Type;
+            existingBill.CategoryId = bill.CategoryId;
+            existingBill.PaymentChannelId = bill.PaymentChannelId;
+            existingBill.LedgerId = bill.LedgerId;
+
+            // 确保 TransactionTime 为 UTC 时间
+            if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+            {
+                existingBill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+            }
+            else
+            {
+                existingBill.TransactionTime = bill.TransactionTime;
+            }
+
+            existingBill.Note = bill.Note;
+            existingBill.SyncStatus = SyncStatus.Pending;
+
+            await _context.SaveChangesAsync();
+
+            // 重新加载包含导航属性的数据
+            return await GetBillByIdAsync(existingBill.Id) ?? existingBill;
         }
-
-        existingBill.Amount = bill.Amount;
-        existingBill.Type = bill.Type;
-        existingBill.CategoryId = bill.CategoryId;
-        existingBill.PaymentChannelId = bill.PaymentChannelId;
-        existingBill.LedgerId = bill.LedgerId;
-
-        // 确保 TransactionTime 为 UTC 时间
-        if (bill.TransactionTime.Kind != DateTimeKind.Utc)
+        catch (Exception ex)
         {
-            existingBill.TransactionTime = bill.TransactionTime.ToUniversalTime();
+            _logger.LogError(ex, "更新账单失败，账单Id: {BillId}, 用户: {UserId}", bill.Id, bill.UserId);
+            throw;
         }
-        else
-        {
-            existingBill.TransactionTime = bill.TransactionTime;
-        }
-
-        existingBill.Note = bill.Note;
-        existingBill.SyncStatus = SyncStatus.Pending;
-
-        await _context.SaveChangesAsync();
-
-        // 重新加载包含导航属性的数据
-        return await GetBillByIdAsync(existingBill.Id) ?? existingBill;
     }
 
     public async Task<bool> DeleteBillAsync(Guid billId, Guid userId)
     {
-        var bill = await _context.Bills
-            .FirstOrDefaultAsync(b => b.Id == billId && b.UserId == userId);
-
-        if (bill == null)
+        try
         {
-            return false;
+            var bill = await _context.Bills
+                .FirstOrDefaultAsync(b => b.Id == billId && b.UserId == userId);
+
+            if (bill == null)
+            {
+                return false;
+            }
+
+            bill.IsDeleted = true;
+            bill.SyncStatus = SyncStatus.Pending;
+
+            await _context.SaveChangesAsync();
+
+            return true;
         }
-
-        bill.IsDeleted = true;
-        bill.SyncStatus = SyncStatus.Pending;
-
-        await _context.SaveChangesAsync();
-
-        return true;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除账单失败，账单Id: {BillId}, 用户: {UserId}", billId, userId);
+            throw;
+        }
     }
 
     public async Task<int> AssignBillsToLedgerAsync(List<Guid> billIds, Guid userId, Guid? ledgerId)
     {
-        if (billIds == null || billIds.Count == 0)
+        try
         {
-            return 0;
-        }
-
-        // 目标账本必须属于当前用户且未删除（移出账本时 ledgerId 为 null，无需校验）
-        if (ledgerId.HasValue)
-        {
-            var ledgerExists = await _context.Ledgers
-                .AnyAsync(l => l.Id == ledgerId.Value && l.UserId == userId && !l.IsDeleted);
-
-            if (!ledgerExists)
+            if (billIds == null || billIds.Count == 0)
             {
-                throw new ArgumentException("账本不存在");
+                return 0;
             }
+
+            // 目标账本必须属于当前用户且未删除（移出账本时 ledgerId 为 null，无需校验）
+            if (ledgerId.HasValue)
+            {
+                var ledgerExists = await _context.Ledgers
+                    .AnyAsync(l => l.Id == ledgerId.Value && l.UserId == userId && !l.IsDeleted);
+
+                if (!ledgerExists)
+                {
+                    throw new ArgumentException("账本不存在");
+                }
+            }
+
+            var bills = await _context.Bills
+                .Where(b => billIds.Contains(b.Id) && b.UserId == userId && !b.IsDeleted)
+                .ToListAsync();
+
+            foreach (var bill in bills)
+            {
+                bill.LedgerId = ledgerId;
+                bill.SyncStatus = SyncStatus.Pending;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return bills.Count;
         }
-
-        var bills = await _context.Bills
-            .Where(b => billIds.Contains(b.Id) && b.UserId == userId && !b.IsDeleted)
-            .ToListAsync();
-
-        foreach (var bill in bills)
+        catch (Exception ex)
         {
-            bill.LedgerId = ledgerId;
-            bill.SyncStatus = SyncStatus.Pending;
+            _logger.LogError(ex, "批量分配账单到账本失败，用户: {UserId}, 账本Id: {LedgerId}, 账单数量: {Count}",
+                userId, ledgerId, billIds?.Count ?? 0);
+            throw;
         }
-
-        await _context.SaveChangesAsync();
-
-        return bills.Count;
     }
 
     public async Task<int> GetBillCountAsync(

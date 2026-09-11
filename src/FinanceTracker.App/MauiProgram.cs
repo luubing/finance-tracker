@@ -7,6 +7,8 @@ using FinanceTracker.Web.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Masa.Blazor.Presets;
+using Serilog;
+using Serilog.Formatting.Compact;
 
 
 #if ANDROID
@@ -54,8 +56,44 @@ public static class MauiProgram
             };
         }).AddMobileComponents();
 
-        // 配置日志
-        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        // 配置 Serilog 日志（仅记录错误级别）
+        var logPath = Path.Combine(FileSystem.AppDataDirectory, "Logs", "app-.log");
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Error()  // 仅记录 Error 及以上级别（Error、Fatal）
+            .Enrich.WithProperty("App", "FinanceTracker")
+            .Enrich.WithProperty("Platform", DeviceInfo.Platform.ToString())
+            .Enrich.WithProperty("DeviceModel", DeviceInfo.Model)
+            .Enrich.WithProperty("DeviceManufacturer", DeviceInfo.Manufacturer)
+            .Enrich.WithProperty("AppVersion", AppInfo.VersionString)
+            .Enrich.WithProperty("OSVersion", DeviceInfo.VersionString)
+            .WriteTo.File(
+                path: logPath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 14,  // 保留最近14天的日志
+                fileSizeLimitBytes: 20 * 1024 * 1024,  // 单个文件最大20MB
+                rollOnFileSizeLimit: true,
+                formatter: new CompactJsonFormatter(),  // JSON 格式，便于结构化查询
+                buffered: false,  // 立即写入，不缓冲（调试时确保日志不丢失）
+                flushToDiskInterval: TimeSpan.FromSeconds(1)  // 每秒刷新到磁盘
+            )
+            .CreateLogger();
+
+        // 将 Serilog 添加到日志管道
+        builder.Logging.AddSerilog(dispose: true);
+
+        // 捕获全局未处理异常
+        AppDomain.CurrentDomain.UnhandledException += (sender, args) =>
+        {
+            var exception = args.ExceptionObject as Exception;
+            Log.Fatal(exception, "全局未处理异常（AppDomain.UnhandledException）");
+            Log.CloseAndFlush();
+        };
+
+        TaskScheduler.UnobservedTaskException += (sender, args) =>
+        {
+            Log.Error(args.Exception, "未观察到的任务异常（TaskScheduler.UnobservedTaskException）");
+            args.SetObserved();
+        };
 
         // 配置 EF Core + SQLite (本地数据库)
         // 迁移程序集指向 SQLite 专用项目（与 API 的 Npgsql 迁移分离）
@@ -118,6 +156,7 @@ public static class MauiProgram
         builder.Services.AddScoped<BillEventService>();
         builder.Services.AddScoped<BudgetAlertService>();
         builder.Services.AddScoped<HttpService>();
+        builder.Services.AddScoped<ILogViewerService, LogViewerService>();
         // 语音记账：文本解析（中文口语 → 账单草稿）+ 语音录入桥接服务
         // （App 端 SpeechService 注册进 BillVoiceInputService 后走原生识别，见 ISpeechService 注册）
         builder.Services.AddScoped<IBillVoiceParser, BillVoiceParser>();
@@ -165,7 +204,7 @@ public static class MauiProgram
             // 注意：必须输出完整异常（含类型与调用栈），之前只输出 ex.Message，导致
             // iOS 上的 EF Core 初始化错误（NativeAOT 模型构建失败）被掩盖，
             // 直到用户登录时才以"登录失败"的形式暴露出来。
-            System.Diagnostics.Debug.WriteLine($"数据库初始化失败: {ex}");
+            Log.Error(ex, "数据库初始化失败");
         }
     }
 }
