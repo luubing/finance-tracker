@@ -1,6 +1,8 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Time;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FinanceTracker.Api.Controllers;
@@ -40,11 +42,16 @@ public class ImportController : BaseApiController
             return BadRequest(new { message = "CSV 内容不能为空" });
         }
 
+        if (!IsValidUtcOffset(request.UtcOffsetMinutes))
+        {
+            return BadRequest(new { message = InvalidUtcOffsetMessage });
+        }
+
         var userId = GetUserId();
 
         var importedBills = await _csvParserService.ParseWeChatCsvAsync(request.CsvContent);
 
-        return await ProcessImportedBills(userId, importedBills, "微信支付");
+        return await ProcessImportedBills(userId, importedBills, "微信支付", request.UtcOffsetMinutes);
     }
 
     /// <summary>
@@ -60,11 +67,16 @@ public class ImportController : BaseApiController
             return BadRequest(new { message = "CSV 内容不能为空" });
         }
 
+        if (!IsValidUtcOffset(request.UtcOffsetMinutes))
+        {
+            return BadRequest(new { message = InvalidUtcOffsetMessage });
+        }
+
         var userId = GetUserId();
 
         var importedBills = await _csvParserService.ParseAlipayCsvAsync(request.CsvContent);
 
-        return await ProcessImportedBills(userId, importedBills, "支付宝");
+        return await ProcessImportedBills(userId, importedBills, "支付宝", request.UtcOffsetMinutes);
     }
 
     /// <summary>
@@ -109,7 +121,21 @@ public class ImportController : BaseApiController
         return Ok(new { totalCount = importedBills.Count, bills = importedBills });
     }
 
-    private async Task<IActionResult> ProcessImportedBills(Guid userId, List<Core.Interfaces.ImportedBill> importedBills, string defaultChannel)
+    private const string InvalidUtcOffsetMessage = "时区偏移必须在 -840 到 840 分钟之间";
+
+    /// <summary>
+    /// 客户端上报的 UTC 偏移（分钟）是否合法：未上报视为合法；全球时区范围为 UTC-12 ~ UTC+14
+    /// </summary>
+    private static bool IsValidUtcOffset(int? utcOffsetMinutes)
+    {
+        return utcOffsetMinutes is null or >= -840 and <= 840;
+    }
+
+    private async Task<IActionResult> ProcessImportedBills(
+        Guid userId,
+        List<Core.Interfaces.ImportedBill> importedBills,
+        string defaultChannel,
+        int? utcOffsetMinutes)
     {
         var categories = await _categoryService.GetCategoriesAsync(userId);
         var channels = await _paymentChannelService.GetPaymentChannelsAsync(userId);
@@ -137,7 +163,11 @@ public class ImportController : BaseApiController
                     CategoryId = category?.Id ?? categories
                         .First(c => c.Name == (importedBill.IsIncome ? "其他收入" : "其他支出")).Id,
                     PaymentChannelId = channel?.Id ?? channels.First(c => c.Name == defaultChannel).Id,
-                    TransactionTime = importedBill.TransactionTime,
+                    // CSV 里的交易时间是不带时区的用户本地时间：客户端上报了偏移就按该偏移换算为 UTC；
+                    // 没上报（旧版客户端）则交给 BillService 按服务器应用时区解释
+                    TransactionTime = utcOffsetMinutes.HasValue
+                        ? AppTimeZone.ToUtc(importedBill.TransactionTime, TimeSpan.FromMinutes(utcOffsetMinutes.Value))
+                        : importedBill.TransactionTime,
                     Note = importedBill.Description,
                     Source = BillSource.Import,
                     SyncStatus = SyncStatus.Pending
@@ -149,7 +179,7 @@ public class ImportController : BaseApiController
             catch (Exception ex)
             {
                 failCount++;
-                errors.Add($"第 {i + 1} 条: {ex.Message}");
+                errors.Add($"第 {i + 1} 条: {ex.GetUserMessage()}");
             }
         }
 
@@ -215,4 +245,11 @@ public class ImportRequest
     /// CSV 文件内容
     /// </summary>
     public string CsvContent { get; set; } = string.Empty;
+
+    /// <summary>
+    /// CSV 中交易时间所属时区相对 UTC 的偏移（分钟，如东八区为 480；可选）。
+    /// 微信/支付宝导出的交易时间不带时区，服务器无从得知用户在哪个时区，应由客户端上报；
+    /// 未上报时按服务器时区解释——服务器为 UTC 而用户在东八区时，账单时间会差 8 小时。
+    /// </summary>
+    public int? UtcOffsetMinutes { get; set; }
 }

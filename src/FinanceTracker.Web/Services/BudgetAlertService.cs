@@ -33,11 +33,17 @@ public class BudgetAlertService
             return;
         }
 
+        // 用 DisplayName：账本级预算带账本名，多个账本各有"总预算"时才分得清是哪个超支
         var message = worst.RemainingAmount < 0
-            ? $"【{worst.CategoryName}】已超支 {Math.Abs(worst.RemainingAmount):N2} 元，请注意控制支出"
-            : $"【{worst.CategoryName}】本月预算已用完，请注意控制支出";
+            ? $"【{worst.DisplayName}】已超支 {Math.Abs(worst.RemainingAmount):N2} 元，请注意控制支出"
+            : $"【{worst.DisplayName}】本月预算已用完，请注意控制支出";
 
-        await _notificationService.NotifyBudgetExceededAsync("预算超支提醒", message);
-        _notificationService.MarkNotifiedToday(year, month);
+        var delivered = await _notificationService.NotifyBudgetExceededAsync("预算超支提醒", message);
+        if (delivered)
+        {
+            // 仅在通知真正发出后才占用「今日已提醒」额度；
+            // 未授权通知权限/发送失败时保持未标记，下次检查仍可再次提醒
+            _notificationService.MarkNotifiedToday(year, month);
+        }
     }
 }

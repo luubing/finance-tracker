@@ -4,7 +4,7 @@
 @inject IBudgetService BudgetService
 @inject ICategoryService CategoryService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 
 <PStackPageBar Title="预算"
@@ -204,11 +204,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadCategoriesAndLedgers();
         await LoadBudgets();
@@ -362,7 +358,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -388,7 +384,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 

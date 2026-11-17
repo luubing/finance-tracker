@@ -1,3 +1,4 @@
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -117,6 +118,10 @@ public class PaymentChannelsController : BaseApiController
             var updatedChannel = await _paymentChannelService.UpdatePaymentChannelAsync(channel);
             return Ok(MapToResponse(updatedChannel));
         }
+        catch (ForbiddenAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
@@ -144,7 +149,7 @@ public class PaymentChannelsController : BaseApiController
 
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (ForbiddenAccessException ex)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }

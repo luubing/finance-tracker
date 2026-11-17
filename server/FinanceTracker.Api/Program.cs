@@ -38,6 +38,9 @@ if (string.IsNullOrWhiteSpace(jwtSettings.Issuer) || string.IsNullOrWhiteSpace(j
     throw new InvalidOperationException("JWT Issuer 和 Audience 不能为空");
 }
 
+// 非 Development 环境禁止沿用仓库内公开的占位密钥（漏覆盖时任何人都能伪造 JWT）
+StartupSecurityChecks.EnsureJwtSecretKeyIsNotPlaceholder(jwtSettings.SecretKey, builder.Environment.IsDevelopment());
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -70,9 +73,6 @@ builder.Services.AddScoped<IApplicationDbContext>(provider =>
 // 注册网络服务
 builder.Services.AddSingleton<INetworkService, ApiNetworkService>();
 
-// 注册同步队列服务（内存队列，需全局共享，注册为单例）
-builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
-
 // 注册业务服务
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IPresetDataService, PresetDataService>();
@@ -100,16 +100,19 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// 数据库口令仍是默认值时只告警（本地开发连接串常用默认口令，不阻止启动）
+if (!app.Environment.IsDevelopment() &&
+    StartupSecurityChecks.UsesDefaultDatabasePassword(app.Configuration.GetConnectionString("DefaultConnection")))
+{
+    app.Logger.LogWarning(
+        "数据库连接串仍在使用默认口令 postgres，请通过环境变量 ConnectionStrings__DefaultConnection 或 appsettings.Production.json 覆盖");
+}
+
 // Configure the HTTP request pipeline.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-// 启用 Swagger（所有环境）
-app.UseSwagger();
-app.UseSwaggerUI(c =>
-{
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "记账本 API V1");
-    c.RoutePrefix = string.Empty; // 在根路径访问 Swagger UI
-});
+// 启用 Swagger：Development 默认开启，其他环境默认关闭（生产需要时设置环境变量 Swagger__Enabled=true）
+app.UseSwaggerWhenEnabled();
 
 app.UseHttpsRedirection();
 
@@ -137,7 +140,12 @@ app.Run();
 /// </summary>
 public class ApiNetworkService : INetworkService
 {
-    public event EventHandler<bool>? ConnectivityChanged;
+    // 始终在线，不会有连通性变化：空访问器（订阅无效果），避免"声明了从不触发的事件"的 CS0067 警告
+    public event EventHandler<bool>? ConnectivityChanged
+    {
+        add { }
+        remove { }
+    }
 
     public bool IsConnected()
     {

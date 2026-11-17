@@ -96,6 +96,16 @@ public class AuthenticationService
     }
 
     /// <summary>
+    /// 作废本地保存的云端 JWT（不动登录状态）。令牌与当前登录的手机号不匹配时调用，
+    /// 下次访问云端会用当前手机号重新换取。
+    /// </summary>
+    public async Task ClearTokenAsync()
+    {
+        _cachedToken = null;
+        await TryRemoveItemAsync("authToken");
+    }
+
+    /// <summary>
     /// 获取当前用户 ID
     /// </summary>
     public async Task<Guid?> GetUserIdAsync()
@@ -128,6 +138,14 @@ public class AuthenticationService
     /// </summary>
     public async Task SaveUserInfoAsync(Guid userId, string phoneNumber)
     {
+        // 同一设备换号登录：之前换来的云端令牌属于上一个手机号，必须作废，
+        // 否则之后的同步会带着旧账号的令牌，把新账号的数据推进旧账号
+        var previousPhone = await TryGetItemAsync("phoneNumber");
+        if (!string.IsNullOrEmpty(previousPhone) && previousPhone != phoneNumber)
+        {
+            await ClearTokenAsync();
+        }
+
         _cachedUserId = userId;
         await TrySetItemAsync("userId", userId.ToString());
         await TrySetItemAsync("phoneNumber", phoneNumber);

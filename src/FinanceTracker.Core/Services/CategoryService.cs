@@ -1,5 +1,6 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -85,7 +86,8 @@ public class CategoryService : ICategoryService
 
             if (existingCategory.IsPreset)
             {
-                throw new UnauthorizedAccessException("不能修改预设分类");
+                // 已认证但无权操作 → ForbiddenAccessException（403）；UnauthorizedAccessException 专指认证失败（401，会触发登出）
+                throw new ForbiddenAccessException("不能修改预设分类");
             }
 
             existingCategory.Name = category.Name;
@@ -123,7 +125,7 @@ public class CategoryService : ICategoryService
 
             if (category.IsPreset)
             {
-                throw new UnauthorizedAccessException("不能删除预设分类");
+                throw new ForbiddenAccessException("不能删除预设分类");
             }
 
             // 检查是否有关联的账单
@@ -132,7 +134,7 @@ public class CategoryService : ICategoryService
 
             if (hasBills)
             {
-                throw new InvalidOperationException("该分类下有账单记录，无法删除");
+                throw new InvalidOperationException("该分类下有账单，无法删除");
             }
 
             category.IsDeleted = true;

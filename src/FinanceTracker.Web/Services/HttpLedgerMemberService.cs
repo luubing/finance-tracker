@@ -4,6 +4,7 @@ using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FinanceTracker.Web.Services;
 
@@ -11,23 +12,37 @@ namespace FinanceTracker.Web.Services;
 /// 账本成员服务客户端实现：
 /// - 管理/邀请等操作走云端 API（云端数据库为真相源）
 /// - 权限判定（GetMyRole/CanView/EnsureCanWrite）与共享账本列表读本地 SQLite 缓存（离线可用）
-/// - 本地缓存通过 sync/ledgermembers/pull 合并维护，同时补建用户/账本存根避免外键违例
+/// - 本地缓存的合并统一交给 <see cref="ISyncService"/>（与整体同步共用一套规则：云端用户 Id 映射回本地用户、
+///   补建用户/账本存根避免外键违例），这里不再各自维护一份合并逻辑
+/// - 读路径（成员列表 / 待确认邀请 / 共享账本）会顺带联网刷新缓存，但云端不可用时不能拖住页面：
+///   刷新只给很短的期限，失败后短时间内直接读本地缓存，见 <see cref="CloudAvailability"/>
 /// </summary>
 public class HttpLedgerMemberService : ILedgerMemberService
 {
     private readonly HttpService _http;
     private readonly IApplicationDbContext _context;
+    private readonly ISyncService _syncService;
+    private readonly CloudAvailability _availability;
+    private readonly ILogger<HttpLedgerMemberService> _logger;
 
-    public HttpLedgerMemberService(HttpService http, IApplicationDbContext context)
+    public HttpLedgerMemberService(
+        HttpService http,
+        IApplicationDbContext context,
+        ISyncService syncService,
+        CloudAvailability availability,
+        ILogger<HttpLedgerMemberService> logger)
     {
         _http = http;
         _context = context;
+        _syncService = syncService;
+        _availability = availability;
+        _logger = logger;
     }
 
     /// <inheritdoc />
     public async Task<List<LedgerMember>> GetMembersAsync(Guid ledgerId, Guid operatorUserId)
     {
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(operatorUserId);
 
         // 历史账本懒补 Owner 成员行（幂等）：云端不可用/成员关系未同步时，
         // 本地按账本归属补建 Owner 行，保证成员列表展示与"邀请"入口可用
@@ -44,7 +59,7 @@ public class HttpLedgerMemberService : ILedgerMemberService
     /// <inheritdoc />
     public async Task<List<LedgerMember>> GetPendingInvitationsAsync(Guid userId)
     {
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(userId);
 
         return await _context.LedgerMembers
             .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Pending && !m.IsDeleted)
@@ -61,12 +76,16 @@ public class HttpLedgerMemberService : ILedgerMemberService
             $"api/ledgers/{ledgerId}/members",
             new LedgerMemberRequest { PhoneNumber = phoneNumber, Role = role });
 
+        // 云端接口调用成功，云端就是可达的：清除退避（邀请成功后不再整体刷新缓存，只合并返回的这一条）
+        _availability.ReportSuccess();
+
         if (response == null)
         {
             throw new InvalidOperationException("邀请失败，请稍后重试");
         }
 
-        await MergeMemberAsync(response);
+        // 接口返回的这一条成员关系直接合并进本地缓存（被邀请人处于待确认，不在"我的成员关系"拉取范围内）
+        await _syncService.MergeLedgerMembersAsync(operatorUserId, new[] { response });
         return (await _context.LedgerMembers.FirstAsync(m => m.Id == response.Id));
     }
 
@@ -77,14 +96,14 @@ public class HttpLedgerMemberService : ILedgerMemberService
             $"api/invitations/{memberId}/respond",
             new LedgerInvitationRespondRequest { Accept = accept });
 
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(userId, afterCloudAction: true);
     }
 
     /// <inheritdoc />
     public async Task RemoveMemberAsync(Guid ledgerId, Guid memberId, Guid operatorUserId)
     {
         await _http.DeleteAsync<object>($"api/ledgers/{ledgerId}/members/{memberId}");
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(operatorUserId, afterCloudAction: true);
     }
 
     /// <inheritdoc />
@@ -94,7 +113,7 @@ public class HttpLedgerMemberService : ILedgerMemberService
             $"api/ledgers/{ledgerId}/members/{memberId}/role",
             new LedgerMemberRequest { Role = newRole });
 
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(operatorUserId, afterCloudAction: true);
     }
 
     /// <inheritdoc />
@@ -104,14 +123,14 @@ public class HttpLedgerMemberService : ILedgerMemberService
             $"api/ledgers/{ledgerId}/transfer-ownership",
             new LedgerTransferOwnershipRequest { ToUserId = toUserId });
 
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(operatorUserId, afterCloudAction: true);
     }
 
     /// <inheritdoc />
     public async Task ExitAsync(Guid ledgerId, Guid userId)
     {
         await _http.PostAsync<object>($"api/ledgers/{ledgerId}/exit", null);
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(userId, afterCloudAction: true);
     }
 
     /// <inheritdoc />
@@ -164,14 +183,15 @@ public class HttpLedgerMemberService : ILedgerMemberService
 
         if (role == LedgerMemberRole.Viewer)
         {
-            throw new InvalidOperationException("只读成员不能在共享账本中记账");
+            // 与服务端 LedgerMemberService 一致：权限拒绝统一为 ForbiddenAccessException
+            throw new ForbiddenAccessException("只读成员不能在共享账本中记账");
         }
     }
 
     /// <inheritdoc />
     public async Task<List<Ledger>> GetSharedLedgersAsync(Guid userId)
     {
-        await RefreshCacheAsync();
+        await RefreshCacheAsync(userId);
 
         return await _context.LedgerMembers
             .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active &&
@@ -195,127 +215,59 @@ public class HttpLedgerMemberService : ILedgerMemberService
     }
 
     /// <summary>
-    /// 从云端拉取成员关系并合并到本地缓存（静默失败：离线时使用本地缓存，不影响页面展示）
+    /// 从云端拉取成员关系并合并到本地缓存（离线时静默使用本地缓存，不影响页面展示）。
+    /// 合并交给 SyncService：云端下发的用户 Id 要映射回本地用户 <paramref name="userId"/>，
+    /// 否则按本地用户 Id 查询的"待确认邀请 / 我的共享账本"永远查不到云端下发的成员行。
     /// </summary>
-    private async Task RefreshCacheAsync()
+    /// <param name="userId">本地当前用户 ID</param>
+    /// <param name="afterCloudAction">
+    /// true：用户主动发起的云端操作刚成功（响应邀请 / 移除成员…），云端明确可达，且刷新结果关系到
+    /// 这次操作有没有反映到本地——不看退避、不设期限，并且立刻清除退避。
+    /// false（默认）：读路径（页面加载顺带刷新）——处于退避期直接读本地缓存；否则只给
+    /// <see cref="CloudAvailability.RefreshTimeout"/> 的期限，超时真正取消请求并进入退避。
+    /// </param>
+    private async Task RefreshCacheAsync(Guid userId, bool afterCloudAction = false)
     {
+        if (afterCloudAction)
+        {
+            // 云端操作刚成功，云端就是可达的：先清除退避，不管后面的刷新结果如何。
+            // 否则刷新时本地合并出错（走到最后的 catch、不会再上报成功），此前的退避会一直挂着，
+            // 之后的读路径持续跳过联网，本地长期看不到刚在云端生效的成员关系
+            _availability.ReportSuccess();
+        }
+        else if (_availability.IsInBackoff)
+        {
+            _logger.LogDebug("云端近期不可用，跳过联网刷新，直接使用本地账本成员缓存");
+            return;
+        }
+
+        // 超时是"真取消"：令牌一路传到 HttpClient（含换取云端令牌的那次请求），到期请求被中止，不遗留后台任务
+        using var timeout = afterCloudAction ? null : _availability.CreateRefreshTimeout();
+
         try
         {
-            var cloudMembers = await _http.PostAsync<LedgerMemberSyncPullResponse>(
-                "api/sync/ledgermembers/pull",
-                new LedgerMemberSyncPullRequest());
-
-            if (cloudMembers == null)
-            {
-                return;
-            }
-
-            foreach (var dto in cloudMembers.Members)
-            {
-                await MergeMemberAsync(dto);
-            }
+            await _syncService.SyncLedgerMembersAsync(userId, timeout?.Token ?? CancellationToken.None);
         }
-        catch
+        catch (Exception ex) when (ex is HttpRequestException ||
+            (ex is OperationCanceledException && timeout?.IsCancellationRequested == true))
         {
-            // 离线或云端不可用时使用本地缓存
+            // 云端确实不可用：离线 / 连接被拒绝 / 超过期限。预期内的情况，使用本地缓存即可，不记警告，
+            // 并让接下来一小段时间内的读路径直接读本地缓存
+            _availability.ReportFailure();
+            _logger.LogDebug(ex, "云端不可用或刷新超时，使用本地账本成员缓存");
         }
-    }
-
-    /// <summary>
-    /// 合并单条成员关系到本地缓存（含用户/账本存根补建）
-    /// </summary>
-    private async Task MergeMemberAsync(LedgerMemberSyncDto dto)
-    {
-        if (dto.UserId != Guid.Empty)
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
         {
-            await EnsureUserStubAsync(dto.UserId, dto.UserPhoneNumber);
+            // 被别的原因中断，与云端是否可用无关，所以不计入退避（否则一个用户关掉页面就会让所有人跳过联网）：
+            // - 页面（电路）在刷新途中被销毁，HttpClient / DbContext 随作用域一起释放了
+            // - HttpClient 自己的超时（只在操作后的刷新这类不设期限的路径上才会走到）
+            _logger.LogDebug(ex, "刷新被中断，使用本地账本成员缓存");
         }
-
-        if (dto.LedgerOwnerId.HasValue && dto.LedgerOwnerId.Value != Guid.Empty)
+        catch (Exception ex)
         {
-            await EnsureUserStubAsync(dto.LedgerOwnerId.Value);
+            // 不阻断页面展示，但必须留痕：此前这里一律静默吞掉，本地写库失败（如唯一索引冲突）也完全看不到
+            _logger.LogWarning(ex, "刷新账本成员关系缓存失败，继续使用本地缓存");
         }
-
-        await EnsureLedgerStubAsync(dto);
-
-        var existing = await _context.LedgerMembers
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(m => m.Id == dto.Id);
-
-        // 本地懒补的 Owner 行 Id 与云端不同：按 (账本, 用户) 唯一约束兜底匹配，
-        // 避免按 Id 查不到时重复插入而违反 (LedgerId, UserId) 唯一索引导致整个拉取合并失败
-        if (existing == null)
-        {
-            existing = await _context.LedgerMembers
-                .IgnoreQueryFilters()
-                .FirstOrDefaultAsync(m => m.LedgerId == dto.LedgerId && m.UserId == dto.UserId);
-        }
-
-        if (existing == null)
-        {
-            _context.LedgerMembers.Add(new LedgerMember
-            {
-                Id = dto.Id,
-                LedgerId = dto.LedgerId,
-                UserId = dto.UserId,
-                Role = dto.Role,
-                Status = dto.Status,
-                IsDeleted = dto.IsDeleted,
-                CreatedAt = dto.CreatedAt,
-                UpdatedAt = dto.UpdatedAt
-            });
-        }
-        else if (dto.UpdatedAt > existing.UpdatedAt && !dto.ContentEquals(existing))
-        {
-            existing.Role = dto.Role;
-            existing.Status = dto.Status;
-            existing.IsDeleted = dto.IsDeleted;
-        }
-
-        await _context.SaveChangesAsync();
-    }
-
-    /// <summary>
-    /// 确保本地存在用户存根（无手机号时生成确定性占位手机号，后续可升级为真实手机号）
-    /// </summary>
-    private async Task EnsureUserStubAsync(Guid userId, string? phoneNumber = null)
-    {
-        var exists = await _context.Users
-            .IgnoreQueryFilters()
-            .AnyAsync(u => u.Id == userId);
-
-        if (!exists)
-        {
-            _context.Users.Add(new User
-            {
-                Id = userId,
-                PhoneNumber = string.IsNullOrEmpty(phoneNumber)
-                    ? BuildStubPhoneNumber(userId)
-                    : phoneNumber
-            });
-            await _context.SaveChangesAsync();
-        }
-        else if (!string.IsNullOrEmpty(phoneNumber))
-        {
-            // 存根已存在但为占位手机号时升级为真实手机号，便于成员列表展示
-            var user = await _context.Users
-                .IgnoreQueryFilters()
-                .FirstAsync(u => u.Id == userId);
-
-            if (user.PhoneNumber.StartsWith("stub_") && user.PhoneNumber != phoneNumber)
-            {
-                user.PhoneNumber = phoneNumber;
-                await _context.SaveChangesAsync();
-            }
-        }
-    }
-
-    /// <summary>
-    /// 生成确定性占位手机号（stub_ + 15 位 hex，共 20 字符，满足唯一索引且与真实 11 位手机号格式天然区分）
-    /// </summary>
-    private static string BuildStubPhoneNumber(Guid userId)
-    {
-        return $"stub_{userId.ToString("N")[..15]}";
     }
 
     /// <inheritdoc />
@@ -343,30 +295,5 @@ public class HttpLedgerMemberService : ILedgerMemberService
             });
             await _context.SaveChangesAsync();
         }
-    }
-
-    /// <summary>
-    /// 确保本地存在成员关系引用的账本（云端拉取的账本实体缺位时按 DTO 附带信息补建存根）
-    /// </summary>
-    private async Task EnsureLedgerStubAsync(LedgerMemberSyncDto dto)
-    {
-        var exists = await _context.Ledgers
-            .IgnoreQueryFilters()
-            .AnyAsync(l => l.Id == dto.LedgerId);
-
-        if (exists)
-        {
-            return;
-        }
-
-        _context.Ledgers.Add(new Ledger
-        {
-            Id = dto.LedgerId,
-            UserId = dto.LedgerOwnerId ?? dto.UserId,
-            Name = string.IsNullOrWhiteSpace(dto.LedgerName) ? "共享账本" : dto.LedgerName!,
-            Icon = string.IsNullOrWhiteSpace(dto.LedgerIcon) ? "mdi-book" : dto.LedgerIcon!,
-            SortOrder = 99
-        });
-        await _context.SaveChangesAsync();
     }
 }

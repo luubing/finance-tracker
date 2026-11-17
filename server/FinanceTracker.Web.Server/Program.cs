@@ -61,8 +61,10 @@ builder.Services.AddScoped<ILedgerMemberService, HttpLedgerMemberService>();
 builder.Services.AddScoped<IBillService, BillService>();
 builder.Services.AddScoped<IStatisticsService, StatisticsService>();
 builder.Services.AddScoped<ISyncService, SyncService>();
-builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
 builder.Services.AddScoped<IUserDefaultService, UserDefaultService>();
+// 日志查看：共享的「我的」页在两个宿主里都有"错误日志"入口，Web.Server 也必须能解析该服务，
+// 否则点进 /log-viewer 会因缺少注册而抛 DI 异常。Web.Server 没有配置 Serilog 文件日志，页面会显示为空
+builder.Services.AddScoped<ILogViewerService, LogViewerService>();
 
 // 注册语音记账服务：
 // - 文本解析（中文口语 → 账单草稿）使用规则解析器，服务端/客户端通用
@@ -80,6 +82,9 @@ builder.Services.AddScoped<AuthenticationService>();
 builder.Services.AddScoped<BillEventService>();
 builder.Services.AddScoped<BudgetAlertService>();
 builder.Services.AddScoped<HttpService>();
+// 云端可用性的短期记忆（单例，所有电路共享）：云端连不上时，页面加载顺带的成员缓存刷新只等 3 秒，
+// 失败后 30 秒内直接读本地缓存，不再每次都白等连接超时
+builder.Services.AddSingleton(new CloudAvailability());
 builder.Services.AddScoped<ICloudSyncClient>(sp =>
     new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), apiBaseUrl));
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(apiBaseUrl) });
@@ -117,7 +122,12 @@ app.Run();
 /// </summary>
 public class WebNetworkService : INetworkService
 {
-    public event EventHandler<bool>? ConnectivityChanged;
+    // 始终在线，不会有连通性变化：空访问器（订阅无效果），避免"声明了从不触发的事件"的 CS0067 警告
+    public event EventHandler<bool>? ConnectivityChanged
+    {
+        add { }
+        remove { }
+    }
 
     public bool IsConnected()
     {

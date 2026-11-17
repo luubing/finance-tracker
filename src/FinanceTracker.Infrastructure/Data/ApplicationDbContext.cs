@@ -1,5 +1,7 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Services;
+using FinanceTracker.Core.Time;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinanceTracker.Infrastructure.Data;
@@ -45,6 +47,18 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
             entity.HasIndex(e => new { e.UserId, e.TransactionTime });
             entity.Property(e => e.Amount).HasPrecision(18, 2);
             entity.Property(e => e.Note).HasMaxLength(500);
+
+            // 库中的 TransactionTime 约定为 UTC（见 Core 的 AppTimeZone 与 ADR 0005）。
+            // EF Core 从 SQLite 读出的 DateTime 其 Kind 为 Unspecified，后续任何 ToUniversalTime/ToLocalTime
+            // 都会把它误当本地时间二次换算；因此读出时统一标记为 Utc。
+            // 写入时：Local 按应用时区转 UTC（与 AppTimeZone.ToUtc 的约定一致，而不是 ToUniversalTime() 的系统时区），
+            // Unspecified 按 UTC 对待（调用方应已经过 BillService 的 AppTimeZone.ToUtc）。
+            // 提供程序类型仍是 DateTime，列类型不变，因此无需新增迁移。
+            entity.Property(e => e.TransactionTime).HasConversion(
+                value => value.Kind == DateTimeKind.Local
+                    ? AppTimeZone.ToUtc(value)
+                    : DateTime.SpecifyKind(value, DateTimeKind.Utc),
+                value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.Bills)
@@ -203,22 +217,60 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
         });
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var entry in ChangeTracker.Entries<Core.Entities.BaseEntity>())
+        // 同步作用域内由同步代码自己决定时间戳（见 SyncTimestampScope）：标记同步状态不算编辑，
+        // 采用云端版本时要沿用云端的更新时间。其余所有保存照常盖章。
+        if (!SyncTimestampScope.IsActive)
         {
-            switch (entry.State)
+            foreach (var entry in ChangeTracker.Entries<Core.Entities.BaseEntity>())
             {
-                case EntityState.Added:
-                    entry.Entity.CreatedAt = DateTime.UtcNow;
-                    entry.Entity.UpdatedAt = DateTime.UtcNow;
-                    break;
-                case EntityState.Modified:
-                    entry.Entity.UpdatedAt = DateTime.UtcNow;
-                    break;
+                switch (entry.State)
+                {
+                    case EntityState.Added:
+                        entry.Entity.CreatedAt = DateTime.UtcNow;
+                        entry.Entity.UpdatedAt = DateTime.UtcNow;
+                        break;
+                    case EntityState.Modified:
+                        entry.Entity.UpdatedAt = DateTime.UtcNow;
+                        break;
+                }
             }
         }
 
-        return base.SaveChangesAsync(cancellationToken);
+        try
+        {
+            return await base.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // 本应用的 DbContext 是长生命周期的（MAUI Blazor Hybrid 的 WebView 作用域 / Blazor Server 的电路）。
+            // 一次保存失败后，失败的 Added/Modified/Deleted 实体若继续留在 ChangeTracker 中，
+            // 之后每一次（哪怕完全合法的）保存都会连带重试这批脏数据并再次失败——
+            // 表现为「保存失败: An error occurred while saving the entity changes」反复出现，重启应用才恢复。
+            // 因此失败后丢弃本次未提交的变更（Unchanged 的已加载实体保持不动），异常原样抛给调用方。
+            DiscardPendingChanges();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 丢弃所有待提交（Added/Modified/Deleted）的变更，使上下文恢复到可继续使用的状态。
+    /// <para>
+    /// 前提：同一个 DbContext 上没有别的流程同时持有尚未保存的变更。
+    /// 本应用所有写入都是"改完立刻 SaveChanges"，保存失败时 ChangeTracker 里的待提交内容只可能属于这次保存；
+    /// 若以后出现"先在上下文里攒一批改动、稍后一起保存"的流程，这里会连带丢掉它们，需要改成只丢弃失败批次涉及的实体
+    /// （例如从 <see cref="DbUpdateException.Entries"/> 取）。
+    /// </para>
+    /// </summary>
+    private void DiscardPendingChanges()
+    {
+        foreach (var entry in ChangeTracker.Entries().ToList())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                entry.State = EntityState.Detached;
+            }
+        }
     }
 }

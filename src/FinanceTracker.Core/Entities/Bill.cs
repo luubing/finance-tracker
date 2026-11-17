@@ -3,7 +3,7 @@ using FinanceTracker.Core.Enums;
 namespace FinanceTracker.Core.Entities;
 
 /// <summary>
-/// 账单记录
+/// 账单
 /// </summary>
 public class Bill : BaseEntity
 {

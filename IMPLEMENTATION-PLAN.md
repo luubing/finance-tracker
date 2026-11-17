@@ -150,8 +150,8 @@ public enum SyncStatus
 
 ### 认证相关
 ```
-POST   /api/auth/register          # 注册（输入手机号）
-POST   /api/auth/login             # 登录（输入手机号）
+POST   /api/auth/login             # 登录/注册（输入手机号，手机号不存在时自动创建用户，返回 JWT）
+GET    /api/auth/me                # 获取当前登录用户信息
 ```
 
 ### 账单相关
@@ -160,7 +160,7 @@ GET    /api/bills                   # 获取账单列表（分页、筛选）
 POST   /api/bills                   # 创建账单
 PUT    /api/bills/{id}              # 更新账单
 DELETE /api/bills/{id}              # 删除账单（软删除）
-POST   /api/bills/sync              # 批量同步账单
+# 账单批量同步见下方「同步相关」：POST /api/sync/push、POST /api/sync/pull
 ```
 
 ### 分类相关
@@ -215,6 +215,10 @@ GET    /api/statistics/category-comparison     # 分类环比对比
 ```
 POST   /api/sync/push                # 批量推送账单（含共享账本写权限校验）
 POST   /api/sync/pull                # 拉取账单（含共享账本内成员账单）
+POST   /api/sync/categories/push     # 推送自定义分类
+POST   /api/sync/categories/pull     # 拉取分类
+POST   /api/sync/paymentchannels/push  # 推送自定义支付渠道
+POST   /api/sync/paymentchannels/pull  # 拉取支付渠道
 POST   /api/sync/ledgers/push        # 推送账本
 POST   /api/sync/ledgers/pull        # 拉取账本（含共享账本）
 POST   /api/sync/ledgermembers/pull  # 拉取账本成员关系（客户端缓存）
@@ -367,6 +371,8 @@ POST   /api/sync/ledgermembers/pull  # 拉取账本成员关系（客户端缓�
 - 网络状态监听
 - 离线队列管理
 - 联网后自动同步
+  - ⚠️ **尚未实现**：当前只能在「同步状态」组件里手动触发同步，另有导入账单后自动触发一次；离线缓存上限 1000 条
+  - 原计划的 `SyncQueueService` 与 `BackgroundSyncService` 从未接入任何业务流程，已作为死代码删除；若要补上"联网后自动同步"，应基于 `ISyncService` + 网络状态事件重新设计（见 `.scratch/finance-tracker/issues/11-cloud-sync.md`）
 
 ---
 
@@ -394,3 +400,17 @@ POST   /api/sync/ledgermembers/pull  # 拉取账本成员关系（客户端缓�
 1. **预算管理** ✅ 已实现（issue 16、17：Budget 实体/预算 CRUD API/预算页面/执行进度/超支提醒与本地通知）
 2. **多账本** ✅ 已实现（多账本与数据隔离为既有能力；共享账本见 issue 18：LedgerMember 实体/邀请确认/角色权限/成员管理页面/共享账单拉取，ADR 0004）
 3. **数据可视化增强** ✅ 已实现（issue 19：可复用图表组件、分类排行、日历热力图、累计曲线、构成对比；issue 20：自定义报表、分类环比对比、CSV 导出、报表分享）
+
+### 计划外已实现的功能
+> 以下功能不在最初的计划里，也没有对应的 issue，但已在代码中实现并在使用；这里补登记，避免文档与代码脱节（代码评审 P16/P17）
+
+1. **错误日志查看** ✅ 已实现
+   - 入口：「我的 → 错误日志」；页面 `LogViewer.razor`（路由 `/log-viewer`），服务 `ILogViewerService` / `LogViewerService`
+   - 写入：MAUI 端 `MauiProgram` 配置 Serilog，仅记录 Error 及以上级别，以紧凑 JSON 格式写入 `AppDataDirectory/Logs/app-.log`，按天滚动、保留 14 个文件、单文件上限 20 MB
+   - 功能：按日期范围/级别/关键字筛选、查看日志详情、级别统计、导出、清除日志
+   - Web.Server 宿主也注册了该服务（避免入口点进去时因缺少注册而抛 DI 异常），但没有配置 Serilog 文件日志，页面为空
+2. **默认值偏好** ✅ 已实现
+   - 数据：`UserDefault` 实体（每个用户一行）+ `IUserDefaultService`，保存默认支出分类、默认收入分类、默认支付渠道、默认账本
+   - 入口：分类、支付渠道、账本管理页的星标按钮（再点一次取消默认）
+   - 使用：记账页 `AddBill.razor` 打开时按偏好预选；偏好指向的项已不在当前可选项里时回退到第一项
+   - 共享账本不能设为默认（账本管理页的星标只作用于自有账本）

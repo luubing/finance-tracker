@@ -68,7 +68,7 @@ security cms -D -i YourProfile.mobileprovision | grep -A1 Name
 
 **说明**: 蒲公英 API Key
 
-**值**: `4b0051a793157929de2ee61a4a3892ce`（已提供）
+**值**: 蒲公英后台「API 信息」中的 API Key（仅配置在 GitHub Secrets，切勿写入仓库）
 
 ---
 

@@ -47,7 +47,8 @@ public class AuthService : IAuthService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "注册/登录失败，手机号: {PhoneNumber}", phoneNumber);
+            // 手机号等同于登录凭据，且日志可在"我的 → 错误日志"导出：只记脱敏后的号码
+            _logger.LogError(ex, "注册/登录失败，手机号: {PhoneNumber}", PhoneNumberMasker.Mask(phoneNumber));
             throw;
         }
     }

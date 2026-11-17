@@ -92,29 +92,42 @@
                     <MCard>
                         <MCardTitle>
                             <MIcon Class="mr-2">mdi-compare</MIcon>
-                            同比分析（与去年同期对比）
+                            @YoyTitle
                         </MCardTitle>
                         <MCardText>
+                            <div class="text-caption text--secondary text-center mb-2">
+                                @FormatPeriod(_yoyData.CurrentPeriodStart, _yoyData.CurrentPeriodEnd)
+                                对比
+                                @FormatPeriod(_yoyData.PreviousPeriodStart, _yoyData.PreviousPeriodEnd)
+                            </div>
                             <MRow>
                                 <MCol Cols="6">
                                     <div class="text-center">
                                         <div class="text-caption">支出同比</div>
-                                        <div class="text-h4 @(_yoyData.ExpenseChangeRate > 0 ? "error--text" : "success--text")">
-                                            @(_yoyData.ExpenseChangeRate > 0 ? "+" : "")@_yoyData.ExpenseChangeRate.ToString("F1")%
+                                        <div class="text-h4 @ChangeRateClass(_yoyData.ExpenseChangeRate, false)">
+                                            @FormatChangeRate(_yoyData.ExpenseChangeRate)
                                         </div>
                                         <div class="text-caption text--secondary">
-                                            去年: ¥@_yoyData.PreviousYearExpense.ToString("N2")
+                                            去年同期: ¥@_yoyData.PreviousYearExpense.ToString("N2")
+                                            @if (!_yoyData.ExpenseChangeRate.HasValue)
+                                            {
+                                                <span>（无对比基数）</span>
+                                            }
                                         </div>
                                     </div>
                                 </MCol>
                                 <MCol Cols="6">
                                     <div class="text-center">
                                         <div class="text-caption">收入同比</div>
-                                        <div class="text-h4 @(_yoyData.IncomeChangeRate > 0 ? "success--text" : "error--text")">
-                                            @(_yoyData.IncomeChangeRate > 0 ? "+" : "")@_yoyData.IncomeChangeRate.ToString("F1")%
+                                        <div class="text-h4 @ChangeRateClass(_yoyData.IncomeChangeRate, true)">
+                                            @FormatChangeRate(_yoyData.IncomeChangeRate)
                                         </div>
                                         <div class="text-caption text--secondary">
-                                            去年: ¥@_yoyData.PreviousYearIncome.ToString("N2")
+                                            去年同期: ¥@_yoyData.PreviousYearIncome.ToString("N2")
+                                            @if (!_yoyData.IncomeChangeRate.HasValue)
+                                            {
+                                                <span>（无对比基数）</span>
+                                            }
                                         </div>
                                     </div>
                                 </MCol>
@@ -185,7 +198,7 @@
     private bool _isLoading = true;
 
     private AnnualStatisticsModel? _annualStats;
-    private YearOverYearModel? _yoyData;
+    private YearOverYearData? _yoyData;
     private object? _monthlyTrendOption;
     private object? _categoryPieOption;
 
@@ -257,19 +270,8 @@
                 CategoryStats = annualStats.CategoryStats
             };
 
-            // 加载同比数据
-            var yoyData = await StatisticsService.GetYearOverYearDataAsync(_userId, _currentYear, DateTime.Now.Month, _selectedLedgerId);
-            _yoyData = new YearOverYearModel
-            {
-                CurrentYear = yoyData.CurrentYear,
-                CurrentMonth = yoyData.CurrentMonth,
-                CurrentExpense = yoyData.CurrentExpense,
-                CurrentIncome = yoyData.CurrentIncome,
-                PreviousYearExpense = yoyData.PreviousYearExpense,
-                PreviousYearIncome = yoyData.PreviousYearIncome,
-                ExpenseChangeRate = yoyData.ExpenseChangeRate,
-                IncomeChangeRate = yoyData.IncomeChangeRate
-            };
+            // 加载整年同比：已结束的年份比整年；当年比"年初至今 vs 去年同期"，避免拿不完整的今年和去年全年比
+            _yoyData = await StatisticsService.GetAnnualYearOverYearDataAsync(_userId, _currentYear, _selectedLedgerId);
 
             // 构建月度趋势图
             var months = annualStats.MonthlyData.Select(m => $"{m.Month}月").ToArray();
@@ -315,7 +317,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -342,26 +344,39 @@
         public decimal TotalIncome { get; set; }
         public decimal NetIncome { get; set; }
         public int BillCount { get; set; }
-        public List<Core.Interfaces.MonthlyStatistics> MonthlyData { get; set; } = new();
-        public List<Core.Interfaces.CategoryStatistics> CategoryStats { get; set; } = new();
+        public List<Core.Models.MonthlyStatistics> MonthlyData { get; set; } = new();
+        public List<Core.Models.CategoryStatistics> CategoryStats { get; set; } = new();
     }
 
-    private class YearOverYearModel
-    {
-        public int CurrentYear { get; set; }
-        public int CurrentMonth { get; set; }
-        public decimal CurrentExpense { get; set; }
-        public decimal CurrentIncome { get; set; }
-        public decimal PreviousYearExpense { get; set; }
-        public decimal PreviousYearIncome { get; set; }
-        public decimal ExpenseChangeRate { get; set; }
-        public decimal IncomeChangeRate { get; set; }
-    }
+    /// <summary>
+    /// 对比期间没有覆盖整年（当年只比较到今天）
+    /// </summary>
+    private bool IsPartialYear =>
+        _yoyData != null && _yoyData.CurrentPeriodEnd < new DateTime(_yoyData.CurrentYear, 12, 31);
 
-    private class LedgerModel
+    private string YoyTitle => _yoyData == null
+        ? "同比分析"
+        : IsPartialYear
+            ? "同比分析（年初至今 vs 去年同期）"
+            : $"同比分析（{_yoyData.CurrentYear} 年 vs {_yoyData.CurrentYear - 1} 年）";
+
+    private static string FormatPeriod(DateTime start, DateTime end)
+        => $"{start:yyyy-MM-dd} ~ {end:yyyy-MM-dd}";
+
+    /// <summary>
+    /// 去年同期为 0 时变化率为 null，显示"—"而不是会被误读成"没有变化"的 0%
+    /// </summary>
+    private static string FormatChangeRate(decimal? rate)
+        => rate.HasValue ? $"{(rate.Value > 0 ? "+" : "")}{rate.Value:F1}%" : "—";
+
+    /// <param name="higherIsBetter">涨是好事（收入）为 true；涨是坏事（支出）为 false</param>
+    private static string ChangeRateClass(decimal? rate, bool higherIsBetter)
     {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
+        if (!rate.HasValue || rate.Value == 0)
+        {
+            return string.Empty;
+        }
+
+        return (rate.Value > 0) == higherIsBetter ? "success--text" : "error--text";
     }
 }

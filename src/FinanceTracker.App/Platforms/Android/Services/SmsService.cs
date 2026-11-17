@@ -73,7 +73,8 @@ public class SmsService : ISmsService
             var selectionArgs = new[] { fromDateMillis.ToString(CultureInfo.InvariantCulture) };
             var sortOrder = "date DESC";
 
-            using var cursor = _context.ContentResolver.Query(uri!, projection, selection, selectionArgs, sortOrder);
+            // ContentResolver 理论上可能为空（Context 已销毁时）：按"没有短信"处理，由下面的 cursor 判空兜底
+            using var cursor = _context.ContentResolver?.Query(uri!, projection, selection, selectionArgs, sortOrder);
 
             if (cursor != null)
             {

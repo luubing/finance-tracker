@@ -18,6 +18,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\FinanceTracker.Core\FinanceTracker.Core.csproj" />
+    <!-- 保存账单回归测试需要真实的 ApplicationDbContext + SQLite 迁移（与 MAUI/Web.Server 本地库一致） -->
+    <ProjectReference Include="..\..\..\src\FinanceTracker.Infrastructure\FinanceTracker.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\src\FinanceTracker.Infrastructure.Sqlite\FinanceTracker.Infrastructure.Sqlite.csproj" />
+    <!-- 预算预警（BudgetAlertService）等位于 Web 共享组件库中的纯逻辑服务的测试 -->
+    <ProjectReference Include="..\..\..\src\FinanceTracker.Web\FinanceTracker.Web.csproj" />
+    <!-- 启动期安全自检（StartupSecurityChecks）位于 Api 项目 -->
+    <ProjectReference Include="..\..\..\server\FinanceTracker.Api\FinanceTracker.Api.csproj" />
   </ItemGroup>
 
 </Project>

@@ -271,7 +271,7 @@
         {
             _pendingCsvContent = null;
             _pendingEndpoint = string.Empty;
-            await PopupService.EnqueueSnackbarAsync($"解析失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"解析失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -288,7 +288,9 @@
 
         try
         {
-            var request = new { CsvContent = _pendingCsvContent };
+            // CSV 里的交易时间是不带时区的用户本地时间：上报本机时区偏移，
+            // 让服务器按用户所在时区（而不是服务器时区）换算为 UTC 入库
+            var request = new { CsvContent = _pendingCsvContent, UtcOffsetMinutes = AppTimeZone.GetUtcOffsetMinutes() };
             var result = await HttpService.PostAsync<ImportResult>(_pendingEndpoint, request);
 
             if (result != null)
@@ -310,7 +312,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导入失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"导入失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -361,7 +363,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{ex.Message}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+            await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{ex.GetUserMessage()}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
         }
     }
 

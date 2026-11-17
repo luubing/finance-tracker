@@ -97,8 +97,8 @@ public class StatisticsController : BaseApiController
     /// <summary>
     /// 获取趋势数据
     /// </summary>
-    /// <param name="startDate">开始日期</param>
-    /// <param name="endDate">结束日期</param>
+    /// <param name="startDate">开始时刻（应用时区，含）</param>
+    /// <param name="endDate">结束时刻（应用时区，<b>含端点</b>）；要覆盖整天/整月请传最后一个 tick（<c>TimeBoundaries.EndOfDay/EndOfMonth</c>），不要传"减 1 秒"</param>
     /// <param name="dimension">维度（day/week/month）</param>
     /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
     /// <returns>趋势数据</returns>
@@ -116,12 +116,12 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "开始日期必须早于结束日期" });
         }
 
-        if (!new[] { "day", "week", "month" }.Contains(dimension.ToLower()))
+        if (!TrendDimensionParser.TryParse(dimension, out var trendDimension))
         {
             return BadRequest(new { message = "维度必须是 day、week 或 month" });
         }
 
-        var trendData = await _statisticsService.GetTrendDataAsync(userId, startDate, endDate, dimension, ledgerId);
+        var trendData = await _statisticsService.GetTrendDataAsync(userId, startDate, endDate, trendDimension, ledgerId);
 
         return Ok(trendData.Select(t => new
         {
@@ -181,11 +181,17 @@ public class StatisticsController : BaseApiController
     /// 获取同比数据
     /// </summary>
     /// <param name="year">当前年份</param>
-    /// <param name="month">当前月份</param>
+    /// <param name="month">
+    /// 当前月份（可选）。传入时比较该月与去年同月；不传时比较整年：
+    /// 已结束的年份为整年 vs 上一整年，当年为年初至今 vs 去年同期（截至去年的同月同日）
+    /// </param>
     /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
-    /// <returns>同比数据</returns>
+    /// <returns>
+    /// 同比数据。去年同期的支出/收入为 0 时没有对比基数，对应的 expenseChangeRate / incomeChangeRate 为 null
+    /// （不是 0）；currentPeriod* / previousPeriod* 为对比期间的起止日（含首尾，格式 yyyy-MM-dd）
+    /// </returns>
     [HttpGet("year-over-year")]
-    public async Task<IActionResult> GetYearOverYearData([FromQuery] int year, [FromQuery] int month, [FromQuery] Guid? ledgerId)
+    public async Task<IActionResult> GetYearOverYearData([FromQuery] int year, [FromQuery] int? month, [FromQuery] Guid? ledgerId)
     {
         var userId = GetUserId();
 
@@ -194,17 +200,23 @@ public class StatisticsController : BaseApiController
             return BadRequest(new { message = "年份不正确" });
         }
 
-        if (month < 1 || month > 12)
+        if (month.HasValue && (month.Value < 1 || month.Value > 12))
         {
             return BadRequest(new { message = "月份不正确" });
         }
 
-        var data = await _statisticsService.GetYearOverYearDataAsync(userId, year, month, ledgerId);
+        var data = month.HasValue
+            ? await _statisticsService.GetYearOverYearDataAsync(userId, year, month.Value, ledgerId)
+            : await _statisticsService.GetAnnualYearOverYearDataAsync(userId, year, ledgerId);
 
         return Ok(new
         {
             currentYear = data.CurrentYear,
             currentMonth = data.CurrentMonth,
+            currentPeriodStart = data.CurrentPeriodStart.ToString("yyyy-MM-dd"),
+            currentPeriodEnd = data.CurrentPeriodEnd.ToString("yyyy-MM-dd"),
+            previousPeriodStart = data.PreviousPeriodStart.ToString("yyyy-MM-dd"),
+            previousPeriodEnd = data.PreviousPeriodEnd.ToString("yyyy-MM-dd"),
             currentExpense = data.CurrentExpense,
             currentIncome = data.CurrentIncome,
             previousYearExpense = data.PreviousYearExpense,

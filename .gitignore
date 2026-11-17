@@ -126,3 +126,10 @@ build/certificates/*.pem
 build/certificates/*.cer
 build/certificates/*.mobileprovision
 /2026-09.csv
+
+## EF 设计时工厂（dotnet ef）生成的一次性 SQLite 文件
+design_time.db
+
+## .scratch 下的一次性调试脚本（issue 文档仍受跟踪）
+.scratch/*.sh
+.scratch/*.py

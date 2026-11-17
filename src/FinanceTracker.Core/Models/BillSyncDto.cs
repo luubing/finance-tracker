@@ -106,7 +106,10 @@ public class BillSyncDto
     /// <summary>
     /// 归一化为 UTC。约定各端一律以 UTC 存储/传输：
     /// - Utc：原样；
-    /// - Local：转换为 UTC；
+    /// - Local：转换为 UTC。System.Text.Json 解析带偏移量的时间戳（如 +08:00）得到的就是 Kind=Local，
+    ///   其含义是"本机系统时区的时间"，反向换算只能用系统时区，所以这里刻意用 ToUniversalTime()，
+    ///   而不是 <see cref="Time.AppTimeZone"/>（后者把 Local 当成"应用时区的墙上时间"，面向表单输入）；
+    ///   两者只在测试里覆盖了应用时区时才会不同；
     /// - Unspecified（SQLite 读出/无时区后缀 JSON 反序列化的典型情况）：按已是 UTC 处理，
     ///   绝不能用 ToUniversalTime()（会按服务器本地时区解释，造成时间偏移）。
     /// Npgsql 写 timestamptz 只接受 Kind=Utc，否则抛 ArgumentException。
@@ -122,7 +125,13 @@ public class BillSyncDto
     /// 确保目标库中存在账单引用的分类；不存在则按 DTO 携带的信息补建（避免外键违例）。
     /// 立即 SaveChanges：保证后续 AnyAsync 能查到，避免同批重复 Add 相同主键。
     /// </summary>
-    public async Task EnsureCategoryExistsAsync(IApplicationDbContext context, Guid userId)
+    /// <param name="allowCreatePreset">
+    /// 是否允许按 DTO 的 <see cref="CategoryIsPreset"/> 标记补建"预设"分类（UserId 为空，对所有用户可见）。
+    /// 只有数据来源可信（客户端拉取云端数据，用来自愈历史上随机 GUID 的预设）时才能传 true；
+    /// 服务端处理客户端推送时必须保持默认的 false——否则任何登录用户都能在云端造出对所有人可见的"预设"分类，
+    /// 此时缺失的分类一律补建为推送者自己的私有分类。
+    /// </param>
+    public async Task EnsureCategoryExistsAsync(IApplicationDbContext context, Guid userId, bool allowCreatePreset = false)
     {
         // IgnoreQueryFilters：只要行存在（含软删除）即满足外键，避免重复 Add 相同主键
         var exists = await context.Categories
@@ -133,14 +142,15 @@ public class BillSyncDto
             return;
         }
 
+        var createAsPreset = CategoryIsPreset && allowCreatePreset;
         context.Categories.Add(new Category
         {
             Id = CategoryId,
-            UserId = CategoryIsPreset ? null : userId,
+            UserId = createAsPreset ? null : userId,
             Name = string.IsNullOrWhiteSpace(CategoryName) ? "未命名分类" : CategoryName!,
             Icon = string.IsNullOrWhiteSpace(CategoryIcon) ? "mdi-tag" : CategoryIcon!,
             Type = Type,
-            IsPreset = CategoryIsPreset,
+            IsPreset = createAsPreset,
             SortOrder = 99
         });
         await context.SaveChangesAsync();
@@ -150,7 +160,11 @@ public class BillSyncDto
     /// 确保目标库中存在账单引用的支付渠道；不存在则按 DTO 携带的信息补建（避免外键违例）。
     /// 立即 SaveChanges：保证后续 AnyAsync 能查到，避免同批重复 Add 相同主键。
     /// </summary>
-    public async Task EnsurePaymentChannelExistsAsync(IApplicationDbContext context, Guid userId)
+    /// <param name="allowCreatePreset">
+    /// 是否允许按 DTO 的 <see cref="PaymentChannelIsPreset"/> 标记补建"预设"支付渠道，
+    /// 取值规则同 <see cref="EnsureCategoryExistsAsync"/>：只有数据来源可信时才能传 true。
+    /// </param>
+    public async Task EnsurePaymentChannelExistsAsync(IApplicationDbContext context, Guid userId, bool allowCreatePreset = false)
     {
         // IgnoreQueryFilters：只要行存在（含软删除）即满足外键，避免重复 Add 相同主键
         var exists = await context.PaymentChannels
@@ -161,13 +175,14 @@ public class BillSyncDto
             return;
         }
 
+        var createAsPreset = PaymentChannelIsPreset && allowCreatePreset;
         context.PaymentChannels.Add(new PaymentChannel
         {
             Id = PaymentChannelId,
-            UserId = PaymentChannelIsPreset ? null : userId,
+            UserId = createAsPreset ? null : userId,
             Name = string.IsNullOrWhiteSpace(PaymentChannelName) ? "未命名渠道" : PaymentChannelName!,
             Icon = string.IsNullOrWhiteSpace(PaymentChannelIcon) ? "mdi-credit-card" : PaymentChannelIcon!,
-            IsPreset = PaymentChannelIsPreset,
+            IsPreset = createAsPreset,
             SortOrder = 99
         });
         await context.SaveChangesAsync();

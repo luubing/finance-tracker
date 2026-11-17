@@ -5,6 +5,7 @@
 @inject IStatisticsService StatisticsService
 @inject ILedgerService LedgerService
 @inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 
 <PStackPageBar Title="自定义报表"
@@ -206,11 +207,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         try
         {
@@ -275,7 +272,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载报表失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载报表失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -356,7 +353,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导出失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"导出失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -433,12 +430,5 @@
         }
 
         return summary;
-    }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
     }
 }

@@ -300,7 +300,9 @@ public class LedgerMemberService : ILedgerMemberService
 
         if (role == LedgerMemberRole.Viewer)
         {
-            throw new InvalidOperationException("只读成员不能在共享账本中记账");
+            // 只读成员记账属于「已认证但无权操作」，必须是 ForbiddenAccessException（403），
+            // 不能用 InvalidOperationException（会被控制器映射成 400）
+            throw new ForbiddenAccessException("只读成员不能在共享账本中记账");
         }
     }
 

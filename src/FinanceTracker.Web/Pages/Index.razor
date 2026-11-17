@@ -186,7 +186,7 @@ else if (_user != null)
                 {
                     <div class="text-center text--secondary py-4">
                         <MIcon Size="48" Color="grey lighten-1">mdi-receipt</MIcon>
-                        <div class="mt-2">暂无账单记录</div>
+                        <div class="mt-2">暂无账单</div>
                         <MButton Small Color="primary" Class="mt-2" OnClick="NavigateToAddBill">
                             记一笔
                         </MButton>
@@ -287,7 +287,7 @@ else if (_user != null)
         {
             if (_user != null)
             {
-                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
+                await LoadBusinessDataAsync();
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -339,7 +339,7 @@ else if (_user != null)
 
             if (_user != null)
             {
-                await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
+                await LoadBusinessDataAsync();
 
                 _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
             }
@@ -374,20 +374,50 @@ else if (_user != null)
             }
 
             // 加载业务数据
-            await Task.WhenAll(LoadMonthlyStatistics(), LoadRecentBills(), LoadBudgetStatus());
+            await LoadBusinessDataAsync();
 
             // 加载待确认账单数量（角标）
             _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException ex)
         {
-            Logger.LogWarning(ex, "加载用户信息失败，将重定向到登录页面");
+            // 仅「认证失败」才需要重新登录（与 401 语义一致）
+            Logger.LogWarning(ex, "登录状态失效，将重定向到登录页面");
             Navigation.Replace("/login");
             return;
+        }
+        catch (Exception ex)
+        {
+            // 其它失败（数据库读取、统计、待确认账单等）与登录无关：
+            // 不能把已登录用户踢到登录页，提示真实原因并留在首页，用户可下拉刷新重试
+            Logger.LogError(ex, "加载首页数据失败");
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
             _isLoading = false;
+        }
+    }
+
+    // 首页三块数据（月度统计、最近账单、预算进度）读的是同一个 DbContext：
+    // MAUI Blazor Hybrid 里 Scoped 等同于应用级单例，Blazor Server 里则是同一条电路。
+    // EF Core 不允许同一个上下文并行执行查询（"A second operation was started on this context"），
+    // 而三个 Load* 方法各自吞掉异常，并发冲突只会悄悄记成 Warning、让首页某一块偶发空白。
+    // 所以必须顺序执行；闸门则避免"下拉刷新"与"账单变更事件"这两条入口同时重入。
+    private readonly SemaphoreSlim _loadGate = new(1, 1);
+
+    private async Task LoadBusinessDataAsync()
+    {
+        await _loadGate.WaitAsync();
+        try
+        {
+            await LoadMonthlyStatistics();
+            await LoadRecentBills();
+            await LoadBudgetStatus();
+        }
+        finally
+        {
+            _loadGate.Release();
         }
     }
 
@@ -428,7 +458,8 @@ else if (_user != null)
                 CategoryIcon = b.Category?.Icon ?? "mdi-tag",
                 PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
                 PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
-                TransactionTime = b.TransactionTime,
+                // 库里是 UTC：首页最近账单展示应用时区的墙上时间
+                TransactionTime = AppTimeZone.ToLocal(b.TransactionTime),
                 Note = b.Note
             }).ToList();
         }
@@ -472,7 +503,8 @@ else if (_user != null)
         try
         {
             var now = DateTime.Now;
-            _budgetStatuses = await BudgetService.GetBudgetStatusAsync(_user!.Id, now.Year, now.Month);
+            // 概览口径：有"全部账本"预算就展示它们；只设了账本级预算时回退展示账本级预算（P14）
+            _budgetStatuses = await BudgetService.GetOverviewBudgetStatusAsync(_user!.Id, now.Year, now.Month);
 
             // 超支时发送本地通知（每日最多一次）
             await BudgetAlertService.NotifyIfExceededAsync(_budgetStatuses, now.Year, now.Month);
@@ -481,7 +513,7 @@ else if (_user != null)
             var exceeded = _budgetStatuses.Where(s => s.UsagePercentage >= 100).ToList();
             if (exceeded.Any())
             {
-                var names = string.Join("、", exceeded.Select(s => s.CategoryName));
+                var names = string.Join("、", exceeded.Select(s => s.DisplayName));
                 await PopupService.EnqueueSnackbarAsync($"预算超支提醒：{names} 本月预算已超支", AlertTypes.Error);
             }
         }

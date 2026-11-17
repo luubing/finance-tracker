@@ -97,7 +97,7 @@ public class LedgerService : ILedgerService
 
             if (hasBills)
             {
-                throw new InvalidOperationException("该账本下有账单记录，无法删除");
+                throw new InvalidOperationException("该账本下有账单，无法删除");
             }
 
             ledger.IsDeleted = true;

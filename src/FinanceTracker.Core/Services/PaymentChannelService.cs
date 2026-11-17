@@ -1,4 +1,5 @@
 using FinanceTracker.Core.Entities;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -69,7 +70,8 @@ public class PaymentChannelService : IPaymentChannelService
 
             if (existingChannel.IsPreset)
             {
-                throw new UnauthorizedAccessException("不能修改预设支付渠道");
+                // 已认证但无权操作 → ForbiddenAccessException（403）；UnauthorizedAccessException 专指认证失败（401，会触发登出）
+                throw new ForbiddenAccessException("不能修改预设支付渠道");
             }
 
             existingChannel.Name = channel.Name;
@@ -101,7 +103,7 @@ public class PaymentChannelService : IPaymentChannelService
 
             if (channel.IsPreset)
             {
-                throw new UnauthorizedAccessException("不能删除预设支付渠道");
+                throw new ForbiddenAccessException("不能删除预设支付渠道");
             }
 
             // 检查是否有关联的账单
@@ -110,7 +112,7 @@ public class PaymentChannelService : IPaymentChannelService
 
             if (hasBills)
             {
-                throw new InvalidOperationException("该支付渠道下有账单记录，无法删除");
+                throw new InvalidOperationException("该支付渠道下有账单，无法删除");
             }
 
             channel.IsDeleted = true;

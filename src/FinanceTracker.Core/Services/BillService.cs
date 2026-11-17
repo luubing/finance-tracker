@@ -1,6 +1,7 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -51,14 +52,17 @@ public class BillService : IBillService
             }
         }
 
+        // 筛选日期是应用时区的墙上时间，库里的 TransactionTime 是 UTC：先换算再比较
         if (startDate.HasValue)
         {
-            query = query.Where(b => b.TransactionTime >= startDate.Value);
+            var startUtc = AppTimeZone.ToUtc(startDate.Value);
+            query = query.Where(b => b.TransactionTime >= startUtc);
         }
 
         if (endDate.HasValue)
         {
-            query = query.Where(b => b.TransactionTime <= endDate.Value);
+            var endUtc = AppTimeZone.ToUtc(endDate.Value);
+            query = query.Where(b => b.TransactionTime <= endUtc);
         }
 
         if (categoryId.HasValue)
@@ -99,16 +103,16 @@ public class BillService : IBillService
     {
         try
         {
+            // 先校验外键引用，避免把「FOREIGN KEY constraint failed」这类用户看不懂的数据库错误抛到界面
+            await EnsureReferencesExistAsync(bill);
+
             bill.Id = Guid.NewGuid();
             bill.SyncStatus = SyncStatus.Pending;
             // 数据来源（Source）由调用方决定（手动录入/导入/短信识别/通知栏/语音识别），
             // 不在此处强制覆盖，否则语音等非手动来源的账单会被错误标记为手动录入
 
-            // 确保 TransactionTime 为 UTC 时间
-            if (bill.TransactionTime.Kind != DateTimeKind.Utc)
-            {
-                bill.TransactionTime = bill.TransactionTime.ToUniversalTime();
-            }
+            // 入库统一为 UTC：调用方传入的 Local/Unspecified 都视为应用时区的墙上时间（见 AppTimeZone）
+            bill.TransactionTime = AppTimeZone.ToUtc(bill.TransactionTime);
 
             _context.Bills.Add(bill);
             await _context.SaveChangesAsync();
@@ -136,21 +140,18 @@ public class BillService : IBillService
                 throw new ArgumentException("账单不存在");
             }
 
+            // 必须在修改已跟踪的 existingBill 之前校验：校验失败时不能把改了一半的实体留在 ChangeTracker 里，
+            // 否则会连带污染之后的每一次保存
+            await EnsureReferencesExistAsync(bill);
+
             existingBill.Amount = bill.Amount;
             existingBill.Type = bill.Type;
             existingBill.CategoryId = bill.CategoryId;
             existingBill.PaymentChannelId = bill.PaymentChannelId;
             existingBill.LedgerId = bill.LedgerId;
 
-            // 确保 TransactionTime 为 UTC 时间
-            if (bill.TransactionTime.Kind != DateTimeKind.Utc)
-            {
-                existingBill.TransactionTime = bill.TransactionTime.ToUniversalTime();
-            }
-            else
-            {
-                existingBill.TransactionTime = bill.TransactionTime;
-            }
+            // 入库统一为 UTC：调用方传入的 Local/Unspecified 都视为应用时区的墙上时间（见 AppTimeZone）
+            existingBill.TransactionTime = AppTimeZone.ToUtc(bill.TransactionTime);
 
             existingBill.Note = bill.Note;
             existingBill.SyncStatus = SyncStatus.Pending;
@@ -264,14 +265,17 @@ public class BillService : IBillService
             }
         }
 
+        // 与 GetBillsAsync 一致：筛选日期是应用时区的墙上时间，先换算为 UTC 再与库里的值比较
         if (startDate.HasValue)
         {
-            query = query.Where(b => b.TransactionTime >= startDate.Value);
+            var startUtc = AppTimeZone.ToUtc(startDate.Value);
+            query = query.Where(b => b.TransactionTime >= startUtc);
         }
 
         if (endDate.HasValue)
         {
-            query = query.Where(b => b.TransactionTime <= endDate.Value);
+            var endUtc = AppTimeZone.ToUtc(endDate.Value);
+            query = query.Where(b => b.TransactionTime <= endUtc);
         }
 
         if (categoryId.HasValue)
@@ -290,6 +294,38 @@ public class BillService : IBillService
         }
 
         return await query.CountAsync();
+    }
+
+    /// <summary>
+    /// 保存前校验账单引用的用户/分类/支付渠道/账本是否存在，
+    /// 把数据库外键错误提前转换为明确、可操作的业务提示。
+    /// 使用 IgnoreQueryFilters：只校验外键行是否存在（与数据库约束语义一致），
+    /// 因此编辑引用了「已软删除分类/渠道/账本」的历史账单不会被误拦截。
+    /// </summary>
+    /// <param name="bill">待保存的账单</param>
+    /// <exception cref="ArgumentException">引用的实体不存在</exception>
+    private async Task EnsureReferencesExistAsync(Bill bill)
+    {
+        if (!await _context.Users.IgnoreQueryFilters().AnyAsync(u => u.Id == bill.UserId))
+        {
+            throw new ArgumentException("当前登录用户不存在，请退出并重新登录后再试");
+        }
+
+        if (!await _context.Categories.IgnoreQueryFilters().AnyAsync(c => c.Id == bill.CategoryId))
+        {
+            throw new ArgumentException("分类不存在，请重新选择分类");
+        }
+
+        if (!await _context.PaymentChannels.IgnoreQueryFilters().AnyAsync(c => c.Id == bill.PaymentChannelId))
+        {
+            throw new ArgumentException("支付渠道不存在，请重新选择支付渠道");
+        }
+
+        if (bill.LedgerId.HasValue &&
+            !await _context.Ledgers.IgnoreQueryFilters().AnyAsync(l => l.Id == bill.LedgerId.Value))
+        {
+            throw new ArgumentException("账本不存在或尚未同步，请重新选择账本");
+        }
     }
 
     /// <summary>

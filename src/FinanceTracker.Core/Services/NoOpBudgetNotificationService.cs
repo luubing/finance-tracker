@@ -7,9 +7,10 @@ namespace FinanceTracker.Core.Services;
 /// </summary>
 public class NoOpBudgetNotificationService : IBudgetNotificationService
 {
-    public Task NotifyBudgetExceededAsync(string title, string message)
+    public Task<bool> NotifyBudgetExceededAsync(string title, string message)
     {
-        return Task.CompletedTask;
+        // 空实现不会真正发出通知
+        return Task.FromResult(false);
     }
 
     public bool IsNotifiedToday(int year, int month)

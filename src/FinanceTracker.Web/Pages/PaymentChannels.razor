@@ -2,7 +2,7 @@
 @using FinanceTracker.Core.Interfaces
 @inject IPaymentChannelService PaymentChannelService
 @inject IUserDefaultService UserDefaultService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
 
@@ -110,11 +110,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadChannels();
     }
@@ -202,7 +198,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -222,7 +218,7 @@
                 await PopupService.EnqueueSnackbarAsync("支付渠道不存在", AlertTypes.Warning);
             }
         }
-        catch (UnauthorizedAccessException ex)
+        catch (ForbiddenAccessException ex)
         {
             await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
         }
@@ -232,7 +228,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -254,7 +250,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 

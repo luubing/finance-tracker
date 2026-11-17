@@ -12,11 +12,16 @@ public class BillsController : BaseApiController
 {
     private readonly IBillService _billService;
     private readonly ILedgerMemberService _ledgerMemberService;
+    private readonly ICategoryService _categoryService;
 
-    public BillsController(IBillService billService, ILedgerMemberService ledgerMemberService)
+    public BillsController(
+        IBillService billService,
+        ILedgerMemberService ledgerMemberService,
+        ICategoryService categoryService)
     {
         _billService = billService;
         _ledgerMemberService = ledgerMemberService;
+        _categoryService = categoryService;
     }
 
     /// <summary>
@@ -41,10 +46,6 @@ public class BillsController : BaseApiController
             {
                 return BadRequest(new { message = ex.Message });
             }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
         }
 
         return null;
@@ -53,8 +54,8 @@ public class BillsController : BaseApiController
     /// <summary>
     /// 获取账单列表
     /// </summary>
-    /// <param name="startDate">开始日期</param>
-    /// <param name="endDate">结束日期</param>
+    /// <param name="startDate">开始时刻（应用时区，含）</param>
+    /// <param name="endDate">结束时刻（应用时区，<b>含端点</b>）；要覆盖整天请传当天最后一个 tick（<c>TimeBoundaries.EndOfDay</c>），不要传"减 1 秒"</param>
     /// <param name="categoryId">分类ID</param>
     /// <param name="paymentChannelId">支付渠道ID</param>
     /// <param name="ledgerId">账本ID</param>
@@ -119,7 +120,7 @@ public class BillsController : BaseApiController
     {
         var userId = GetUserId();
 
-        var validationError = ValidateBillRequest(request);
+        var validationError = ValidateBillRequest(request) ?? await ValidateCategoryAsync(userId, request);
         if (validationError != null)
         {
             return validationError;
@@ -165,7 +166,7 @@ public class BillsController : BaseApiController
             return NotFound(new { message = "账单不存在" });
         }
 
-        var validationError = ValidateBillRequest(request);
+        var validationError = ValidateBillRequest(request) ?? await ValidateCategoryAsync(userId, request);
         if (validationError != null)
         {
             return validationError;
@@ -218,6 +219,32 @@ public class BillsController : BaseApiController
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// 分类校验：分类必须对当前用户可见（预设或自建），且分类类型与账单类型一致，
+    /// 否则会出现「支出账单挂收入分类」之类的脏数据，污染统计。
+    /// 分类不存在时不在此拦截，交给 BillService 的引用校验给出明确提示。
+    /// </summary>
+    private async Task<IActionResult?> ValidateCategoryAsync(Guid userId, BillRequest request)
+    {
+        var category = await _categoryService.GetCategoryByIdAsync(request.CategoryId);
+        if (category == null)
+        {
+            return null;
+        }
+
+        if (!category.IsPreset && category.UserId != userId)
+        {
+            return BadRequest(new { message = "分类不存在" });
+        }
+
+        if (category.Type != request.Type)
+        {
+            return BadRequest(new { message = "分类类型与账单类型不一致" });
+        }
+
+        return null;
     }
 
     private IActionResult? ValidateBillRequest(BillRequest request)

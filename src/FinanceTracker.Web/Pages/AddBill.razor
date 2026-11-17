@@ -154,7 +154,7 @@
                             <MCol Cols="12">
                                 <MSelect @bind-Value="_model.LedgerId"
                                          Items="_ledgers"
-                                         ItemText="@GetLedgerDisplayText"
+                                         ItemText="@(l => l.DisplayText)"
                                          ItemValue="l => (Guid?)l.Id"
                                          Label="账本（可选）"
                                          Outlined
@@ -374,6 +374,12 @@
         {
             _model.TransactionTime = DateTime.Now.ToString("yyyy-MM-ddTHH:mm");
         }
+
+        // 表单已就绪（分类/渠道/账本、默认值、编辑回填都只读本地库）：先渲染出来，再去加载共享账本。
+        // 共享账本要先向云端刷新成员关系，云端慢或连不上时要等好几秒；放在最前面的话，整个表单
+        // 都被拖住，而且迟到的默认值/编辑回填还会覆盖用户这几秒里已经填好的内容
+        StateHasChanged();
+        await LoadSharedLedgersAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -450,7 +456,20 @@
             IsShared = false
         }).ToList();
 
-        // 共享账本：Editor/Viewer 均可选择（Viewer 记账时由服务端拦截并提示）
+        // 设置默认值：优先使用默认值，没有默认值则选中第一条
+        // （默认账本只会是自己的账本——共享账本不能设为默认——所以不必等共享账本加载完）
+        await SetDefaultValuesAsync();
+
+        // 通知 UI 更新
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// 加载共享账本供选择：Editor/Viewer 均可选择（Viewer 记账时由服务端拦截并提示）。
+    /// 需要联网刷新成员关系，所以放在表单就绪之后；失败（离线等）只影响共享账本，自己的账本照常可选。
+    /// </summary>
+    private async Task LoadSharedLedgersAsync()
+    {
         try
         {
             var sharedLedgers = await LedgerMemberService.GetSharedLedgersAsync(_userId);
@@ -467,12 +486,6 @@
         {
             // 共享账本加载失败不影响自有账本
         }
-
-        // 设置默认值：优先使用默认值，没有默认值则选中第一条
-        await SetDefaultValuesAsync();
-
-        // 通知 UI 更新
-        StateHasChanged();
     }
 
     private async Task SetDefaultValuesAsync()
@@ -551,7 +564,8 @@
                 CategoryId = bill.CategoryId,
                 PaymentChannelId = bill.PaymentChannelId,
                 LedgerId = bill.LedgerId,
-                TransactionTime = bill.TransactionTime.ToString("yyyy-MM-ddTHH:mm"),
+                // 库里是 UTC：编辑回填应用时区的墙上时间，保存时再由 BillService 换回 UTC
+                TransactionTime = AppTimeZone.ToLocal(bill.TransactionTime).ToString("yyyy-MM-ddTHH:mm"),
                 Note = bill.Note
             };
         }
@@ -613,7 +627,7 @@
             }
             catch (Exception ex)
             {
-                await PopupService.EnqueueSnackbarAsync(ex.Message, AlertTypes.Warning);
+                await PopupService.EnqueueSnackbarAsync(ex.GetUserMessage(), AlertTypes.Warning);
                 return;
             }
         }
@@ -671,7 +685,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"保存失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"保存失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -1040,19 +1054,4 @@
         public string Icon { get; set; } = string.Empty;
         public bool IsDefault { get; set; }
     }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
-        public bool IsShared { get; set; }
-        public bool IsDefault { get; set; }
-    }
-
-    /// <summary>
-    /// 账本下拉显示文本：共享账本追加（共享）标记
-    /// </summary>
-    private string GetLedgerDisplayText(LedgerModel ledger) =>
-        ledger.IsShared ? $"{ledger.Name}（共享）" : ledger.Name;
 }

@@ -105,7 +105,7 @@ openssl x509 -in ios_distribution.cer -inform DER -out ios_distribution.pem -out
 
 # 合并证书和私钥为 .p12 文件
 # 会提示设置导出密码，记住这个密码！
-openssl pkcs12 -export -inkey ios_distribution.key -in ios_distribution.pem -out ios_distribution.p12 -password pass:financeTracker
+openssl pkcs12 -export -inkey ios_distribution.key -in ios_distribution.pem -out ios_distribution.p12 -password pass:<你的p12密码>
 ```
 
 ---
@@ -138,10 +138,10 @@ https://github.com/你的用户名/finance-tracker
 | Secret 名称 | 值 |
 |-------------|-----|
 | `APPLE_CERTIFICATE` | 粘贴 `certificate_base64.txt` 的内容 |
-| `APPLE_CERTIFICATE_PASSWORD` | `financeTracker` (或你设置的密码) |
+| `APPLE_CERTIFICATE_PASSWORD` | 导出 `.p12` 时设置的密码（与步骤 4 中 `-password` 保持一致） |
 | `APPLE_PROVISIONING_PROFILE` | 粘贴 `profile_base64.txt` 的内容 |
 | `APPLE_PROVISIONING_PROFILE_NAME` | `FinanceTracker Distribution` |
-| `PGYER_API_KEY` | `4b0051a793157929de2ee61a4a3892ce` |
+| `PGYER_API_KEY` | 蒲公英后台「API 信息」中的 API Key（仅配置在 GitHub Secrets，切勿写入仓库） |
 
 ---
 

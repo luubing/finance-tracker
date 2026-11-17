@@ -3,7 +3,7 @@
 @using FinanceTracker.Core.Interfaces
 @inject ILedgerMemberService LedgerMemberService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
 
@@ -191,18 +191,7 @@
             return;
         }
 
-        try
-        {
-            var userIdStr = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
-            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-            {
-                _userId = userId;
-            }
-        }
-        catch (Exception)
-        {
-            // 电路断开等场景下无法访问 localStorage，保持 Guid.Empty
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadMembersAsync();
         StateHasChanged();
@@ -223,7 +212,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载成员失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载成员失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -249,7 +238,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"邀请失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"邀请失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -276,7 +265,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"修改失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"修改失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -290,7 +279,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"移除失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"移除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -304,7 +293,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"转让失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"转让失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -318,7 +307,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 

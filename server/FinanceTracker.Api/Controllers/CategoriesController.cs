@@ -1,4 +1,5 @@
 using FinanceTracker.Core.Enums;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -121,6 +122,10 @@ public class CategoriesController : BaseApiController
             var updatedCategory = await _categoryService.UpdateCategoryAsync(category);
             return Ok(MapToResponse(updatedCategory));
         }
+        catch (ForbiddenAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
@@ -148,7 +153,7 @@ public class CategoriesController : BaseApiController
 
             return NoContent();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (ForbiddenAccessException ex)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }

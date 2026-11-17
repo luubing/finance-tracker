@@ -4,7 +4,8 @@ E2E 冒烟测试：验证 Blazor Server 页面可正常加载、SignalR 电路�
 
 前置条件：
   1. pip install playwright && python -m playwright install chromium
-  2. FinanceTracker.Web.Server 已启动（默认监听 http://localhost:59947）
+  2. FinanceTracker.Web.Server 已用 http 启动配置运行（监听 http://localhost:5999）：
+     dotnet run --project server/FinanceTracker.Web.Server --launch-profile http
 
 验证点：
   - 页面 HTTP 200
@@ -18,7 +19,7 @@ import json
 from playwright.sync_api import sync_playwright
 
 # ======== 配置 ========
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:59947")   # Web.Server http 端口（见 launchSettings.json）
+BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")   # Web.Server 的 http 启动配置（见 launchSettings.json）
 TIMEOUT_MS = 30_000
 
 # Windows 控制台默认 GBK，中文/特殊字符输出会报错，统一切换 UTF-8

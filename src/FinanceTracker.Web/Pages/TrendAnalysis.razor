@@ -3,7 +3,7 @@
 @using FinanceTracker.Core.Enums
 @inject IStatisticsService StatisticsService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 
 <PStackPageBar Title="趋势分析"
@@ -241,11 +241,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadLedgersAsync();
         await LoadTrendData();
@@ -290,7 +286,9 @@
         {
             var (startDate, endDate) = GetDateRange(_selectedRange);
 
-            var trendData = await StatisticsService.GetTrendDataAsync(_userId, startDate, endDate, _selectedDimension, _selectedLedgerId);
+            // 按钮组的值是字符串（MButtonGroup 的 StringNumber），统一经解析器转成枚举后再交给统计服务
+            var dimension = TrendDimensionParser.TryParse(_selectedDimension, out var parsed) ? parsed : TrendDimension.Day;
+            var trendData = await StatisticsService.GetTrendDataAsync(_userId, startDate, endDate, dimension, _selectedLedgerId);
 
             _trendData = trendData.Select(t => new TrendDataModel
             {
@@ -313,7 +311,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -383,12 +381,5 @@
         public decimal Expense { get; set; }
         public decimal Income { get; set; }
         public decimal NetIncome { get; set; }
-    }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
     }
 }

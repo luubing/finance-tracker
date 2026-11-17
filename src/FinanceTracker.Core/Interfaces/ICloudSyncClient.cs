@@ -8,6 +8,14 @@ namespace FinanceTracker.Core.Interfaces;
 public interface ICloudSyncClient
 {
     /// <summary>
+    /// 云端把当前登录用户识别为哪个用户 Id（取自云端 JWT 的用户声明）。
+    /// 本地库与云端库各自独立生成用户 Id，二者通常不同；拉取下来的账单/账本/成员关系带的是云端 Id，
+    /// 同步服务需要据此把"云端的我"映射回本地用户，否则这些数据会挂在一个存根用户名下、本地看不到。
+    /// 拿不到（未登录、离线、token 无法解析）时返回 null，此时不做映射。
+    /// </summary>
+    Task<Guid?> GetCloudUserIdAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 批量推送账单到云端（服务端按 UpdatedAt 做“后写入优先”冲突裁决，返回权威版本）
     /// </summary>
     Task<SyncPushResponse> PushBillsAsync(Guid userId, IReadOnlyList<BillSyncDto> bills, CancellationToken cancellationToken = default);

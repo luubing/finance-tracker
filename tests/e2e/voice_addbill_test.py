@@ -4,7 +4,8 @@ E2E 测试：语音录入功能集成验证（记账页语音栏）。
 
 前置条件：
   1. pip install playwright && python -m playwright install chromium
-  2. FinanceTracker.Web.Server 已启动（Development 环境，含开发态静态资源）
+  2. FinanceTracker.Web.Server 已用 http 启动配置运行（Development 环境，监听 http://localhost:5999）：
+     dotnet run --project server/FinanceTracker.Web.Server --launch-profile http
 
 验证点：
   - /add-bill 页面正常加载（分类/支付渠道渲染，既有回归点）
@@ -21,7 +22,7 @@ import json
 from playwright.sync_api import sync_playwright
 
 # ======== 配置 ========
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")
+BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")   # Web.Server 的 http 启动配置（见 launchSettings.json）
 TEST_PHONE = "13800138000"
 TIMEOUT_MS = 30_000
 

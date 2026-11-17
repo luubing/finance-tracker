@@ -32,6 +32,9 @@ public class HttpCloudSyncClient : ICloudSyncClient
         return $"{baseUrl}/api/{endpoint.TrimStart('/')}";
     }
 
+    public Task<Guid?> GetCloudUserIdAsync(CancellationToken cancellationToken = default) =>
+        _http.GetCloudUserIdAsync(cancellationToken);
+
     public async Task<SyncPushResponse> PushBillsAsync(Guid userId, IReadOnlyList<BillSyncDto> bills, CancellationToken cancellationToken = default)
     {
         var request = new SyncPushRequest
@@ -39,7 +42,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Bills = bills.ToList()
         };
 
-        var response = await _http.PostAsync<SyncPushResponse>(BuildApiUrl("sync/push"), request);
+        var response = await _http.PostAsync<SyncPushResponse>(BuildApiUrl("sync/push"), request, cancellationToken);
         return response ?? new SyncPushResponse();
     }
 
@@ -50,7 +53,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Since = since
         };
 
-        var response = await _http.PostAsync<SyncPullResponse>(BuildApiUrl("sync/pull"), request);
+        var response = await _http.PostAsync<SyncPullResponse>(BuildApiUrl("sync/pull"), request, cancellationToken);
         return response?.Bills ?? new List<BillSyncDto>();
     }
 
@@ -61,7 +64,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Categories = categories.ToList()
         };
 
-        var response = await _http.PostAsync<CategorySyncPushResponse>(BuildApiUrl("sync/categories/push"), request);
+        var response = await _http.PostAsync<CategorySyncPushResponse>(BuildApiUrl("sync/categories/push"), request, cancellationToken);
         return response ?? new CategorySyncPushResponse();
     }
 
@@ -72,7 +75,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Since = since
         };
 
-        var response = await _http.PostAsync<CategorySyncPullResponse>(BuildApiUrl("sync/categories/pull"), request);
+        var response = await _http.PostAsync<CategorySyncPullResponse>(BuildApiUrl("sync/categories/pull"), request, cancellationToken);
         return response?.Categories ?? new List<CategorySyncDto>();
     }
 
@@ -83,7 +86,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             PaymentChannels = channels.ToList()
         };
 
-        var response = await _http.PostAsync<PaymentChannelSyncPushResponse>(BuildApiUrl("sync/paymentchannels/push"), request);
+        var response = await _http.PostAsync<PaymentChannelSyncPushResponse>(BuildApiUrl("sync/paymentchannels/push"), request, cancellationToken);
         return response ?? new PaymentChannelSyncPushResponse();
     }
 
@@ -94,7 +97,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Since = since
         };
 
-        var response = await _http.PostAsync<PaymentChannelSyncPullResponse>(BuildApiUrl("sync/paymentchannels/pull"), request);
+        var response = await _http.PostAsync<PaymentChannelSyncPullResponse>(BuildApiUrl("sync/paymentchannels/pull"), request, cancellationToken);
         return response?.PaymentChannels ?? new List<PaymentChannelSyncDto>();
     }
 
@@ -105,7 +108,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Ledgers = ledgers.ToList()
         };
 
-        var response = await _http.PostAsync<LedgerSyncPushResponse>(BuildApiUrl("sync/ledgers/push"), request);
+        var response = await _http.PostAsync<LedgerSyncPushResponse>(BuildApiUrl("sync/ledgers/push"), request, cancellationToken);
         return response ?? new LedgerSyncPushResponse();
     }
 
@@ -116,7 +119,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Since = since
         };
 
-        var response = await _http.PostAsync<LedgerSyncPullResponse>(BuildApiUrl("sync/ledgers/pull"), request);
+        var response = await _http.PostAsync<LedgerSyncPullResponse>(BuildApiUrl("sync/ledgers/pull"), request, cancellationToken);
         return response?.Ledgers ?? new List<LedgerSyncDto>();
     }
 
@@ -127,7 +130,7 @@ public class HttpCloudSyncClient : ICloudSyncClient
             Since = since
         };
 
-        var response = await _http.PostAsync<LedgerMemberSyncPullResponse>(BuildApiUrl("sync/ledgermembers/pull"), request);
+        var response = await _http.PostAsync<LedgerMemberSyncPullResponse>(BuildApiUrl("sync/ledgermembers/pull"), request, cancellationToken);
         return response?.Members ?? new List<LedgerMemberSyncDto>();
     }
 }

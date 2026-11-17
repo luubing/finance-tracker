@@ -121,7 +121,6 @@ public static class MauiProgram
         builder.Services.AddScoped<IBillService, BillService>();
         builder.Services.AddScoped<IStatisticsService, StatisticsService>();
         builder.Services.AddScoped<ISyncService, SyncService>();
-        builder.Services.AddSingleton<ISyncQueueService, SyncQueueService>();
 
         // 预算超支本地通知（App 端原生实现：Android/iOS，其他平台内部静默跳过）
         builder.Services.AddSingleton<IBudgetNotificationService, BudgetNotificationService>();
@@ -156,6 +155,9 @@ public static class MauiProgram
         builder.Services.AddScoped<BillEventService>();
         builder.Services.AddScoped<BudgetAlertService>();
         builder.Services.AddScoped<HttpService>();
+        // 云端可用性的短期记忆（单例）：云端连不上时，页面加载顺带的成员缓存刷新只等 3 秒，
+        // 失败后 30 秒内直接读本地缓存，不再每次都白等连接超时
+        builder.Services.AddSingleton(new CloudAvailability());
         builder.Services.AddScoped<ILogViewerService, LogViewerService>();
         // 语音记账：文本解析（中文口语 → 账单草稿）+ 语音录入桥接服务
         // （App 端 SpeechService 注册进 BillVoiceInputService 后走原生识别，见 ISpeechService 注册）
@@ -163,7 +165,6 @@ public static class MauiProgram
         builder.Services.AddScoped<BillVoiceInputService>();
         builder.Services.AddScoped<ICloudSyncClient>(sp =>
             new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), CloudApiBaseUrl));
-        builder.Services.AddSingleton<BackgroundSyncService>();
 
         // 注册 HttpClient（设置基址以支持相对路径的 API 调用，如导入接口）
         builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(CloudApiBaseUrl) });

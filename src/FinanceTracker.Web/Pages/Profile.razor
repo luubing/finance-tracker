@@ -50,7 +50,7 @@
                 </MAvatar>
                 <div class="ml-4">
                     <div class="text-h6">@MaskPhoneNumber(_user.PhoneNumber)</div>
-                    <div class="text-caption text--secondary">注册时间: @_user.CreatedAt.ToString("yyyy-MM-dd")</div>
+                    <div class="text-caption text--secondary">注册时间: @AppTimeZone.ToLocal(_user.CreatedAt).ToString("yyyy-MM-dd")</div>
                 </div>
             </MCardText>
         </MCard>
@@ -187,7 +187,7 @@
                     </MListItemIcon>
                     <MListItemContent>
                         <MListItemTitle>账单列表</MListItemTitle>
-                        <MListItemSubtitle>查看所有账单记录</MListItemSubtitle>
+                        <MListItemSubtitle>查看所有账单</MListItemSubtitle>
                     </MListItemContent>
                     <MListItemAction>
                         <MIcon>mdi-chevron-right</MIcon>

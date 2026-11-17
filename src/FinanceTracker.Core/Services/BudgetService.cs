@@ -1,6 +1,7 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Time;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -170,6 +171,41 @@ public class BudgetService : IBudgetService
 
         var budgets = await budgetsQuery.ToListAsync();
 
+        return await BuildStatusesAsync(userId, year, month, budgets);
+    }
+
+    /// <inheritdoc />
+    public async Task<List<BudgetStatus>> GetOverviewBudgetStatusAsync(Guid userId, int year, int month)
+    {
+        ValidateYearMonth(year, month);
+
+        var globalBudgets = await _context.Budgets
+            .Where(b => b.UserId == userId && b.Year == year && b.Month == month && b.LedgerId == null)
+            .ToListAsync();
+
+        if (globalBudgets.Count > 0)
+        {
+            return await BuildStatusesAsync(userId, year, month, globalBudgets);
+        }
+
+        // 回退：当月没有任何"全部账本"预算，改为展示账本级预算。
+        // 只取用户自己的、未删除的账本：账本删除只校验"没有账单"，不会连带删除预算，
+        // 已删账本遗留的预算若被展示，会因为取不到账本名而被误认成"全部账本"预算。
+        // （Ledger 的软删除全局过滤器同样作用在这个子查询上）
+        var ledgerBudgets = await _context.Budgets
+            .Where(b => b.UserId == userId && b.Year == year && b.Month == month
+                        && b.LedgerId != null
+                        && _context.Ledgers.Any(l => l.Id == b.LedgerId && l.UserId == userId))
+            .ToListAsync();
+
+        return await BuildStatusesAsync(userId, year, month, ledgerBudgets);
+    }
+
+    /// <summary>
+    /// 计算给定预算在指定年月的执行情况（已用额、分类/账本名称），并排序：总预算在前，其余按分类名、账本名。
+    /// </summary>
+    private async Task<List<BudgetStatus>> BuildStatusesAsync(Guid userId, int year, int month, List<Budget> budgets)
+    {
         if (budgets.Count == 0)
         {
             return new List<BudgetStatus>();
@@ -178,8 +214,10 @@ public class BudgetService : IBudgetService
         // 已用金额按支出账单统计（软删除由 Bill 的全局查询过滤器自动排除）。
         // 注意：账单一次性加载且不按 ledgerId 过滤——"全部账本"预算(LedgerId=null)的
         // 已用额必须统计所有账单，按账本预算(LedgerId=X)只统计 X 的账单，各自独立匹配
-        var startDate = new DateTime(year, month, 1);
-        var endDate = startDate.AddMonths(1);
+        // 预算月份按应用时区的自然月划分，库里的 TransactionTime 是 UTC：边界先换算再比较（左闭右开）
+        var monthStartLocal = new DateTime(year, month, 1);
+        var startDate = AppTimeZone.ToUtc(monthStartLocal);
+        var endDate = AppTimeZone.ToUtc(monthStartLocal.AddMonths(1));
 
         var bills = await _context.Bills
             .Where(bill => bill.UserId == userId
@@ -241,10 +279,12 @@ public class BudgetService : IBudgetService
             });
         }
 
-        // 总预算在前，分类预算按名称排序
+        // 总预算在前，分类预算按名称排序；名称相同时（多个账本各有一个"总预算"）按账本名，
+        // 保证顺序稳定——首页只展示前 3 项，顺序漂移会让用户看到的预算时有时无
         return result
             .OrderByDescending(s => s.CategoryId == null)
             .ThenBy(s => s.CategoryName)
+            .ThenBy(s => s.LedgerName)
             .ToList();
     }
 

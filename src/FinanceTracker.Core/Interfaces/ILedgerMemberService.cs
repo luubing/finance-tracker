@@ -80,6 +80,8 @@ public interface ILedgerMemberService
     /// <summary>
     /// 校验用户可向账本写入账单（自有账本 / Owner / Editor），否则抛出异常
     /// </summary>
+    /// <exception cref="ArgumentException">账本不存在</exception>
+    /// <exception cref="Exceptions.ForbiddenAccessException">非成员或只读成员（Viewer）无权记账</exception>
     Task EnsureCanWriteAsync(Guid ledgerId, Guid userId);
 
     /// <summary>

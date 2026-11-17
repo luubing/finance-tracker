@@ -6,7 +6,7 @@
 @implements IDisposable
 @inject IStatisticsService StatisticsService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
 @inject IBudgetService BudgetService
@@ -250,7 +250,7 @@
                    Icon="mdi-calendar-month"
                    IsLoading="_isLoading"
                    IsEmpty="!_dailyTrend.Any(t => t.Expense > 0)"
-                   EmptyText="当月暂无支出记录">
+                   EmptyText="当月暂无支出账单">
             <CalendarHeatmapChart DailyData="_dailyTrend" Year="_currentYear" Month="_currentMonth" />
         </ChartCard>
 
@@ -259,7 +259,7 @@
                    Icon="mdi-chart-areaspline"
                    IsLoading="_isLoading"
                    IsEmpty="!_dailyTrend.Any()"
-                   EmptyText="当月暂无收支记录">
+                   EmptyText="当月暂无收支账单">
             <CumulativeNetChart DailyData="_dailyTrend" Year="_currentYear" Month="_currentMonth" />
         </ChartCard>
 
@@ -268,7 +268,7 @@
                    Icon="mdi-chart-donut"
                    IsLoading="_isLoading"
                    IsEmpty="!_expenseCategories.Any() && !_incomeCategories.Any()"
-                   EmptyText="当月暂无收支记录">
+                   EmptyText="当月暂无收支账单">
             <ExpenseIncomeDonutChart ExpenseCategories="_expenseCategories" IncomeCategories="_incomeCategories" />
         </ChartCard>
     }
@@ -307,11 +307,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadLedgersAsync();
         await LoadStatistics();
@@ -423,13 +419,13 @@
 
             // 加载日粒度趋势数据（热力图/累计曲线）
             var monthStart = new DateTime(_currentYear, _currentMonth, 1);
-            var monthEnd = monthStart.AddMonths(1).AddSeconds(-1);
+            var monthEnd = TimeBoundaries.EndOfMonth(_currentYear, _currentMonth);
             _dailyTrend = await StatisticsService.GetTrendDataAsync(
-                _userId, monthStart, monthEnd, "day", _selectedLedgerId);
+                _userId, monthStart, monthEnd, TrendDimension.Day, _selectedLedgerId);
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -507,12 +503,5 @@
         public decimal TotalIncome { get; set; }
         public decimal NetIncome { get; set; }
         public int BillCount { get; set; }
-    }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
     }
 }

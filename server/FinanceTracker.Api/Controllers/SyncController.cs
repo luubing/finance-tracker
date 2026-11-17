@@ -1,5 +1,6 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Enums;
+using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -89,7 +90,7 @@ public class SyncController : BaseApiController
                 // 单条账单失败（如外键/校验错误）只影响该条，不中止整批推送；
                 // 避免一条脏数据导致整批 500、远端库一条都写不进去。
                 failedCount++;
-                results.Add(new CloudSyncPushItemResult(dto.Id, "failed", null, ex.Message));
+                results.Add(new CloudSyncPushItemResult(dto.Id, "failed", null, ex.GetUserMessage()));
 
                 // 把本次失败涉及的实体从跟踪器中分离，避免后续保存重试导致连锁失败。
                 // 注意：IApplicationDbContext 不暴露 ChangeTracker，需向下转型到 DbContext。
@@ -253,7 +254,7 @@ public class SyncController : BaseApiController
             }
             catch (Exception ex)
             {
-                results.Add(new CategorySyncItemResult(dto.Id, "failed", null, ex.Message));
+                results.Add(new CategorySyncItemResult(dto.Id, "failed", null, ex.GetUserMessage()));
                 if (_context is DbContext dbContext)
                 {
                     foreach (var entry in dbContext.ChangeTracker.Entries())
@@ -346,7 +347,7 @@ public class SyncController : BaseApiController
             }
             catch (Exception ex)
             {
-                results.Add(new PaymentChannelSyncItemResult(dto.Id, "failed", null, ex.Message));
+                results.Add(new PaymentChannelSyncItemResult(dto.Id, "failed", null, ex.GetUserMessage()));
                 if (_context is DbContext dbContext)
                 {
                     foreach (var entry in dbContext.ChangeTracker.Entries())
@@ -413,6 +414,10 @@ public class SyncController : BaseApiController
                 if (existing == null)
                 {
                     var entity = dto.ToEntity(userId);
+                    // OwnerId 只用于"拉取"方向（共享账本拉到成员端时标明真正的所有者）。
+                    // 推送时所有者必须以 JWT 为准：客户端自报的是它本地库里的用户 Id，
+                    // 在云端既不存在（外键失败，账本推不上来），也可能被伪造成别人的 Id（把账本建到别人名下）
+                    entity.UserId = userId;
                     _context.Ledgers.Add(entity);
                     await _context.SaveChangesAsync();
                     results.Add(new LedgerSyncItemResult(dto.Id, "pushed"));
@@ -441,7 +446,7 @@ public class SyncController : BaseApiController
             }
             catch (Exception ex)
             {
-                results.Add(new LedgerSyncItemResult(dto.Id, "failed", null, ex.Message));
+                results.Add(new LedgerSyncItemResult(dto.Id, "failed", null, ex.GetUserMessage()));
                 if (_context is DbContext dbContext)
                 {
                     foreach (var entry in dbContext.ChangeTracker.Entries())

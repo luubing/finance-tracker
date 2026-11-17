@@ -3,11 +3,12 @@
 @inject ISyncService SyncService
 @inject AuthenticationService AuthStateService
 @inject IPopupService PopupService
+@inject ILogger<SyncStatus> Logger
 
 <MCard Class="mb-4">
     <MCardText Class="d-flex align-center">
-        <MIcon Class="mr-2" Color="@(_isSynced ? "success" : "warning")">
-            @(_isSynced ? "mdi-cloud-check" : "mdi-cloud-sync")
+        <MIcon Class="mr-2" Color="@(_isSynced && !_loadFailed ? "success" : "warning")">
+            @(_isSynced && !_loadFailed ? "mdi-cloud-check" : "mdi-cloud-sync")
         </MIcon>
         <div>
             <div class="text-subtitle-2">同步状态</div>
@@ -15,6 +16,10 @@
                 @if (_isSyncing)
                 {
                     <span>正在同步...</span>
+                }
+                else if (_loadFailed)
+                {
+                    <span>状态未知（读取待同步账单失败）</span>
                 }
                 else if (_pendingCount > 0)
                 {
@@ -40,6 +45,8 @@
 @code {
     private bool _isSyncing;
     private bool _isSynced = true;
+    // 读取待同步数量失败时为 true：此时 _pendingCount 不可信，不能继续显示"已同步"误导用户
+    private bool _loadFailed;
     private int _pendingCount;
     private Guid _userId;
 
@@ -59,10 +66,13 @@
         {
             _pendingCount = await SyncService.GetOfflineCacheCountAsync(_userId);
             _isSynced = _pendingCount == 0;
+            _loadFailed = false;
         }
-        catch
+        catch (Exception ex)
         {
-            // 忽略错误
+            // 状态读取失败不应打断页面，但要留下日志，并让界面如实显示"状态未知"
+            Logger.LogWarning(ex, "读取待同步账单数量失败");
+            _loadFailed = true;
         }
     }
 
@@ -90,6 +100,12 @@
             {
                 await PopupService.EnqueueSnackbarAsync("同步完成", AlertTypes.Success);
             }
+            else if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                // 整体失败（无网络 / 同步过程抛异常）时 FailedCount 为 0，
+                // 不能显示成「同步完成，0条失败」把真正的错误原因藏起来
+                await PopupService.EnqueueSnackbarAsync($"同步失败: {result.ErrorMessage}", AlertTypes.Error);
+            }
             else
             {
                 await PopupService.EnqueueSnackbarAsync($"同步完成，{result.FailedCount}条失败", AlertTypes.Warning);
@@ -99,7 +115,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"同步失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"同步失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {

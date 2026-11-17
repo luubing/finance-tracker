@@ -4,15 +4,17 @@ E2E 测试：完整登录 + 记一笔账单流程。
 
 前置条件：
   1. pip install playwright && python -m playwright install chromium
-  2. FinanceTracker.Web.Server 已启动（默认监听 http://localhost:59947）
+  2. FinanceTracker.Web.Server 已用 http 启动配置运行（监听 http://localhost:5999）：
+     dotnet run --project server/FinanceTracker.Web.Server --launch-profile http
 
 验证点（对应历史 bug：AuthenticationService.IsPrerendering 判断错误导致
 localStorage 未写入 userId → 记账时 UserId=Guid.Empty → SQLite FOREIGN KEY constraint failed）：
   - 登录成功后 localStorage 正确写入 userId / phoneNumber（核心回归点）
-  - 首页显示"欢迎回来"（认证状态事件通知生效，无需整页刷新）
+  - 登录后首页显示"本月概览"（认证状态事件通知生效，无需整页刷新；首页改版后不再有"欢迎回来"文案）
   - /add-bill 页面正常加载分类与支付渠道
   - 注意：MASA 下拉框在无头浏览器中难以自动化选择支付渠道，
-    表单提交依赖该项，故本脚本止步于页面加载验证（见 save_bill_test.py 的说明）
+    表单提交依赖该项，故本脚本止步于页面加载验证；完整的"保存账单"提交请手动验证
+    （保存逻辑本身由 tests/unit 里的 BillService 测试覆盖，见 tests/e2e/README.md）
 """
 import sys
 import os
@@ -20,7 +22,7 @@ import json
 from playwright.sync_api import sync_playwright
 
 # ======== 配置 ========
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:59947")
+BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")   # Web.Server 的 http 启动配置（见 launchSettings.json）
 TEST_PHONE = "13800138000"
 TIMEOUT_MS = 30_000
 
@@ -49,14 +51,16 @@ def main() -> int:
         page.wait_for_timeout(4_000)
 
         body = page.inner_text("body")
-        result["welcome_shown"] = "欢迎回来" in body
+        result["home_shown"] = "本月概览" in body
 
         # 核心回归点：localStorage 必须写入 userId（修复前为 null）
         result["localStorage_userId"] = page.evaluate("() => localStorage.getItem('userId')")
         result["localStorage_phone"] = page.evaluate("() => localStorage.getItem('phoneNumber')")
 
         # ---- 进入记一笔页面 ----
-        page.get_by_role("button", name="记一笔").click()
+        # 首页有两个"记一笔"按钮（快捷操作；无账单时还有空状态里的一个），都跳转到记账页，取第一个即可。
+        # 不加 .first 会触发 Playwright 严格模式的"匹配到多个元素"错误
+        page.get_by_role("button", name="记一笔").first.click()
         page.wait_for_timeout(3_000)
         add_bill_body = page.inner_text("body")
         result["add_bill_loaded"] = "选择分类" in add_bill_body
@@ -75,7 +79,7 @@ def main() -> int:
     print("\n".join(m for m in console_msgs if m.startswith("[error]")) or "(none)")
 
     ok = (
-        result["welcome_shown"]
+        result["home_shown"]
         and result["localStorage_userId"]           # 非 null 且为合法 GUID
         and result["localStorage_phone"] == TEST_PHONE
         and result["add_bill_loaded"]

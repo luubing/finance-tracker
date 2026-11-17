@@ -57,6 +57,21 @@ public interface IBudgetService
     Task<List<BudgetStatus>> GetBudgetStatusAsync(Guid userId, int year, int month, Guid? ledgerId = null);
 
     /// <summary>
+    /// 获取首页概览用的预算执行情况。
+    /// <para>
+    /// 优先展示"全部账本"的预算（总预算 + 分类预算）；只有当月<b>没有任何</b>"全部账本"预算时，
+    /// 才回退为展示用户自己（未删除）账本的账本级预算——否则只设了账本级预算的用户，首页永远没有预算进度条。
+    /// 两者不会混在一起：设了"全部账本"预算的用户，首页行为与 <see cref="GetBudgetStatusAsync"/> 不传账本时完全一致。
+    /// </para>
+    /// <para>回退结果里每一项带 <see cref="BudgetStatus.LedgerName"/>；已用额只统计该账本下的支出账单。</para>
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="year">年份</param>
+    /// <param name="month">月份</param>
+    /// <returns>预算执行情况列表（总预算在前；没有任何可展示的预算时为空列表）</returns>
+    Task<List<BudgetStatus>> GetOverviewBudgetStatusAsync(Guid userId, int year, int month);
+
+    /// <summary>
     /// 获取预算预警（单笔账单保存场景：返回与该账单相关的预算中使用率最高的一条预警状态）
     /// </summary>
     /// <param name="userId">用户ID</param>
@@ -122,6 +137,12 @@ public class BudgetStatus
     /// 账本名称（全部账本时为 null）
     /// </summary>
     public string? LedgerName { get; set; }
+
+    /// <summary>
+    /// 提示文案里使用的预算名：账本级预算带账本名前缀（"旅行 · 总预算"），
+    /// 全部账本的预算就是分类名/"总预算"。多个账本各有一个"总预算"时，靠它区分是哪个账本超支。
+    /// </summary>
+    public string DisplayName => LedgerName == null ? CategoryName : $"{LedgerName} · {CategoryName}";
 }
 
 /// <summary>

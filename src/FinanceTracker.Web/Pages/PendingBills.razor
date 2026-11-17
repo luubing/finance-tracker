@@ -261,13 +261,29 @@
             };
 
             await BillService.CreateBillAsync(newBill);
-            await PendingBillService.RemoveAsync(bill.Id);
+
+            // 待确认项走独立的 DbContext（IDbContextFactory），与上面的账单保存无法放进同一个事务。
+            // 账单此时已经保存成功：若移除失败不能再报"创建账单失败"，否则用户会重试并产生重复账单
+            try
+            {
+                await PendingBillService.RemoveAsync(bill.Id);
+            }
+            catch (Exception removeEx)
+            {
+                // 账单已经入库：当前页面不能再给这条待确认项留着"确认"按钮（点两次就是两笔账单）。
+                // 存储里那条待确认项没删掉，下次进入页面还会出现，届时只能点"忽略"
+                _pendingBills.RemoveAll(p => p.Id == bill.Id);
+                await PopupService.EnqueueSnackbarAsync(
+                    $"账单已创建，但从待确认列表移除失败（{removeEx.GetUserMessage()}）。这条待确认项下次打开页面时还会出现，请点「忽略」，不要重复确认",
+                    AlertTypes.Warning);
+                return;
+            }
 
             await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 

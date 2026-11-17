@@ -263,26 +263,8 @@
 
     private async Task LoadUserIdAsync()
     {
-        // 优先使用 AuthenticationService（电路级缓存，预渲染阶段安全），失败时回退 JS interop 读 localStorage
-        var cachedUserId = await AuthStateService.GetUserIdAsync();
-        if (cachedUserId.HasValue)
-        {
-            _userId = cachedUserId.Value;
-            return;
-        }
-
-        try
-        {
-            var userIdStr = await JSRuntime.InvokeAsync<string?>("localStorage.getItem", "userId");
-            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-            {
-                _userId = userId;
-            }
-        }
-        catch (Exception)
-        {
-            // 电路断开等场景下无法访问 localStorage，保持 Guid.Empty（列表为空但不崩溃）
-        }
+        // AuthenticationService 带电路级缓存，且对预渲染/电路断开做了安全封装（失败返回 null，保持 Guid.Empty）
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
     }
 
     private async Task LoadLedgers()
@@ -307,7 +289,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载账本失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载账本失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -338,7 +320,7 @@
         catch (Exception ex)
         {
             // 云端不可用时回退本地缓存
-            await PopupService.EnqueueSnackbarAsync($"共享账本加载失败: {ex.Message}", AlertTypes.Warning);
+            await PopupService.EnqueueSnackbarAsync($"共享账本加载失败: {ex.GetUserMessage()}", AlertTypes.Warning);
         }
 
         try
@@ -361,7 +343,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -486,7 +468,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -512,7 +494,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -534,16 +516,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
-    }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string? Icon { get; set; }
-        public bool IsDefault { get; set; }
-        public int SortOrder { get; set; }
     }
 }

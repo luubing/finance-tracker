@@ -1,6 +1,7 @@
 @page "/sms-recognition"
 @using FinanceTracker.Core.Interfaces
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Core.Services
 @using FinanceTracker.Web.Services
 @inject ISmsService SmsService
 @inject ICategoryService CategoryService
@@ -230,10 +231,10 @@
     {
         try
         {
-            // 解析短信内容（description 未单独使用，备注记录原始短信内容）
-            var (amount, isIncome, _, channel) = ParseSmsContent(sms.Body);
+            // 与短信广播接收器、通知栏监听共用同一份解析规则（PaymentContentParser）；备注记录原始短信内容
+            var parsed = PaymentContentParser.Parse(sms.Body);
 
-            if (amount <= 0)
+            if (parsed.Amount <= 0)
             {
                 // Issue 14：金额识别失败时打开手动补全对话框，而不是直接中断
                 _editingSms = sms;
@@ -243,11 +244,11 @@
                 return;
             }
 
-            await CreateBillFromSms(sms, amount, isIncome, channel);
+            await CreateBillFromSms(sms, parsed.Amount, parsed.IsIncome, parsed.Channel);
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 
@@ -293,53 +294,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
-    }
-
-    private (decimal amount, bool isIncome, string description, string channel) ParseSmsContent(string body)
-    {
-        var amount = 0m;
-        var isIncome = false;
-        var description = body;
-        var channel = "";
-
-        // 提取金额 - 支持多种格式
-        var amountPatterns = new[]
-        {
-            @"(\d+\.?\d*)\s*元",
-            @"人民币\s*(\d+\.?\d*)",
-            @"¥\s*(\d+\.?\d*)",
-            @"金额\s*(\d+\.?\d*)"
-        };
-
-        foreach (var pattern in amountPatterns)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(body, pattern);
-            if (match.Success)
-            {
-                amount = decimal.Parse(match.Groups[1].Value);
-                break;
-            }
-        }
-
-        // 判断收入/支出
-        isIncome = body.Contains("收入") || body.Contains("到账") || body.Contains("转入") || body.Contains("退款");
-
-        // 识别渠道
-        if (body.Contains("微信"))
-            channel = "微信支付";
-        else if (body.Contains("支付宝") || body.Contains("花呗") || body.Contains("余额宝"))
-            channel = "支付宝";
-        else if (body.Contains("京东") || body.Contains("白条"))
-            channel = "京东支付";
-        else if (body.Contains("美团"))
-            channel = "美团支付";
-        else if (body.Contains("云闪付") || body.Contains("银联"))
-            channel = "云闪付";
-        else
-            channel = "银行卡";
-
-        return (amount, isIncome, description, channel);
     }
 }

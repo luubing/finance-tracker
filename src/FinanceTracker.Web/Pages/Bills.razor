@@ -5,7 +5,7 @@
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
+@inject AuthenticationService AuthStateService
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
 @inject BillEventService BillEventService
@@ -85,7 +85,7 @@
     <div class="mb-4">
         <MSelect @bind-Value="_filter.LedgerId"
                  Items="_ledgers"
-                 ItemText="@GetLedgerDisplayText"
+                 ItemText="@(l => l.DisplayText)"
                  ItemValue="l => (Guid?)l.Id"
                  Label="账本"
                  Outlined
@@ -360,11 +360,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var userIdStr = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "userId");
-        if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
-        {
-            _userId = userId;
-        }
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
 
         await LoadFilterData();
         await LoadBills();
@@ -434,7 +430,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -476,8 +472,9 @@
             ? DateTime.Parse(_filter.StartDate)
             : null;
 
+        // 结束日期含当天：服务端的结束条件是"含端点的结束时刻"，必须取当天最后一个 tick（见 TimeBoundaries）
         DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
-            ? DateTime.Parse(_filter.EndDate).AddDays(1).AddSeconds(-1)
+            ? TimeBoundaries.EndOfDay(DateTime.Parse(_filter.EndDate))
             : null;
 
         var bills = await BillService.GetBillsAsync(
@@ -504,7 +501,8 @@
             PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
             LedgerName = b.Ledger?.Name,
             LedgerIcon = b.Ledger?.Icon ?? "mdi-book",
-            TransactionTime = b.TransactionTime,
+            // 库里是 UTC：视图模型统一持有应用时区的墙上时间，列表的按天分组、排序、HH:mm 展示都基于它
+            TransactionTime = AppTimeZone.ToLocal(b.TransactionTime),
             Note = b.Note
         }).ToList();
     }
@@ -526,7 +524,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -560,7 +558,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -745,7 +743,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -806,7 +804,7 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"归属账本失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"归属账本失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
         finally
         {
@@ -863,18 +861,4 @@
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = string.Empty;
     }
-
-    private class LedgerModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
-        public bool IsShared { get; set; }
-    }
-
-    /// <summary>
-    /// 账本下拉显示文本：共享账本追加（共享）标记
-    /// </summary>
-    private string GetLedgerDisplayText(LedgerModel ledger) =>
-        ledger.IsShared ? $"{ledger.Name}（共享）" : ledger.Name;
 }

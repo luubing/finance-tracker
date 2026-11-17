@@ -13,4 +13,7 @@
 	<uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
 	<!-- 语音记账：原生 SpeechRecognizer 识别需要麦克风权限（运行时通过 Permissions.Microphone 申请） -->
 	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<!-- 预算超支本地通知（Issue 17）：Android 13+（API 33）必须声明并在运行时授予 POST_NOTIFICATIONS，
+	     否则系统会静默丢弃通知（运行时通过 Permissions.PostNotifications 申请） -->
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

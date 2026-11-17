@@ -7,7 +7,7 @@
 **Status:** completed
 
 - [x] 实现预算执行情况 API (GET /api/budgets/status?year=&month=&ledgerId=)，返回每个预算的预算额、已用额、剩余额、使用百分比（issue 16 阶段已提前实现）
-- [x] 在首页 (Index.razor) 展示当月预算进度条与剩余额度（最多展示 3 条 + 汇总提示，点击"管理"跳转 /budgets）
+- [x] 在首页 (Index.razor) 展示当月预算进度条与剩余额度（最多展示 3 条 + 汇总提示，点击"管理"跳转 /budgets）；有"全部账本"预算时展示它们，当月一个都没有时回退展示账本级预算（见下方"首页预算口径"）
 - [x] 在月度统计页面 (MonthlyStatistics.razor) 增加预算执行情况区块（随月份/账本筛选联动）
 - [x] 接近预算预警（使用率达到 80% 时黄色警示）
 - [x] 超支提醒（使用率达到 100% 时红色警示 + 应用内提示）
@@ -21,4 +21,15 @@
 - **MAUI App**：`BudgetNotificationService` 通过 `#if ANDROID/#elif IOS` 提供 Android NotificationChannel 通知与 iOS UNUserNotificationCenter 通知，使用 Preferences 记录当天已提醒（每日最多一次）；点击通知回到应用。
 - **宿主注册**：App 注册原生实现；Web.Server 注册 NoOp 实现；`BudgetAlertService` 在两宿主均为 Scoped。
 - **验证**：`dotnet build FinanceTracker.sln` 通过（0 错误），单元测试 27/27 通过。
-- **注意**：Android 13+ 发布通知需要 POST_NOTIFICATIONS 运行时权限，当前实现未主动申请（静默失败，后续可按需补充权限引导）。
+- **通知权限**：Android 13+ 发布通知需要 POST_NOTIFICATIONS。`AndroidManifest.xml` 已声明该权限，`BudgetNotificationService` 在发送前通过 `Permissions.PostNotifications` 运行时申请；用户拒绝时通知不会发出，且 `BudgetAlertService` 只在通知真正发出后才标记"今日已提醒"，不会白白消耗当天唯一一次提醒机会。
+
+## 首页预算口径（评审 P14）
+
+首页原先调用 `GetBudgetStatusAsync` 且不传账本，只会拿到 `LedgerId == null` 的"全部账本"预算，所以只设了账本级预算的用户，首页永远没有进度条。现在首页改用 `IBudgetService.GetOverviewBudgetStatusAsync(userId, year, month)`：
+
+- 当月有任何"全部账本"预算（总预算或分类预算）：只展示它们，行为与改动前完全一致，不混入账本级预算。
+- 当月一个"全部账本"预算都没有：回退展示用户自己的、未删除账本的账本级预算（总预算在前，其次按分类名、账本名排序）。每项带账本名（"（旅行）"），已用额只统计该账本下的支出账单。
+- 已删除账本遗留的预算、指向他人账本的预算不会回退展示（删除账本只校验"没有账单"，不会连带删除预算，遗留预算若被展示会因取不到账本名被误认成"全部账本"预算）。
+- 超支提示/本地通知的文案使用 `BudgetStatus.DisplayName`：账本级预算带账本名前缀（"旅行 · 总预算"），多个账本各有一个"总预算"时分得清是哪个超支。
+- "预算管理"页默认的账本筛选是"全部账本"，回退展示的账本级预算需要在该页选择对应账本后查看/编辑。
+- 回归测试：`tests/unit/FinanceTracker.Tests/Services/BudgetOverviewTests.cs`、`BudgetAlertServiceTests.cs`。
