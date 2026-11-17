@@ -32,12 +32,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # 2.1 固定 .NET SDK 为 10.0.x
+      #   runner 镜像（2026-11 起）的 /Users/runner/.dotnet 里同时预装了 .NET 11 SDK，`dotnet` 默认取最高版本：
+      #   工作负载会装成 .NET 11 的清单（iOS 27.x / MAUI 11.0.0），net10.0-ios 只剩 Microsoft.iOS.Sdk.net10.0_26.0，
+      #   Build iOS 于是要求 Xcode 26.0（镜像默认是 26.6；切到 26.0.1 又缺 iOS 26.0 模拟器运行时，actool 报
+      #   "No simulator runtime version ... available to use with iphonesimulator SDK version 23A339"）。
+      #   用 global.json 把 SDK 锁在 10.0.x（上一步 setup-dotnet 已保证装有 10.0.x）。只在 CI 里生成，不入库。
+      - name: Pin .NET SDK to 10.0
+        run: |
+          echo '{ "sdk": { "version": "10.0.100", "rollForward": "latestFeature" } }' > global.json
+          dotnet --list-sdks
+          dotnet --version
+
       # 3. 安装 MAUI 工作负载
-      #   固定为 2026-09-11 最后一次成功构建时的清单版本（iOS 26.5.10318 / MAUI 10.0.20 …），不追最新清单。
-      #   不固定时 `dotnet workload install maui` 会装到 .NET 11 时代的新清单，其中 net10.0-ios 只剩
-      #   Microsoft.iOS.Sdk.net10.0_26.0（要求 Xcode 26.0）。runner 镜像里的 Xcode 26.0.1 没有匹配的 iOS 模拟器运行时，
-      #   actool 编译资源目录会报 "No simulator runtime version ... available to use with iphonesimulator SDK version 23A339"；
-      #   而默认的 Xcode 26.6 又与 26.0 的包版本校验不符。
+      #   即使锁定了 10.0.x SDK，不指定版本时 `dotnet workload install maui` 也会装最新的工作负载集
+      #   （10.0.404 的 iOS 清单是 27.2，要求 Xcode 27.2，runner 上没有）。这里固定为 2026-09-11 最后一次成功构建
+      #   用的工作负载集 10.0.401（iOS 26.5.10318 / MAUI 10.0.20 / Android 36.1.69 / emscripten、mono 10.0.112），
+      #   逐项写成回滚文件，不依赖「版本号 → NuGet 包」的映射。
       #   以后要升级时：同时更新这里的清单版本和下一步的 Xcode 版本（必须是同一个 iOS 小版本）。
       - name: Install MAUI workload
         run: |
@@ -62,6 +73,7 @@ jobs:
           }
           EOF
           dotnet workload install maui --from-rollback-file "$RUNNER_TEMP/workload-rollback.json"
+          dotnet workload list
 
       # 3.1 选择与 iOS 工作负载匹配的 Xcode
       #   .NET for iOS 要求 Xcode 的主.次版本与工作负载的 iOS 版本一致：iOS 26.5 的包对应 Xcode 26.5。
