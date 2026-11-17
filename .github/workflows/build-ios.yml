@@ -49,7 +49,7 @@ jobs:
       #   （10.0.404 的 iOS 清单是 27.2，要求 Xcode 27.2，runner 上没有）。这里固定为 2026-09-11 最后一次成功构建
       #   用的工作负载集 10.0.401（iOS 26.5.10318 / MAUI 10.0.20 / Android 36.1.69 / emscripten、mono 10.0.112），
       #   逐项写成回滚文件，不依赖「版本号 → NuGet 包」的映射。
-      #   以后要升级时：同时更新这里的清单版本和下一步的 Xcode 版本（必须是同一个 iOS 小版本）。
+      #   以后要升级时：同时更新这里的清单版本和下一步的 Xcode 版本（包要求哪个 Xcode，构建报错里会写明）。
       - name: Install MAUI workload
         run: |
           cat > "$RUNNER_TEMP/workload-rollback.json" <<'EOF'
@@ -76,13 +76,13 @@ jobs:
           dotnet workload list
 
       # 3.1 选择与 iOS 工作负载匹配的 Xcode
-      #   .NET for iOS 要求 Xcode 的主.次版本与工作负载的 iOS 版本一致：iOS 26.5 的包对应 Xcode 26.5。
-      #   macos-latest 的默认 Xcode 会随镜像升级（现为 26.6），不一致时 Build iOS 直接报
-      #   "This version of .NET for iOS (26.5.x) requires Xcode 26.5. The current version of Xcode is 26.6"。
+      #   .NET for iOS 的包会校验 Xcode 版本：iOS 26.5.10318 的包要求 Xcode 26.6，不符时 Build iOS 直接报
+      #   "This version of .NET for iOS (26.5.10318) requires Xcode 26.6. The current version of Xcode is 26.5"。
+      #   macos-latest 的默认 Xcode 会随镜像升级，所以显式选定（升级工作负载时以构建报错里写明的 Xcode 版本为准）。
       #   用 realpath 取真实路径：若 Xcode_x.y.app 只是符号链接，经链接选择会让 xcodebuild 报 "SDK ... cannot be located"。
-      - name: Select Xcode 26.5
+      - name: Select Xcode 26.6
         run: |
-          XCODE_APP="$(realpath /Applications/Xcode_26.5.app)"
+          XCODE_APP="$(realpath /Applications/Xcode_26.6.app)"
           echo "Using $XCODE_APP"
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
