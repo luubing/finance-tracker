@@ -15,7 +15,8 @@ public sealed class ImmersiveCoordinatorTests
 {
     private const string ModulePath = "./_content/FinanceTracker.Web/js/immersive.js";
 
-    private static readonly SafeAreaInsets Notch = new(47, 0, 34, 0);
+    // iPhone（刘海 + Home 指示条）：底部 34 全是指示条
+    private static readonly SafeAreaInsets Notch = new(47, 0, 34, 0, 34);
 
     private readonly FakeImmersiveJsRuntime _js = new();
     private readonly FakeSafeAreaService _safeArea = new();
@@ -35,8 +36,19 @@ public sealed class ImmersiveCoordinatorTests
 
         Assert.Equal(new[] { ModulePath }, _js.ImportedPaths);
         Assert.Equal(new[] { "setSafeArea", "start" }, Module.Calls.Select(call => call.Identifier));
-        // 单位是 CSS 像素，顺序 上、右、下、左
-        Assert.Equal(new object?[] { 47d, 0d, 34d, 0d }, Module.Calls[0].Args);
+        // 单位是 CSS 像素，顺序 上、右、下、左，最后一个是底部边距里「只是 Home 指示条」的部分
+        Assert.Equal(new object?[] { 47d, 0d, 34d, 0d, 34d }, Module.Calls[0].Args);
+    }
+
+    [Fact]
+    public async Task 宿主没有标明底部指示条时_按0推送_整个底部边距都要避开()
+    {
+        // Android 宿主只给四边，BottomIndicator 缺省 0：Tab 栏要整个避开三键导航栏 / 手势区
+        _safeArea.Current = new SafeAreaInsets(24, 0, 48, 0);
+
+        await CreateCoordinator().StartAsync();
+
+        Assert.Equal(new object?[] { 24d, 0d, 48d, 0d, 0d }, Module.Calls[0].Args);
     }
 
     [Fact]
@@ -71,15 +83,28 @@ public sealed class ImmersiveCoordinatorTests
         await CreateCoordinator().StartAsync();
         Assert.Equal(1, Module.CountOf("setSafeArea"));
 
-        // 系统键盘弹出：底部边距变大
+        // 系统键盘弹出：底部边距变大，键盘是实心的、没有「只是指示条」的部分（Tab 栏要整个停在键盘之上）
         var withKeyboard = new SafeAreaInsets(47, 0, 336, 0);
         _safeArea.Raise(withKeyboard);
         Assert.Equal(2, Module.CountOf("setSafeArea"));
-        Assert.Equal(new object?[] { 47d, 0d, 336d, 0d }, Module.Calls.Last(call => call.Identifier == "setSafeArea").Args);
+        Assert.Equal(new object?[] { 47d, 0d, 336d, 0d, 0d }, Module.Calls.Last(call => call.Identifier == "setSafeArea").Args);
 
         // 原生在布局过程中可能重复通知同一个数值
         _safeArea.Raise(withKeyboard);
         Assert.Equal(2, Module.CountOf("setSafeArea"));
+    }
+
+    [Fact]
+    public async Task 只有底部指示条的数值变化也会推送()
+    {
+        // 底部边距相同（34），但一个是 Home 指示条、一个是实心占用：对 Tab 栏的影响不同，不能被当成「没变」去重
+        _safeArea.Current = Notch;
+        await CreateCoordinator().StartAsync();
+
+        _safeArea.Raise(new SafeAreaInsets(47, 0, 34, 0));
+
+        Assert.Equal(2, Module.CountOf("setSafeArea"));
+        Assert.Equal(new object?[] { 47d, 0d, 34d, 0d, 0d }, Module.Calls.Last(call => call.Identifier == "setSafeArea").Args);
     }
 
     [Fact]
@@ -107,11 +132,11 @@ public sealed class ImmersiveCoordinatorTests
         var coordinator = CreateCoordinator();
         await coordinator.StartAsync();
 
-        _safeArea.Current = new SafeAreaInsets(0, 47, 21, 47); // 横屏
+        _safeArea.Current = new SafeAreaInsets(0, 47, 21, 47, 21); // 横屏
         await coordinator.OnViewportChanged();
 
         Assert.Equal(2, Module.CountOf("setSafeArea"));
-        Assert.Equal(new object?[] { 0d, 47d, 21d, 47d }, Module.Calls.Last(call => call.Identifier == "setSafeArea").Args);
+        Assert.Equal(new object?[] { 0d, 47d, 21d, 47d, 21d }, Module.Calls.Last(call => call.Identifier == "setSafeArea").Args);
 
         // 再次回调但数值没变：不重复推送
         await coordinator.OnViewportChanged();

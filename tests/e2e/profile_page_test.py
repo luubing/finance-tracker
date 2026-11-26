@@ -17,7 +17,7 @@ E2E 测试：我的 Tab（iOS UI 重构 · 13 号 ticket）。
   E. 刷新：下拉刷新（真实触摸，唯一的刷新入口）只重读本页数据——更新摘要值、不向云端发同步请求；拉得不够 / 不在顶部不触发；
      二级页面关闭后自动重读摘要（账本个数、待确认账单角标）
   F. 大标题折叠：向上滚动后折叠为居中小标题，回到顶部展开
-  G. 沉浸式：模拟刘海（状态栏 47）+ 手势条（34）后导航栏让出状态栏、内容不被 Tab 栏遮挡、浅色导航栏 → 深色状态栏图标
+  G. 沉浸式：模拟刘海（状态栏 47）+ Home 指示条（34）后导航栏让出状态栏、内容不被 Tab 栏遮挡、Tab 栏压住指示条所在的安全区但不盖住指示条本体、浅色导航栏 → 深色状态栏图标
   H. 未登录：显示「请先登录」引导，「去登录」进入登录页
   I. 退出登录：Alert 取消 / Esc 都留在原地；确认后清登录状态回登录页（没有 Tab 栏）并提示；换号登录后不残留上一个用户的资料与摘要
 
@@ -68,7 +68,8 @@ from fake_cloud import CloudPortBusy, FakeCloud
 SCREEN_W = PHONE_VIEWPORT["width"]
 SCREEN_H = PHONE_VIEWPORT["height"]
 TOP = 47  # 灵动岛 / 刘海机型状态栏高度
-BOTTOM = 34  # 手势条高度
+BOTTOM = 34  # Home 指示条所在的底部安全区高度
+HOME_INDICATOR_TOP = 13  # Home 指示条本体（高 5，离屏幕底 8）的顶边离屏幕底的距离
 
 RGB_DANGER_TEXT = "rgb(211, 34, 26)"  # --ft-danger-text #D3221A
 RGB_WARNING_TEXT = "rgb(154, 80, 0)"  # --ft-warning-text #9A5000（23 号起与预算提示条共用同一个令牌）
@@ -228,15 +229,17 @@ WATCH_LOGOUT_TOAST_JS = """() => {
   }).observe(document.body, { childList: true, subtree: true });
 }"""
 
+# 模拟 iPhone：刘海（顶部）+ Home 指示条（底部整个边距都只是指示条，宿主上报的 BottomIndicator），Tab 栏压住它
 SET_SAFE_JS = """([top, bottom]) => {
   const style = document.documentElement.style;
   style.setProperty('--ft-safe-top', top + 'px');
   style.setProperty('--ft-safe-bottom', bottom + 'px');
+  style.setProperty('--ft-safe-indicator', bottom + 'px');
 }"""
 
 CLEAR_SAFE_JS = """() => {
   const style = document.documentElement.style;
-  ['--ft-safe-top', '--ft-safe-bottom'].forEach((name) => style.removeProperty(name));
+  ['--ft-safe-top', '--ft-safe-bottom', '--ft-safe-indicator'].forEach((name) => style.removeProperty(name));
 }"""
 
 
@@ -795,8 +798,13 @@ def check_immersive(run: TestRun, page) -> None:
     wait_animations_settled(page)
     clearance = page.evaluate(BOTTOM_CLEARANCE_JS)
     run.check(
-        "【沉浸式】有手势条时，滚到底最后一行仍完整露在 Tab 栏之上，Tab 栏在手势条之上",
-        clearance["lowest"] <= clearance["tabTop"] + 1 and clearance["tabBottom"] <= SCREEN_H - BOTTOM + 1,
+        "【沉浸式】有 Home 指示条时，滚到底最后一行仍完整露在 Tab 栏之上",
+        clearance["lowest"] <= clearance["tabTop"] + 1,
+        str(clearance),
+    )
+    run.check(
+        "【沉浸式】Tab 栏下沿离屏幕底 21（压住指示条所在的安全区，设计稿 01），且没有盖住指示条本体（顶边离屏幕底约 13）",
+        approx(clearance["tabBottom"], SCREEN_H - 21) and clearance["tabBottom"] <= SCREEN_H - HOME_INDICATOR_TOP,
         str(clearance),
     )
     collapsed = page.evaluate(LAYOUT_JS)

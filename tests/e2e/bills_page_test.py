@@ -13,7 +13,7 @@ E2E 测试：账单 Tab · 列表、筛选 Sheet、批量归属账本与搜索�
      分段控件与导航栏两个按钮（筛选、多选；没有刷新按钮）、条件条四颗标签、Sheet 里「查看 0 笔账单」照常可点
   B. 有数据的列表：汇总卡（全量口径）、按日分组（今天 / 昨天 / 日期 + 星期 + 当日合计）、行内容与金额颜色、
      分段筛选（全部 / 支出 / 收入，滑块跟随）、大标题折叠、布局（底部让出 Tab 栏、玻璃层 ≤ 3、无横向溢出）、
-     Tab 切换后状态保留、无障碍属性、沉浸式（模拟刘海 / 手势条）、点按整行升起编辑 Sheet（16 号起编辑是记一笔 Sheet 的编辑模式）
+     Tab 切换后状态保留、无障碍属性、沉浸式（模拟刘海 / Home 指示条）、点按整行升起编辑 Sheet（16 号起编辑是记一笔 Sheet 的编辑模式）
   C. 左滑「编辑 / 删除」：编辑升起编辑 Sheet；删除先 Alert 确认（取消不删），确认后软删除、Toast、汇总与分组即时更新、删光后回到空状态
   D. 刷新：下拉刷新（真实触摸，唯一的刷新入口——导航栏没有刷新按钮）只重读本页数据，不触发任何云端请求；拉得不够 / 页面不在顶部不刷新
   E. 条件条与筛选 Sheet（09 号）：
@@ -93,7 +93,7 @@ from fake_cloud import CloudPortBusy, FakeCloud
 SCREEN_W = PHONE_VIEWPORT["width"]
 SCREEN_H = PHONE_VIEWPORT["height"]
 TOP = 47  # 灵动岛 / 刘海机型状态栏高度
-BOTTOM = 34  # 手势条高度
+BOTTOM = 34  # Home 指示条高度
 WEEKDAYS = "一二三四五六日"
 PAGE_SIZE = 20
 
@@ -214,15 +214,17 @@ PTR_IDLE_JS = """() => {
   return zone.getAttribute('data-state') === 'idle' && !scroller.style.getPropertyValue('--ft-ptr-offset');
 }"""
 
+# 模拟 iPhone：刘海（顶部）+ Home 指示条（底部整个边距都只是指示条，宿主上报的 BottomIndicator），Tab 栏压住它
 SET_SAFE_JS = """([top, bottom]) => {
   const style = document.documentElement.style;
   style.setProperty('--ft-safe-top', top + 'px');
   style.setProperty('--ft-safe-bottom', bottom + 'px');
+  style.setProperty('--ft-safe-indicator', bottom + 'px');
 }"""
 
 CLEAR_SAFE_JS = """() => {
   const style = document.documentElement.style;
-  ['--ft-safe-top', '--ft-safe-bottom'].forEach((name) => style.removeProperty(name));
+  ['--ft-safe-top', '--ft-safe-bottom', '--ft-safe-indicator'].forEach((name) => style.removeProperty(name));
 }"""
 
 
@@ -1020,7 +1022,7 @@ def check_immersive_notch(run: TestRun, page) -> None:
     notch = page.evaluate(LAYOUT_JS)
     run.check("【沉浸式】模拟刘海后导航栏变高（44 + 47），仍贴着屏幕顶端；按钮与标题都在状态栏之下", approx(notch["nav"]["height"], 44 + TOP) and approx(notch["nav"]["top"], 0) and notch["select"]["top"] >= TOP and notch["filter"]["top"] >= TOP, f"{notch['nav']} {notch['select']}")
     run.check("【沉浸式】大标题仍排在导航栏之下，没有被状态栏盖住", notch["title"]["top"] >= notch["nav"]["bottom"] - 1 and approx(notch["title"]["top"] - base["title"]["top"], TOP), f"{base['title']} -> {notch['title']}")
-    run.check("【沉浸式】底部留白 = Tab 栏占位（21 + 62 + 34 + 24），最后一项内容滚得出 Tab 栏", approx(notch["page"]["paddingBottom"], 21 + 62 + BOTTOM + 24), str(notch["page"]["paddingBottom"]))
+    run.check("【沉浸式】底部留白 = Tab 栏占位（21 + 62 + 24；Tab 栏压住 Home 指示条，指示条不额外占位），最后一项内容滚得出 Tab 栏", approx(notch["page"]["paddingBottom"], 21 + 62 + 24), str(notch["page"]["paddingBottom"]))
     state = scroll_root_state(page)
     scroll_root_to(page, min(200, state["max"]))
     page.wait_for_function(COLLAPSED_JS)

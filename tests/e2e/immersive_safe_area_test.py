@@ -8,11 +8,13 @@ E2E 测试：沉浸式状态栏与安全区（iOS UI 重构 · 02 号 ticket）�
   A. 安全区变量 --ft-safe-top/right/bottom/left
      - 浏览器默认全为 0（Web.Server 不受影响）；
      - 原生注入（immersive.js 的 setSafeArea / clearSafeArea）优先于 CSS env()，非法值被钳到 0；
+     - 底部边距里「只是 Home 指示条」的部分（setSafeArea 的第 5 个参数 → --ft-safe-indicator）与其余的「实心」部分（--ft-safe-bottom-solid），
+       后者 = 整个底部边距 − 指示条，不会小于 0；Tab 栏只避开实心部分（iPhone 上距底仍是 21，压住 Home 指示条），键盘 / 三键导航栏整个避开；
   B. 状态栏图标风格 <html data-statusbar-icons="light|dark">
      - 采样：状态栏下方是深色不透明背景 → light（浅色图标），浅色 → dark；半透明 / 全透明元素不算背景；
      - 声明：data-statusbar-bg="dark|light" 优先于采样；移除声明后恢复；
      - 跟随：滚动、进入 / 返回二级页面（浅色导航栏）时自动更新；
-  C. Tab 栏在刘海 / 手势条下的几何，以及从首页（深色 Hero，浅色图标）压栈进入二级页面（浅色导航栏，深色图标）再返回时状态栏图标跟随、
+  C. Tab 栏在刘海 / 手势条 / Home 指示条 / 键盘下的几何，以及从首页（深色 Hero，浅色图标）压栈进入二级页面（浅色导航栏，深色图标）再返回时状态栏图标跟随、
      新模板的导航栏让出状态栏。四个 Tab 根页面与全部二级页面都已迁移（22 号迁完最后一个旧二级页面「错误日志」），
      旧的 .container 根页面外壳与「迁移期兼容层」断言（依赖 PageStack 内部 DOM）都已删除；各页让出安全区的细节由各页自己的 E2E 覆盖。
 
@@ -39,7 +41,8 @@ from e2e_base import (
 
 SCREEN_H = PHONE_VIEWPORT["height"]
 TOP = 47  # 灵动岛 / 刘海机型状态栏高度
-BOTTOM = 34  # 手势条高度
+BOTTOM = 34  # 手势条 / Home 指示条高度
+KEYBOARD = 336  # 系统键盘高度
 
 READ_SAFE_JS = """() => {
   // 用探针元素读出 --ft-safe-* 的实际生效值（自定义属性本身可能带 env()/var() 原文）
@@ -51,6 +54,29 @@ READ_SAFE_JS = """() => {
   const values = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].map(parseFloat);
   probe.remove();
   return values;
+}"""
+
+# 读出 --ft-safe-indicator（底部边距里只是 Home 指示条的部分）与 --ft-safe-bottom-solid（必须整个避开的部分）的实际生效值
+READ_BOTTOM_PARTS_JS = """() => {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;'
+    + 'padding-top:var(--ft-safe-indicator);padding-bottom:var(--ft-safe-bottom-solid)';
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe);
+  const parts = { indicator: parseFloat(cs.paddingTop), solid: parseFloat(cs.paddingBottom) };
+  probe.remove();
+  return parts;
+}"""
+
+# 模拟原生宿主注入：与 ImmersiveCoordinator → immersive.js setSafeArea 同一条路径的 JS 端（参数顺序 上、右、下、左、底部指示条）
+SET_NATIVE_JS = """async (args) => {
+  const module = await import('/_content/FinanceTracker.Web/js/immersive.js');
+  module.setSafeArea(...args);
+}"""
+
+CLEAR_NATIVE_JS = """async () => {
+  const module = await import('/_content/FinanceTracker.Web/js/immersive.js');
+  module.clearSafeArea();
 }"""
 
 SET_SAFE_JS = """([top, bottom]) => {
@@ -116,6 +142,10 @@ def read_safe(page) -> "list[float]":
     return page.evaluate(READ_SAFE_JS)
 
 
+def read_bottom_parts(page) -> "dict[str, float]":
+    return page.evaluate(READ_BOTTOM_PARTS_JS)
+
+
 def approx(actual, expected, tolerance: float = 1.0) -> bool:
     return actual is not None and abs(actual - expected) <= tolerance
 
@@ -150,6 +180,8 @@ def check_safe_area_contract(run: TestRun, page) -> None:
     )
     run.check("clearSafeArea 后回落到默认 0", read_safe(page) == [0, 0, 0, 0], str(read_safe(page)))
 
+    check_bottom_indicator_contract(run, page)
+
     page.evaluate(SET_SAFE_JS, [TOP, BOTTOM])
     page.evaluate(
         """async () => {
@@ -169,6 +201,76 @@ def check_safe_area_contract(run: TestRun, page) -> None:
             module.clearSafeArea();
         }"""
     )
+
+
+def check_bottom_indicator_contract(run: TestRun, page) -> None:
+    """A（续）. 底部边距里「只是 Home 指示条」的部分：--ft-safe-indicator / --ft-safe-bottom-solid"""
+    run.check(
+        "浏览器默认：没有指示条、没有实心占用（env(safe-area-inset-bottom) = 0）",
+        read_bottom_parts(page) == {"indicator": 0, "solid": 0},
+        str(read_bottom_parts(page)),
+    )
+
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6, 34])
+    parts = read_bottom_parts(page)
+    run.check(
+        "iPhone：整个底部边距 34 都标明是 Home 指示条 → 实心部分 0（Tab 栏可以压住它）",
+        read_safe(page) == [50, 8, 34, 6] and parts == {"indicator": 34, "solid": 0},
+        f"{read_safe(page)} {parts}",
+    )
+
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6])
+    parts = read_bottom_parts(page)
+    run.check(
+        "宿主没传第 5 个参数（Android）→ 指示条 0，整个底部边距都是实心占用",
+        read_safe(page) == [50, 8, 34, 6] and parts == {"indicator": 0, "solid": 34},
+        f"{read_safe(page)} {parts}",
+    )
+
+    page.evaluate(SET_NATIVE_JS, [50, 8, 336, 6, 0])
+    parts = read_bottom_parts(page)
+    run.check(
+        "键盘升起（底部边距并入键盘高度 336，指示条归零）→ 实心部分 336，Tab 栏整个避开",
+        parts == {"indicator": 0, "solid": 336},
+        str(parts),
+    )
+
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6, 50])
+    parts = read_bottom_parts(page)
+    run.check(
+        "指示条比整个底部边距还大 → 实心部分钳到 0，不会出现负的距底",
+        parts == {"indicator": 50, "solid": 0},
+        str(parts),
+    )
+
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6, -5])
+    negative = read_bottom_parts(page)
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6, "abc"])
+    garbage = read_bottom_parts(page)
+    page.evaluate(SET_NATIVE_JS, [50, 8, 34, 6, None])
+    missing = read_bottom_parts(page)
+    expected = {"indicator": 0, "solid": 34}
+    run.check(
+        "非法 / 负数 / 空的指示条值被钳到 0（按「整个底部边距都是实心」处理，最保守）",
+        negative == expected and garbage == expected and missing == expected,
+        f"{negative} {garbage} {missing}",
+    )
+
+    page.evaluate(CLEAR_NATIVE_JS)
+    parts = read_bottom_parts(page)
+    run.check(
+        "clearSafeArea 后指示条一并清除，回落默认（env = 0）",
+        read_safe(page) == [0, 0, 0, 0] and parts == {"indicator": 0, "solid": 0},
+        f"{read_safe(page)} {parts}",
+    )
+
+    # 页面（html 内联）覆盖优先于原生注入：与 --ft-safe-* 一样，E2E 可以直接在 html 上模拟指示条
+    page.evaluate(SET_NATIVE_JS, [0, 0, 20, 0, 0])
+    page.evaluate("() => document.documentElement.style.setProperty('--ft-safe-indicator', '20px')")
+    overridden = read_bottom_parts(page)
+    page.evaluate("() => document.documentElement.style.removeProperty('--ft-safe-indicator')")
+    page.evaluate(CLEAR_NATIVE_JS)
+    run.check("页面（html 内联）对 --ft-safe-indicator 的覆盖优先于原生注入", overridden == {"indicator": 20, "solid": 0}, str(overridden))
 
 
 def check_status_bar_protocol(run: TestRun, page) -> None:
@@ -256,7 +358,7 @@ def check_tab_bar_and_push(run: TestRun, page) -> None:
 
     notch = page.evaluate(TAB_BAR_JS)
     run.check(
-        "Tab 栏停在手势条之上（高 62，底边 = 屏高 - 21 - 34）",
+        "底部 34 是实心占用（行内变量模拟、没标明指示条）时 Tab 栏停在它之上（高 62，底边 = 屏高 - 21 - 34）",
         notch and approx(notch["height"], 62) and approx(notch["bottom"], SCREEN_H - 21 - BOTTOM),
         str(notch),
     )
@@ -294,6 +396,46 @@ def check_tab_bar_and_push(run: TestRun, page) -> None:
         "安全区还原为 0 后 Tab 栏回到无刘海 / 手势条的取值",
         restored and approx(restored["height"], 62) and approx(restored["bottom"], SCREEN_H - 21),
         str(restored),
+    )
+
+    # 走真实的注入路径（与 ImmersiveCoordinator → immersive.js setSafeArea 同一条，不靠行内变量覆盖）：
+    # iPhone 底部 34 全是 Home 指示条 → Tab 栏压住它，下沿离屏幕底 21（设计稿 01，指示条在它下面）；
+    # 键盘升起 → 宿主把键盘高度并入底部边距、指示条归零 → Tab 栏整个停在键盘之上；收起键盘 → 回到压住指示条
+    page.evaluate(SET_NATIVE_JS, [TOP, 0, BOTTOM, 0, BOTTOM])
+    wait_animations_settled(page)
+    ios = page.evaluate(TAB_BAR_JS)
+    run.check(
+        "iPhone（宿主上报底部 34 全是 Home 指示条）：Tab 栏压住它，高 62，底边 = 屏高 - 21",
+        ios and approx(ios["height"], 62) and approx(ios["bottom"], SCREEN_H - 21),
+        str(ios),
+    )
+    shot(page, "immersive-root-ios-indicator")
+
+    page.evaluate(SET_NATIVE_JS, [TOP, 0, KEYBOARD, 0, 0])
+    wait_animations_settled(page)
+    keyboard = page.evaluate(TAB_BAR_JS)
+    run.check(
+        f"键盘升起（底部边距 {KEYBOARD}，指示条 0）：Tab 栏整个停在键盘之上，底边 = 屏高 - 21 - {KEYBOARD}",
+        keyboard and approx(keyboard["bottom"], SCREEN_H - 21 - KEYBOARD) and keyboard["bottom"] <= SCREEN_H - KEYBOARD,
+        str(keyboard),
+    )
+
+    page.evaluate(SET_NATIVE_JS, [TOP, 0, BOTTOM, 0, BOTTOM])
+    wait_animations_settled(page)
+    dismissed = page.evaluate(TAB_BAR_JS)
+    run.check(
+        "收起键盘：Tab 栏回到压住 Home 指示条的位置",
+        dismissed and approx(dismissed["bottom"], SCREEN_H - 21),
+        str(dismissed),
+    )
+
+    page.evaluate(CLEAR_NATIVE_JS)
+    wait_animations_settled(page)
+    cleared = page.evaluate(TAB_BAR_JS)
+    run.check(
+        "宿主注入清除后 Tab 栏回到默认位置",
+        cleared and approx(cleared["bottom"], SCREEN_H - 21),
+        str(cleared),
     )
 
 

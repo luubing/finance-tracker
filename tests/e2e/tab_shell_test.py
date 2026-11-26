@@ -5,8 +5,8 @@ E2E 测试：设计令牌 + 悬浮玻璃 Tab 栏 + 四 Tab 壳（iOS UI 重构 �
 只覆盖网页层——Android / iOS 上玻璃模糊真实渲染、手势条不遮挡 Tab 栏等原生表现，见 ticket 03 的人工验收清单。
 
   A. 设计令牌：两个宿主共用的 tokens.css 已加载；MASA 主题 primary 与令牌品牌色一致
-  B. Tab 栏外观与位置：四个 Tab + 独立「记一笔」圆钮；高 62、左右边距 16、距底 21（在安全区之上）；
-     选中项图标换实心并染品牌色，底部有静态高光；每屏玻璃层 ≤ 3
+  B. Tab 栏外观与位置：四个 Tab + 独立「记一笔」圆钮；高 62、左右边距 16、距底 21（下沿离屏幕底边 21：iPhone 上压住 Home 指示条所在的安全区，
+     键盘 / 三键导航栏这类实心占用再整个避开）；选中项图标换实心并染品牌色，底部有静态高光；每屏玻璃层 ≤ 3
   C. 切换 Tab：文档化的「当前激活 Tab」属性（data-active-tab）随之变化，并显示对应页面；
      Home 里指向账单列表的入口（「最近账单」的「全部」）切到「账单」Tab，而不是把它压栈（「我的」里的账单列表入口已由 13 号迁出）
   D. 切走再切回：滚动位置与筛选状态保持
@@ -74,6 +74,24 @@ def short_viewport(page):
         yield
     finally:
         page.set_viewport_size(PHONE_VIEWPORT)
+
+
+# 模拟宿主上报的底部安全区：--ft-safe-bottom = 整个底部边距，--ft-safe-indicator = 其中「只是 Home 指示条」的部分
+# （indicator 传 None = 不注入，走 app.css 的回落：env(safe-area-inset-bottom)，浏览器里恒为 0）
+SET_BOTTOM_INSET_JS = """({ bottom, indicator }) => {
+  const style = document.documentElement.style;
+  style.setProperty('--ft-safe-bottom', bottom + 'px');
+  if (indicator === null) style.removeProperty('--ft-safe-indicator');
+  else style.setProperty('--ft-safe-indicator', indicator + 'px');
+}"""
+CLEAR_BOTTOM_INSET_JS = "() => ['--ft-safe-bottom', '--ft-safe-indicator'].forEach((name) => document.documentElement.style.removeProperty(name))"
+
+
+def simulate_bottom_inset(page, bottom: float, indicator) -> dict:
+    """模拟一种底部安全区，等 Tab 栏的位置过渡结束后返回 Tab 栏外框"""
+    page.evaluate(SET_BOTTOM_INSET_JS, {"bottom": bottom, "indicator": indicator})
+    wait_animations_settled(page)
+    return page.evaluate(TAB_LAYOUT_JS)["wrap"]
 
 
 READ_TOKENS_JS = """() => {
@@ -220,16 +238,45 @@ def check_tab_bar_look(run: TestRun, page) -> None:
     glass = page.evaluate(GLASS_LAYERS_JS)
     run.check("每屏同时叠加的玻璃层不超过 3 层", glass <= 3, f"{glass} 层")
 
-    # 位于底部安全区之上：模拟手势条后，Tab 栏整体上移 34
-    page.evaluate("() => document.documentElement.style.setProperty('--ft-safe-bottom', '34px')")
-    wait_animations_settled(page)
-    lifted = page.evaluate(TAB_LAYOUT_JS)["wrap"]
+    # 底部安全区：设计稿 01 里 Tab 栏下沿离屏幕底 21，Home 指示条在它下面（Tab 栏压住指示条所在的安全区），
+    # 所以 iPhone 上距底仍是 21，不再「21 + 34」；键盘 / 三键导航栏这类实心占用才整个避开
+    ios_home = simulate_bottom_inset(page, bottom=BOTTOM, indicator=BOTTOM)
     run.check(
-        "手势条 34px 时 Tab 栏距底 = 21 + 34，整体停在安全区之上",
-        approx(lifted["bottom"], SCREEN_H - 21 - BOTTOM) and approx(lifted["height"], 62),
-        str(lifted),
+        "iPhone Home 指示条 34px（宿主标明整个底部边距都只是指示条）时 Tab 栏距底仍是 21，压住指示条所在的安全区",
+        approx(ios_home["bottom"], SCREEN_H - 21) and approx(ios_home["height"], 62),
+        str(ios_home),
     )
-    page.evaluate("() => document.documentElement.style.removeProperty('--ft-safe-bottom')")
+    shot(page, "tab-shell-home-ios-indicator")
+
+    solid = simulate_bottom_inset(page, bottom=BOTTOM, indicator=0)
+    run.check(
+        "实心占用 34px（宿主没标明指示条：Android 三键导航栏 / 手势区）时 Tab 栏距底 = 21 + 34，整体停在占用区之上",
+        approx(solid["bottom"], SCREEN_H - 21 - BOTTOM) and approx(solid["height"], 62),
+        str(solid),
+    )
+
+    keyboard = simulate_bottom_inset(page, bottom=336, indicator=0)
+    run.check(
+        "系统键盘 336px（键盘升起时指示条为 0）时 Tab 栏整个停在键盘之上：距底 = 21 + 336",
+        approx(keyboard["bottom"], SCREEN_H - 21 - 336),
+        str(keyboard),
+    )
+
+    oversized = simulate_bottom_inset(page, bottom=BOTTOM, indicator=50)
+    run.check(
+        "指示条比整个底部边距还大（宿主给了不合理的值）时实心部分钳到 0，Tab 栏不会被拉到屏幕之下",
+        approx(oversized["bottom"], SCREEN_H - 21),
+        str(oversized),
+    )
+
+    only_env = simulate_bottom_inset(page, bottom=BOTTOM, indicator=None)
+    run.check(
+        "没有宿主注入指示条（Web.Server）时回落 env(safe-area-inset-bottom)：浏览器里 env = 0，实心部分 = 整个底部边距",
+        approx(only_env["bottom"], SCREEN_H - 21 - BOTTOM),
+        str(only_env),
+    )
+
+    page.evaluate(CLEAR_BOTTOM_INSET_JS)
     wait_animations_settled(page)
     shot(page, "tab-shell-home")
 
@@ -325,6 +372,21 @@ def check_secondary_pages(run: TestRun, page) -> None:
             str(clearance),
         )
         run.check("留白 ≥ Tab 栏高度 + 距底（62 + 21）", clearance["paddingBottom"] >= 62 + 21, str(clearance))
+
+        # 留白跟着 Tab 栏的真实位置走：iPhone（整个底部边距都只是指示条）= 21 + 62 + 24；实心占用 34px 时再加 34
+        for label, indicator, expected in (
+            ("iPhone Home 指示条 34px", BOTTOM, 21 + 62 + 24),
+            ("实心占用 34px（三键导航栏 / 手势区）", 0, 21 + 62 + BOTTOM + 24),
+        ):
+            page.evaluate(SET_BOTTOM_INSET_JS, {"bottom": BOTTOM, "indicator": indicator})
+            scroll_root_to(page, "bottom")
+            inset_clearance = page.evaluate(BOTTOM_CLEARANCE_JS)
+            run.check(
+                f"{label}：底部留白 = {expected}（Tab 栏占位 + 24 呼吸空间），滚到底最后一项内容仍完整露在 Tab 栏之上",
+                approx(inset_clearance["paddingBottom"], expected) and inset_clearance["lowest"] <= inset_clearance["tabTop"] + 1,
+                str(inset_clearance),
+            )
+        page.evaluate(CLEAR_BOTTOM_INSET_JS)
 
         # 再次点按当前 Tab：滚到顶部
         state = scroll_root_state(page)

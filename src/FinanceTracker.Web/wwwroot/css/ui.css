@@ -72,7 +72,8 @@ body {
 /* ------------------------------------------------------------
    悬浮玻璃 Tab 栏 + 「记一笔」圆钮（GlassTabBar.razor，滑块动效由 tabBar.js 驱动）
    结构：.ft-tabwrap > nav.ft-tabbar.ft-glass(> .ft-tabbar__thumb + .ft-tab × 4) + button.ft-capsule + button.ft-fab
-   尺寸：高 62、左右边距 16、距底 21 + 安全区（均为令牌）。每屏玻璃层 ≤ 3：Tab 栏只占 1 层，圆钮是实色渐变。
+   尺寸：高 62、左右边距 16、距底 21（均为令牌）。距底以 --ft-tabbar-offset 为准：iPhone 上 Tab 栏压住 Home 指示条所在的安全区（下沿离屏幕底 21，指示条在它下面），
+   键盘 / Android 三键导航栏这类实心占用则整个避开（21 + 占用）。每屏玻璃层 ≤ 3：Tab 栏只占 1 层，圆钮是实色渐变。
    由脚本维护的状态（Blazor 不渲染这些属性，重绘不会冲掉它们）：
      .ft-tabwrap[data-collapsed="true"]      Tab 栏收缩成「当前页胶囊」（向下滚动超过 --ft-collapse-threshold）
      .ft-tabwrap[data-pressed="true"]        正在按住某个 Tab：高光「抬起」
@@ -86,7 +87,7 @@ body {
     z-index: var(--ft-z-tabbar);
     left: calc(var(--ft-tabbar-side) + var(--ft-safe-left, 0px));
     right: calc(var(--ft-tabbar-side) + var(--ft-safe-right, 0px));
-    bottom: calc(var(--ft-tabbar-bottom) + var(--ft-safe-bottom, 0px));
+    bottom: var(--ft-tabbar-offset);
     height: var(--ft-tabbar-height);
     display: flex;
     gap: var(--ft-tabbar-gap);
@@ -100,7 +101,7 @@ body {
 
 /* 二级页面与登录页：Tab 栏滑出并隐藏（元素保留在 DOM，回到根页面时再滑回） */
 .ft-tabwrap--hidden {
-    transform: translateY(calc(100% + var(--ft-tabbar-bottom) + var(--ft-safe-bottom, 0px) + 12px));
+    transform: translateY(calc(100% + var(--ft-tabbar-offset) + 12px));
     opacity: 0;
     visibility: hidden;
     transition: transform var(--ft-dur-tabbar) var(--ft-ease-out), opacity var(--ft-dur-tabbar) var(--ft-ease-out), visibility 0s linear var(--ft-dur-tabbar);
@@ -1409,7 +1410,7 @@ button.ft-cell {
    ------------------------------------------------------------ */
 .m-enqueued-snackbars {
     z-index: var(--ft-z-toast);
-    bottom: calc(var(--ft-toast-bottom) + var(--ft-safe-bottom, 0px)) !important;
+    bottom: var(--ft-toast-bottom) !important;
     pointer-events: none; /* 容器横跨整屏，只有消息条本身响应点击 */
 }
 
@@ -2837,7 +2838,7 @@ p.ft-sheet-hint {
     z-index: var(--ft-z-actionbar);
     left: calc(var(--ft-tabbar-side) + var(--ft-safe-left, 0px));
     right: calc(var(--ft-tabbar-side) + var(--ft-safe-right, 0px));
-    bottom: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + var(--ft-safe-bottom, 0px) + var(--ft-actionbar-gap));
+    bottom: calc(var(--ft-tabbar-offset) + var(--ft-tabbar-height) + var(--ft-actionbar-gap));
     box-sizing: border-box;
     height: var(--ft-actionbar-height);
     display: flex;

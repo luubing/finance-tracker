@@ -8,7 +8,8 @@ namespace FinanceTracker.Web.Services;
 /// 由全局唯一的 <c>ImmersiveHost</c> 组件创建和释放；所有 JS 交互都在 <c>wwwroot/js/immersive.js</c> 中。
 /// <list type="number">
 /// <item>安全区：<see cref="ISafeAreaService"/> → JS <c>setSafeArea</c> → CSS 变量 <c>--ft-native-safe-*</c>
-/// （页面统一读 <c>--ft-safe-*</c>，原生没有提供时回落到 <c>env(safe-area-inset-*)</c>，再回落到 0）。</item>
+/// （页面统一读 <c>--ft-safe-*</c>，原生没有提供时回落到 <c>env(safe-area-inset-*)</c>，再回落到 0）；
+/// 底部边距里「只是指示条」的部分（<see cref="SafeAreaInsets.BottomIndicator"/>）另写到 <c>--ft-native-safe-indicator</c>，Tab 栏据此压住 Home 指示条。</item>
 /// <item>状态栏：JS 对屏幕顶部像素采样得到图标风格（或读取页面声明的 <c>data-statusbar-bg</c>），
 /// 回调 <see cref="OnStatusBarIconsChanged"/> → <see cref="IStatusBarService"/>。</item>
 /// </list>
@@ -124,7 +125,7 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
             _pushedInsets = latest;
             if (latest is { } insets)
             {
-                await module.InvokeVoidAsync("setSafeArea", insets.Top, insets.Right, insets.Bottom, insets.Left);
+                await module.InvokeVoidAsync("setSafeArea", insets.Top, insets.Right, insets.Bottom, insets.Left, insets.BottomIndicator);
             }
             else
             {

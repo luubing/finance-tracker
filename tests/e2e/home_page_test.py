@@ -11,7 +11,7 @@ E2E 测试：首页重做（iOS UI 重构 · 07 号 ticket）。
   B. 有数据的首页：本月支出 / 收入 / 结余 = 造的账单；最近账单 5 行（内容、金额颜色、时间、未归属账本、点按升起编辑 Sheet）；
      本月预算三种状态（正常 / 接近上限 / 超支）与文字线索、进度条无障碍属性、脚注；超支提示；
      待确认横幅与角标（有 / 无）；「快捷操作」宫格已移除；「全部」切换到账单 Tab；布局（滚动、底部让出 Tab 栏、无横向溢出、玻璃层 ≤ 3）；
-     沉浸式（模拟刘海 / 手势条）
+     沉浸式（模拟刘海 / Home 指示条：Tab 栏压住指示条，留白不再额外加 34）
   C. 刷新：下拉刷新（真实触摸，唯一的刷新入口——Hero 里没有刷新按钮）只重读本页数据，不触发任何云端请求；拉得不够不刷新；
      页面不在顶部时不触发；重新加载后同一个预算不会再次弹出超支提示
   D. 历史无账本账单：只在顶部给一行「还没有账本」提示，不挡住已有数据
@@ -62,7 +62,7 @@ from fake_cloud import CloudPortBusy, FakeCloud
 SCREEN_W = PHONE_VIEWPORT["width"]
 SCREEN_H = PHONE_VIEWPORT["height"]
 TOP = 47  # 灵动岛 / 刘海机型状态栏高度
-BOTTOM = 34  # 手势条高度
+BOTTOM = 34  # Home 指示条高度
 WEEKDAYS = "一二三四五六日"
 
 RGB_INCOME_TEXT = "rgb(24, 133, 64)"  # --ft-income-text #188540
@@ -158,15 +158,17 @@ COVER_JS = """() => {
   };
 }"""
 
+# 模拟 iPhone：刘海（顶部）+ Home 指示条（底部整个边距都只是指示条，宿主上报的 BottomIndicator），Tab 栏压住它
 SET_SAFE_JS = """([top, bottom]) => {
   const style = document.documentElement.style;
   style.setProperty('--ft-safe-top', top + 'px');
   style.setProperty('--ft-safe-bottom', bottom + 'px');
+  style.setProperty('--ft-safe-indicator', bottom + 'px');
 }"""
 
 CLEAR_SAFE_JS = """() => {
   const style = document.documentElement.style;
-  ['--ft-safe-top', '--ft-safe-bottom'].forEach((name) => style.removeProperty(name));
+  ['--ft-safe-top', '--ft-safe-bottom', '--ft-safe-indicator'].forEach((name) => style.removeProperty(name));
 }"""
 
 # 统计「超支提示」Toast 被加入页面的次数（Toast 几秒后自动消失，事后数不出来，所以用 MutationObserver 在刷新前布防）
@@ -543,7 +545,7 @@ def check_immersive_notch(run: TestRun, page) -> None:
     run.check("【沉浸式】模拟刘海后 Hero 仍顶到屏幕最顶端", approx(notch["hero"]["top"], 0), str(notch["hero"]))
     run.check("【沉浸式】标题与通知入口让出状态栏（在状态栏之下）", notch["title"]["top"] >= TOP and notch["bell"]["top"] >= TOP, f"{notch['title']} {notch['bell']}")
     run.check("【沉浸式】Hero 随安全区变高（刘海 47）", approx(notch["hero"]["height"] - base["hero"]["height"], TOP, 1), f"{base['hero']['height']} -> {notch['hero']['height']}")
-    run.check("【沉浸式】底部留白 = Tab 栏占位（21 + 62 + 34 + 24），最后一项内容滚得出 Tab 栏", approx(notch["page"]["paddingBottom"], 21 + 62 + BOTTOM + 24), str(notch["page"]["paddingBottom"]))
+    run.check("【沉浸式】底部留白 = Tab 栏占位（21 + 62 + 24；Tab 栏压住 Home 指示条，指示条不额外占位），最后一项内容滚得出 Tab 栏", approx(notch["page"]["paddingBottom"], 21 + 62 + 24), str(notch["page"]["paddingBottom"]))
     shot(page, "home-notch")
     page.evaluate(CLEAR_SAFE_JS)
 

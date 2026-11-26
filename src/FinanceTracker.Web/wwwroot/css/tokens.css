@@ -147,11 +147,14 @@
     --ft-nav-height: 44px;                                 /* 导航栏（玻璃圆按钮 44 × 44） */
     --ft-tabbar-height: 62px;                              /* Tab 栏 */
     --ft-tabbar-side: 16px;                                /* Tab 栏左右边距 */
-    --ft-tabbar-bottom: 21px;                              /* Tab 栏距底（在底部安全区之上，另加 --ft-safe-bottom） */
+    --ft-tabbar-bottom: 21px;                              /* Tab 栏下沿离屏幕底边的距离（设计稿 01：Tab 栏压住 Home 指示条所在的安全区，指示条在它下面） */
+    /* Tab 栏实际的距底：再加上底部安全区里必须整个避开的部分（键盘 / Android 三键导航栏等实心占用；Home 指示条不算，见 app.css 的 --ft-safe-bottom-solid）。
+       Tab 栏本身、Toast、多选操作栏、页面底部留白都以它为准，不要再各自拼「--ft-tabbar-bottom + --ft-safe-bottom」 */
+    --ft-tabbar-offset: calc(var(--ft-tabbar-bottom) + var(--ft-safe-bottom-solid, 0px));
     --ft-tabbar-gap: 10px;                                 /* Tab 栏与「记一笔」圆钮的间距 */
     --ft-fab-size: 62px;                                   /* 「记一笔」圆钮 */
     /* 一级页面底部为悬浮 Tab 栏预留的高度：Tab 栏占位 + 呼吸空间，最后一项内容可完整滚出 Tab 栏之上 */
-    --ft-tabbar-clearance: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + var(--ft-safe-bottom, 0px) + 24px);
+    --ft-tabbar-clearance: calc(var(--ft-tabbar-offset) + var(--ft-tabbar-height) + 24px);
     --ft-shell-max-width: 480px;                           /* 宽屏（桌面浏览器）下应用壳的最大宽度，保持手机比例 */
 
     /* ---------- 动效 ---------- */
@@ -197,7 +200,7 @@
     --ft-dur-sheet-out: 260ms;
     --ft-dur-fade: 180ms;
     --ft-ease-sheet: cubic-bezier(.2, .9, .25, 1);
-    --ft-toast-bottom: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + 14px); /* Toast 距底：始终在 Tab 栏之上（在二级页面上显得略高，但全局位置一致） */
+    --ft-toast-bottom: calc(var(--ft-tabbar-offset) + var(--ft-tabbar-height) + 14px); /* Toast 距底：始终在 Tab 栏之上（在二级页面上显得略高，但全局位置一致） */
     --ft-brand-button-gradient: linear-gradient(155deg, #7A5CFF 0%, var(--ft-brand) 62%, #3510D6 100%); /* 主按钮 / 「记一笔」圆钮 */
     --ft-brand-button-shadow:
         0 8px 20px rgba(var(--ft-brand-rgb), .38),

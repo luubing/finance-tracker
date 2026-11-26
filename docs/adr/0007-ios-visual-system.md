@@ -40,8 +40,8 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 
 - 一级页面四个 Tab：首页 `/`、账单 `/bills`、统计 `/statistics`、我的 `/profile`；右侧是独立的圆形「记一笔」按钮。
   Tab 与路径的对应关系集中在 `FinanceTracker.Web.Shell.TabNavigation`，Tab 栏（`GlassTabBar`）与页面栈规则都取自它。
-- Tab 栏几何：高 62、左右边距 16、距底 `21 + 底部安全区`，与「记一笔」圆钮（62）间距 10；宽屏（≥ 521px）应用壳限制
-  最大宽度 480 并居中。
+- Tab 栏几何：高 62、左右边距 16、**下沿离屏幕底边 21**（`--ft-tabbar-bottom`；iPhone 上它压住 Home 指示条所在的安全区，只有键盘 / Android 三键导航栏这类实心占用才再整个避开，实际距底是 `--ft-tabbar-offset`，见 §29），
+  与「记一笔」圆钮（62）间距 10；宽屏（≥ 521px）应用壳限制最大宽度 480 并居中。
 - **Tab 栏只在四个一级页面显示**；二级页面（压栈的页面）与登录页不显示。登录页不渲染 Tab 栏，二级页面只隐藏
   （`visibility: hidden` + `inert`），保留 DOM 以便返回时滑回。
 - **切换 Tab 只用 `NavigationManager.NavigateTo(根路径)`，不得 `Push` 一个 Tab 根路径**：压栈会把一个常驻的根页面
@@ -49,7 +49,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   时用 `PageStackNavController.GoBackToTab(根路径)`。
 - Tab 根页面由页面栈常驻（切走只隐藏不销毁）：切走再切回保留滚动位置与筛选状态。
 - 再次点按当前 Tab：已在根页面则滚动回到顶部；停在该 Tab 的二级页面则先回到根页面。
-- 一级页面内容区底部预留 `--ft-tabbar-clearance`（距底 + Tab 栏高度 + 安全区 + 24），最后一项内容可以完整滚出 Tab 栏之上。
+- 一级页面内容区底部预留 `--ft-tabbar-clearance`（`--ft-tabbar-offset` + Tab 栏高度 + 24），最后一项内容可以完整滚出 Tab 栏之上。
 - 宽屏下应用壳加 `transform: translateZ(0)`：这让 `position: fixed` 的后代（页面栈的页面、Tab 栏、弹层）
   以壳为包含块，因此都收在壳内；并用 `overflow-x: clip` 裁掉压栈时向左错开的下层页面。
 
@@ -58,6 +58,8 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 - 安全区（刘海 / 灵动岛 / 手势条 / 键盘）通过 `--ft-safe-top|right|bottom|left` 变量暴露给 Web 层；来源优先级：
   html 内联覆盖 → 原生注入（`--ft-native-safe-*`）→ `env(safe-area-inset-*)` → `0px`。页面一律读这四个变量，
   不直接用 `env()`。
+- 底部边距里「只是 Home 指示条」的那一段由宿主另行上报（`SafeAreaInsets.BottomIndicator` → `setSafeArea` 的第 5 个参数 → `--ft-safe-indicator`），
+  派生出必须整个避开的实心部分 `--ft-safe-bottom-solid`；只有悬浮的 Tab 栏（及与它同口径的 Toast / 多选操作栏）只避开实心部分，页面内容与 Sheet 仍避开整个 `--ft-safe-bottom`（§29）。
 - 状态栏图标明暗由 `immersive.js` 对屏幕顶部采样得出，写到 `<html data-statusbar-icons="light|dark">`；背景是渐变 / 图片时
   页面用 `data-statusbar-bg="dark|light"` 显式声明。
 - 触感反馈等原生能力同样经 Web 共享库里的接口抽象，由 MAUI 宿主实现、Web.Server 宿主提供空实现，
@@ -659,7 +661,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 
 - **清掉了什么**：
   - `app.css` 里的迁移期兼容层（让旧页面在沉浸式下不被状态栏盖住的 `.m-page-stack-item__bar` / `.container` / 工具栏按钮规则）整体删除；其中唯一仍有用的一条——二级页面内容区的上内边距——升为 `ui.css` 的正式规则（§7）。
-    `app.css` 现在只剩「禁止长按选择」与四个 `--ft-safe-*` 变量（真机验收之后又加了一条：未处理异常提示条 `#blazor-error-ui` 的默认隐藏规则，见 §28）。
+    `app.css` 现在只剩「禁止长按选择」与四个 `--ft-safe-*` 变量（真机验收之后又加了两处：未处理异常提示条 `#blazor-error-ui` 的默认隐藏规则，见 §28；只给 Tab 栏用的 `--ft-safe-indicator` / `--ft-safe-bottom-solid` 两个派生变量，见 §29）。
   - `tabBar.js` 与 E2E 基座里「找不到 `data-scroll-root` 就退回旧 `.container`」的兜底删除——所有页面都有滚动根标记，兜底留着只会让漏标的新页面「恰好正常」。
   - 没有任何引用的 `LedgerSelect`（旧账本下拉）删除；`BillFilterChip` 在「已设置条件」时直接渲染通用件 `ConditionChip`（条件标签的标记与样式只剩一份，渲染出来的 DOM 不变）。
   - 15 个 E2E 脚本各抄一份的「玻璃层数」探针合并成 `e2e_base.GLASS_LAYERS_JS`，口径只有一处。
@@ -700,6 +702,29 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   E2E 冒烟检查提示条默认隐藏、不撑高文档、强制显示时固定在手势条之上。
 - **教训**：E2E 看不到 MAUI 宿主页与宿主的根地址（`tests/e2e/README.md` 开头有说明）。往后凡是「两个宿主各有一份」的东西（宿主页里的标记 / 样式、对地址格式的假设），要么只留一份放进共用资源，要么写源码扫描 / 多根地址的单元测试；
   对 `NavigationManager.Uri` 的任何解析都不要假设协议。
+
+### 29. Tab 栏距底：压住 Home 指示条所在的安全区，不再「21 + 整个底部安全区」
+
+iOS 真机验收后用户反馈：**Tab 栏离屏幕底部的安全区间距太大**。
+
+- **根因：设计稿里的「21」量错了基准**。规格与 §4 写的是「距底 21（在安全区之上）」，实现成 `bottom = 21 + --ft-safe-bottom`；iPhone 的底部安全区是 34，于是 Tab 栏下沿离屏幕底 55。
+  实测设计稿 01 的成品图（786 × 1704，2.0154 倍）：Tab 栏下沿离屏幕底边 **20.8pt**，Home 指示条（深色药丸，高 5）顶边离底 12.9pt、底边离底 7.9pt——21 是从**屏幕边缘**量起的，
+  Tab 栏压在 Home 指示条所在的安全区上、下沿高出指示条约 8pt。多出来的 34 就是「间距太大」。E2E 的几何断言照着规格文字写（「21 + 34」），所以一路是绿的，真机上才看得出来。
+- **不能简单地把 `--ft-safe-bottom` 从公式里删掉**：底部安全区在各宿主里不全是「指示条」。iOS 键盘升起时宿主把键盘高度并入底部边距（`Math.Max(safe.Bottom, keyboardHeight)`），Android 并入输入法高度、三键导航栏是实心的——
+  这些必须整个避开，否则 Tab 栏会盖在键盘 / 导航键上。纯 CSS 的写法（`safe − 13px`、按阈值分段……）区分不出「34 是 Home 指示条」还是「34 是实心占用」，所以改成**让宿主说明**。
+- **做法**：
+  - `SafeAreaInsets` 增加第 5 个成员 `BottomIndicator`（底部边距里「只是指示条」的那一段，缺省 0）。iOS 宿主在键盘收起时把整个 `safe.Bottom` 标为指示条、键盘升起时为 0；Android 宿主不传（= 0，行为不变）。
+  - `immersive.js` 的 `setSafeArea` 增加第 5 个参数，写到 `--ft-native-safe-indicator`（`clearSafeArea` 一并清除；非法 / 负值钳 0）。
+  - `app.css`：`--ft-safe-indicator`（原生注入 → `env(safe-area-inset-bottom)` → 0）与 `--ft-safe-bottom-solid = max(0, --ft-safe-bottom − --ft-safe-indicator)`——必须整个避开的实心部分。
+  - `tokens.css`：`--ft-tabbar-offset = --ft-tabbar-bottom（21） + --ft-safe-bottom-solid`。Tab 栏本身、Toast（`--ft-toast-bottom`）、多选操作栏、一级页面底部留白（`--ft-tabbar-clearance`）全部改用它，口径只有一处。
+  - 页面内容、固定在底部的按钮、Sheet 仍然避开**整个** `--ft-safe-bottom`——它们是不能压在指示条上的内容；只有悬浮的 Tab 栏（以及与它同口径的 Toast / 操作栏）可以压住指示条。
+- **结果**：iPhone 上 Tab 栏下沿离屏幕底 21（原来 55），同时留有约 8pt 不盖住指示条本体；键盘升起时整个停在键盘之上（21 + 键盘高度）；Android 不变（21 + 导航栏 / 手势区）；
+  Web.Server 在真 iPhone 的 Safari 里 `env()` 同时给出两个值，也是 21。
+- **守卫**：单元测试扫描源码——`--ft-tabbar-offset` 只由 `--ft-tabbar-bottom` 与 `--ft-safe-bottom-solid` 构成、依赖 Tab 栏位置的令牌与 `ui.css` 里不再自己拼「`--ft-tabbar-bottom` + `--ft-safe-bottom`」、`app.css` 的两条派生公式；
+  `ImmersiveCoordinatorTests` 覆盖第 5 个参数的推送（iPhone / 缺省 / 键盘）与「只有指示条变化也要推送」；E2E：`tab_shell_test.py` / `immersive_safe_area_test.py` 覆盖 iPhone 指示条、实心占用、键盘升起与收起、越界钳 0、无宿主注入回落 `env()`、清除；
+  首页 / 账单 / 我的 / 账本管理的「刘海 + 指示条」场景改成 iPhone 口径（模拟时同时设 `--ft-safe-bottom` 与 `--ft-safe-indicator`），Tab 栏下沿离屏幕底 21 且不盖住指示条本体（顶边离底 13）。
+- **没有动的**：Android 的手势导航条同样是一条「指示条」，但 Android 宿主目前不区分它与三键导航栏（都按实心避开，Tab 栏距底 = 21 + 导航栏高度），这次只修用户反馈的 iOS；
+  若 Android 手势导航下也觉得偏高，可以在 `SafeAreaService` 里用 `WindowInsetsCompat.Type.TappableElement`（手势导航下为 0）区分后同样上报 `BottomIndicator`，Web 层不用再改。
 
 ## 考虑的替代方案
 
@@ -814,6 +839,9 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 - §28 的两处修复（iOS 上 Tab 栏不出现、登录页底部的错误提示条）在本机只验证了「用 `app://0.0.0.0/` 等根地址跑纯逻辑」与 Web.Server 里的样式 / 行为，**没有在 iOS 真机 / 模拟器上重新验证过**——开发机是 Windows，没有 iOS 目标可跑；
   需要真机确认：冷启动后登录页底部不再有文字；登录后四个 Tab 都显示 Tab 栏并能切换；统计页的分段（月度 / 趋势 / 年度）随地址正确切换。
   若真机上仍然出现错误提示卡片或 Tab 仍然异常，请先看「我的 → 错误日志」（Tab 栏恢复后才进得去；进不去就用 Xcode / 设备日志取）并带上 iOS 版本。
+- §29 的 Tab 栏距底修复同样**没有在 iOS 真机 / 模拟器上验证过**：Web 层用行内变量与 `immersive.js` 的真实注入路径模拟了 iPhone 指示条 / 键盘 / 实心占用，iOS 宿主的 `SafeAreaService`（键盘收起时上报整个底部边距为指示条）只验证了能编译。
+  需要真机确认：Tab 栏下沿离屏幕底约 21、在 Home 指示条之上不盖住它；账单页点搜索框升起键盘时 Tab 栏整个停在键盘之上、收起键盘后落回原位；横屏、iPad / 无 Home 指示条的机型（底部边距为 0）下 Tab 栏距底仍是 21；
+  多选操作栏与 Toast 在 Tab 栏之上的间距是否顺眼（它们随 Tab 栏一起下移了 34）。
 
 ## 相关
 

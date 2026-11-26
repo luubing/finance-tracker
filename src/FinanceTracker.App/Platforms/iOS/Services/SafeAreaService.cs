@@ -7,7 +7,7 @@ namespace FinanceTracker.App.Platforms.iOS.Services;
 
 /// <summary>
 /// iOS 安全区服务：读取关键窗口的 <c>SafeAreaInsets</c>（状态栏 / 灵动岛 / 刘海 / 底部 Home 指示条，单位 pt = CSS 像素），
-/// 并把系统键盘高度并入底部边距。
+/// 并把系统键盘高度并入底部边距；键盘收起时再标明底部边距全是 Home 指示条（<see cref="SafeAreaInsets.BottomIndicator"/>），供 Tab 栏压住它。
 /// 触发时机：系统键盘弹出 / 收起（键盘通知）；旋转等视口变化由 Web 层 <c>resize</c> 事件回调
 /// <see cref="ImmersiveCoordinator.OnViewportChanged"/> 后重新读取 <see cref="Current"/>。
 /// 注意：必须配合 <c>MainPage</c> 里把 <c>WKWebView.ScrollView.ContentInsetAdjustmentBehavior</c> 设为 Never，
@@ -67,11 +67,17 @@ public sealed class SafeAreaService : ISafeAreaService
         }
 
         var safe = window.SafeAreaInsets;
+
+        // Home 指示条只是屏幕底部的一条细线：悬浮的 Tab 栏可以压住这块区域（设计稿里 Tab 栏下沿离屏幕底 21，指示条在它下面）。
+        // 键盘升起时底部是实心的键盘，没有「可以压住」的部分，Tab 栏要整个停在键盘之上。
+        var indicator = _keyboardHeight > 0 ? 0d : (double)safe.Bottom;
+
         var insets = new SafeAreaInsets(
             (double)safe.Top,
             (double)safe.Right,
             Math.Max((double)safe.Bottom, _keyboardHeight),
-            (double)safe.Left);
+            (double)safe.Left,
+            indicator);
 
         lock (_gate)
         {

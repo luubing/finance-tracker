@@ -293,6 +293,52 @@ public sealed class DesignTokensTests
         Assert.True(undefinedTokens.Count == 0, $"ui.css 引用了没有定义的令牌：{string.Join(", ", undefinedTokens)}");
     }
 
+    // ---- Tab 栏距底：设计稿 01 里 Tab 栏下沿离屏幕底 21，Home 指示条在它下面（Tab 栏压住底部安全区里的指示条） ----
+
+    [Fact]
+    public void Tab栏距底令牌是_21_加底部安全区里必须整个避开的部分_而不是整个底部安全区()
+    {
+        var offset = Token("--ft-tabbar-offset");
+
+        Assert.Contains("var(--ft-tabbar-bottom)", offset);
+        Assert.Contains("var(--ft-safe-bottom-solid", offset);
+        // 把整个 --ft-safe-bottom（iPhone 上 34）加进去，Tab 栏就比设计稿高出 34、与 Home 指示条之间空出一大截
+        Assert.DoesNotMatch(@"--ft-safe-bottom(?!-)", offset);
+    }
+
+    [Theory]
+    [InlineData("--ft-tabbar-clearance")]
+    [InlineData("--ft-toast-bottom")]
+    public void 依赖Tab栏位置的令牌都以_tabbar_offset_为准(string token)
+    {
+        var value = Token(token);
+
+        Assert.Contains("var(--ft-tabbar-offset)", value);
+        Assert.DoesNotMatch(@"--ft-tabbar-bottom|--ft-safe-bottom(?!-)", value);
+    }
+
+    [Fact]
+    public void 组件样式里Tab栏的距底只引用_tabbar_offset_不再自己拼安全区()
+    {
+        // Tab 栏本身、Toast、多选操作栏、页面底部留白都要和 Tab 栏的真实位置一致。谁再把 --ft-tabbar-bottom 和 --ft-safe-bottom 拼在一起，
+        // iPhone 上 Tab 栏就会重新高出一截（用户反馈过「Tab 距离 iOS 底部安全域间距太大」）
+        var ui = UiCssWithoutComments();
+
+        Assert.DoesNotContain("var(--ft-tabbar-bottom", ui);
+        Assert.Matches(@"\.ft-tabwrap\s*\{[^}]*\bbottom:\s*var\(--ft-tabbar-offset\)\s*;", ui);
+    }
+
+    [Fact]
+    public void 底部安全区的实心部分等于整个底部边距减去指示条_且不会小于0()
+    {
+        var app = Regex.Replace(
+            File.ReadAllText(RepoRoot.Combine("src/FinanceTracker.Web/wwwroot/css/app.css")), @"/\*.*?\*/", string.Empty, RegexOptions.Singleline);
+
+        // 指示条：原生宿主注入 → env(safe-area-inset-bottom) → 0（Web.Server 在真 iPhone 的 Safari 里也是同一口径）
+        Assert.Matches(@"--ft-safe-indicator:\s*var\(--ft-native-safe-indicator,\s*env\(safe-area-inset-bottom,\s*0px\)\)\s*;", app);
+        Assert.Matches(@"--ft-safe-bottom-solid:\s*max\(0px,\s*calc\(var\(--ft-safe-bottom\)\s*-\s*var\(--ft-safe-indicator\)\)\)\s*;", app);
+    }
+
     // ---- 文字对比度（WCAG AA：正文 ≥ 4.5:1）。本组只覆盖首页重做新增 / 调整的文字色令牌；全局审计见无障碍加固 ticket ----
 
     private static (double R, double G, double B) Rgb(string hex)

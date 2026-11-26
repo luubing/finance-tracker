@@ -3,6 +3,8 @@
 // 一、安全区
 //   原生宿主把测得的安全区交给 setSafeArea → 写入 html 的 --ft-native-safe-*；
 //   样式统一读 --ft-safe-*（app.css：优先原生值，回落 env(safe-area-inset-*)，再回落 0）。
+//   底部边距里「只是一条指示条」的部分（iOS 的 Home 指示条，键盘升起时为 0）另写到 --ft-native-safe-indicator：
+//   悬浮的 Tab 栏可以压住它（app.css 的 --ft-safe-bottom-solid），页面内容仍然避开整个底部边距。
 //
 // 二、状态栏图标风格
 //   对屏幕顶部像素（水平居中、y=1）做命中检测，沿命中栈自上而下找到第一个
@@ -16,6 +18,7 @@ const ROOT = document.documentElement;
 const DECLARE_ATTR = 'data-statusbar-bg';
 const ICONS_ATTR = 'data-statusbar-icons';
 const NATIVE_VARS = ['top', 'right', 'bottom', 'left'].map((side) => `--ft-native-safe-${side}`);
+const NATIVE_INDICATOR_VAR = '--ft-native-safe-indicator';
 
 /** 背景有效不透明度达到该值才视为"遮住了下层" */
 const OPAQUE_ALPHA = 0.6;
@@ -36,12 +39,14 @@ let colorCanvasContext = null;
 
 /**
  * 写入原生安全区（单位 CSS 像素）。
+ * bottomIndicator：底部边距里「只是一条指示条」的部分（缺省 0 = 整个底部边距都要避开）。
  */
-export function setSafeArea(top, right, bottom, left) {
+export function setSafeArea(top, right, bottom, left, bottomIndicator = 0) {
   const values = [top, right, bottom, left];
   NATIVE_VARS.forEach((name, index) => {
-    ROOT.style.setProperty(name, `${Math.max(0, Number(values[index]) || 0)}px`);
+    ROOT.style.setProperty(name, `${toPixels(values[index])}px`);
   });
+  ROOT.style.setProperty(NATIVE_INDICATOR_VAR, `${toPixels(bottomIndicator)}px`);
 }
 
 /**
@@ -49,6 +54,12 @@ export function setSafeArea(top, right, bottom, left) {
  */
 export function clearSafeArea() {
   NATIVE_VARS.forEach((name) => ROOT.style.removeProperty(name));
+  ROOT.style.removeProperty(NATIVE_INDICATOR_VAR);
+}
+
+/** 非法 / 负数的原生值钳到 0 */
+function toPixels(value) {
+  return Math.max(0, Number(value) || 0);
 }
 
 /**

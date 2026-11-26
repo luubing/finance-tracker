@@ -18,7 +18,7 @@ E2E 测试：二级页面模板 + 账本管理（iOS UI 重构 · 05 号 ticket�
   H. 加入的共享账本 / 共享徽标 / 邀请卡（本地与云端各造一份；云端不可用时拒绝给出提示且不登出；云端可用时接受 / 拒绝成功）
   I. Sheet 的收起方式：点遮罩、Esc、关闭按钮、拖拽把手；拖得不够会弹回；弹层盖住整屏（含导航栏）；Alert 在 Sheet 之上
   J. 降级：减少动态效果时 Sheet 入场改为淡入
-  K. 沉浸式：模拟刘海（状态栏 47）+ 手势条（34）后，导航栏 / 内容 / Sheet / Toast 都让出安全区，浅色导航栏 → 深色状态栏图标
+  K. 沉浸式：模拟刘海（状态栏 47）+ Home 指示条（34）后，导航栏 / 内容 / Sheet 让出安全区、Toast 与 Tab 栏同口径，浅色导航栏 → 深色状态栏图标
 
 可观察属性（已登记到 README）：ledgers-page、ledger-add、ledger-row[data-ledger-id][data-open]、ledger-cell、joined-cell、
 badge-default / badge-shared / badge-role、invitation-*、ledger-sheet(-host)、ledger-name / ledger-sort、ledger-default-switch、
@@ -858,21 +858,24 @@ def check_sheet_dismiss(run: TestRun, page, db: LocalDb, user_id: str) -> None:
 # ---------------------------------------------------------------------------------------------- K. 沉浸式
 
 
+# 模拟 iPhone：刘海（顶部）+ Home 指示条（底部整个边距都只是指示条，宿主上报的 BottomIndicator）
 SET_SAFE_JS = """([top, bottom]) => {
   const style = document.documentElement.style;
   style.setProperty('--ft-safe-top', top + 'px');
   style.setProperty('--ft-safe-bottom', bottom + 'px');
+  style.setProperty('--ft-safe-indicator', bottom + 'px');
 }"""
 
 CLEAR_SAFE_JS = """() => {
   const style = document.documentElement.style;
   style.removeProperty('--ft-safe-top');
   style.removeProperty('--ft-safe-bottom');
+  style.removeProperty('--ft-safe-indicator');
 }"""
 
 
 def check_immersive(run: TestRun, page, db: LocalDb, user_id: str) -> None:
-    """模拟刘海（状态栏 47）+ 手势条（34）：新模板的导航栏、内容、Sheet、Toast 都要让出安全区。"""
+    """模拟刘海（状态栏 47）+ Home 指示条（34）：新模板的导航栏、内容、Sheet 都要让出安全区；Toast 与 Tab 栏同口径（不额外避让指示条）。"""
     notch, gesture = 47, 34
     open_app(page, "/ledgers")
     page.get_by_test_id("ledgers-page").wait_for(state="visible")
@@ -906,10 +909,11 @@ def check_immersive(run: TestRun, page, db: LocalDb, user_id: str) -> None:
     wait_animations_settled(page)
     toast_info = page.evaluate(TOAST_JS)
     if toast_info is None:
-        run.skip("【沉浸式】Toast 避开手势条", "测量时 Toast 已消失")
+        run.skip("【沉浸式】Toast 位置", "测量时 Toast 已消失")
     else:
-        expected = SCREEN_H - gesture - TOAST_BOTTOM_GAP
-        run.check("【沉浸式】Toast 在手势条与 Tab 栏占位之上", abs(toast_info["bottom"] - expected) <= 3, f"{toast_info['bottom']} vs {expected}")
+        # Toast 与 Tab 栏同一口径（--ft-tabbar-offset）：Tab 栏压住 Home 指示条，Toast 也不再额外避让指示条
+        expected = SCREEN_H - TOAST_BOTTOM_GAP
+        run.check("【沉浸式】Toast 在 Tab 栏占位之上，与没有 Home 指示条时同一位置（距底 97）", abs(toast_info["bottom"] - expected) <= 3, f"{toast_info['bottom']} vs {expected}")
     shot(page, "ledgers-immersive-notch")
 
     page.evaluate(CLEAR_SAFE_JS)

@@ -41,12 +41,21 @@ select,
 
    所有页面都自己使用 --ft-safe-*（二级页面的顶栏与内容区见 ui.css 的「二级页面」一节，Tab 根页面见各页自己的样式），
    没有任何依赖页面栈内部 DOM 的全局兼容规则（迁移期的兼容层已在 24 号清理）。
+
+   底部边距里「只是一条指示条」的部分另有两个变量，只给悬浮的 Tab 栏用（页面内容、按钮、Sheet 仍然避开整个 --ft-safe-bottom）：
+     --ft-safe-indicator     底部边距里只是指示条的那一段（iOS 的 Home 指示条）。原生宿主注入（--ft-native-safe-indicator）→ env(safe-area-inset-bottom) → 0；
+                             键盘升起时宿主会把它写成 0（键盘是实心的）。Android 宿主不提供，值恒为 0。
+     --ft-safe-bottom-solid  底部边距里必须整个避开的那一段 = 整个底部边距 − 指示条，不会小于 0。
+                             Tab 栏只避开它：iPhone 上是 0，所以 Tab 栏下沿离屏幕底 21（设计稿 01，指示条在它下面）；
+                             键盘 / Android 三键导航栏 / 手势区这些实心占用仍然整个避开。
    ============================================ */
 :root {
     --ft-safe-top: var(--ft-native-safe-top, env(safe-area-inset-top, 0px));
     --ft-safe-right: var(--ft-native-safe-right, env(safe-area-inset-right, 0px));
     --ft-safe-bottom: var(--ft-native-safe-bottom, env(safe-area-inset-bottom, 0px));
     --ft-safe-left: var(--ft-native-safe-left, env(safe-area-inset-left, 0px));
+    --ft-safe-indicator: var(--ft-native-safe-indicator, env(safe-area-inset-bottom, 0px));
+    --ft-safe-bottom-solid: max(0px, calc(var(--ft-safe-bottom) - var(--ft-safe-indicator)));
 }
 
 /* ============================================
