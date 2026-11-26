@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- 「启动失败」兜底的静态还原：加载页（渐变 + Logo 组）之上放一张真实的 GlassAlert 样式（ui.css 里的 ft-alert，
+     标记与 Components/Ui/GlassAlert.razor 一致，ShowCancel = false）。放在 393×852 的 iframe 里使用。
+     与标准 Alert 的两处差别：不要遮罩（背景只是品牌画布，没有要隔离的内容）、位置在 Logo 组下方而不是正中（不遮住 Logo）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=393, initial-scale=1, viewport-fit=cover">
+<title>启动失败（静态还原）</title>
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/app.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/ui.css">
+<link rel="stylesheet" href="shared.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    :root { --ft-font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    html, body { margin: 0; height: 852px; width: 393px; overflow: hidden; background: #000; }
+    .stage { position: relative; width: 393px; height: 852px; overflow: hidden; }
+    /* Alert 下沉到 Logo 组下方：底边距屏幕底 94（手势条安全区 34 + 60 呼吸） */
+    .ft-alert-host { place-items: end center; padding-bottom: 94px; }
+    /* 截图时让 Alert 停在入场动画的终点 */
+    .ft-alert { animation: none; }
+</style>
+</head>
+<body>
+<div class="stage">
+    <div class="boot-solid"></div>
+    <div class="boot-gradient"></div>
+    <div class="boot-group">
+        <div class="tile" data-glyph></div>
+        <div class="boot-title">记账本</div>
+        <div class="boot-sub">简单、安心的个人记账</div>
+    </div>
+
+    <div class="ft-alert-host" data-state="open">
+        <div class="ft-alert" role="alertdialog" aria-labelledby="t" aria-describedby="m">
+            <div class="ft-alert__body">
+                <h2 class="ft-alert__title" id="t">启动失败</h2>
+                <p class="ft-alert__message" id="m">没能打开记账本，请重新加载。反复出现时请重启应用。</p>
+            </div>
+            <div class="ft-alert__actions">
+                <button type="button" class="ft-alert__btn ft-alert__btn--strong">重新加载</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="shared.js"></script>
+</body>
+</html>

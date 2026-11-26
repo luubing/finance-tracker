@@ -1,0 +1,204 @@
+/* ============================================================
+   冷启动设计稿 · 共用样式
+   颜色 / 渐变 / 玻璃 / 字号 / 时长全部取自 tokens.css（本文件之前加载），
+   这里只放「设计稿版式」与「冷启动画面」两类样式，方便以后直接搬进 index.html。
+   首页 / 登录页两个终点画面不在这里画：它们是用真实样式表静态还原的 home-screen.html / login-screen.html，用 iframe 嵌入。
+   ============================================================ */
+
+:root {
+    --mock-font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+
+    /* 提案：新增的唯一令牌。取 Hero 渐变在 Logo 所在横带（距顶 330–620）的屏幕均值，实测 #5C2EF7；
+       原生启动页只能给纯色，用它让下一帧渐变淡入时 Logo 周围不跳色。 */
+    --ft-splash-bg: #5C2EF7;
+
+    --sheet-ink: #14142B;
+    --sheet-ink-2: #5B6078;
+    --sheet-ink-3: #8A8FA6;
+    --screen-w: 393px;
+    --screen-h: 852px;
+    --screen-r: 56px;
+
+    /* 真实几何（home-screen / login-screen 在 393×852、安全区 59 / 34 下量得） */
+    --logo-start-y: 426px;          /* 加载页里 Logo 方块的中心：屏幕正中，与原生启动页一致 */
+    --logo-travel: 183px;           /* 到登录页 Logo 方块中心（y=243）要上移的距离 */
+    --hero-h-home: 348px;           /* 首页 Hero 的实际高度 = 安全区 59 + 289（运行时量取，不写死） */
+}
+
+html, body { margin: 0; padding: 0; }
+body { font-family: var(--mock-font); color: var(--sheet-ink); -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+
+/* ---------------- 设计稿版式（与 docs/design/ios-ui-refactor 总览稿一致） ---------------- */
+.sheet {
+    position: relative;
+    width: 1980px;
+    padding: 72px 73px 76px;
+    background: linear-gradient(180deg, #F1F2F9 0%, #E7E9F3 100%);
+}
+.sheet__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 40px; margin-bottom: 44px; }
+.sheet__title { margin: 0 0 12px; font: 800 38px/1.15 var(--mock-font); letter-spacing: -.4px; color: var(--sheet-ink); }
+.sheet__sub { margin: 0; max-width: 1280px; font: 400 16px/1.65 var(--mock-font); color: var(--sheet-ink-2); }
+.tags { display: flex; gap: 10px; padding-top: 6px; }
+.tag { padding: 8px 15px; border-radius: 999px; background: #fff; color: var(--ft-brand); font: 600 13px/1 var(--mock-font); box-shadow: 0 2px 8px rgba(30, 20, 90, .08); white-space: nowrap; }
+
+.section { display: flex; align-items: center; gap: 12px; margin: 0 0 26px; font: 800 24px/1.2 var(--mock-font); color: var(--sheet-ink); }
+.section::before { content: ""; width: 5px; height: 24px; border-radius: 3px; background: var(--ft-brand); }
+.section small { font: 400 15px/1.2 var(--mock-font); color: var(--sheet-ink-3); }
+.section--gap { margin-top: 74px; }
+
+.row { display: grid; grid-template-columns: repeat(4, 414px); column-gap: 59.5px; align-items: start; }
+.frame { position: relative; }
+.frame--link::after {
+    content: "";
+    position: absolute; z-index: 40;
+    right: -48px; top: 418px; width: 36px; height: 36px; border-radius: 50%;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%234318FF' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / 18px no-repeat;
+    box-shadow: 0 4px 14px rgba(30, 20, 90, .16);
+}
+
+.cap { padding: 0 6px; }
+.cap .step { margin: 28px 0 6px; display: flex; align-items: center; gap: 8px; font: 700 12.5px/1 var(--mock-font); letter-spacing: .6px; color: var(--ft-brand); text-transform: none; }
+.cap .step i { font-style: normal; padding: 4px 9px; border-radius: 999px; font-weight: 600; letter-spacing: 0; }
+.cap .step .native { background: rgba(30, 20, 90, .08); color: var(--sheet-ink-2); }
+.cap .step .web { background: var(--ft-brand-soft-2); color: var(--ft-brand); }
+.cap h3 { margin: 0 0 8px; font: 800 24px/1.25 var(--mock-font); color: var(--sheet-ink); }
+.cap p { margin: 0 0 14px; font: 400 15px/1.65 var(--mock-font); color: var(--sheet-ink-2); }
+.cap ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cap li { position: relative; padding-left: 34px; font: 500 15px/1.55 var(--mock-font); color: #23253F; }
+.cap li::before {
+    content: attr(data-n);
+    position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 50%;
+    background: #FF3B30; color: #fff; font: 700 12px/22px var(--mock-font); text-align: center;
+}
+.cap code, .card code, .panel code { font: 600 .9em/1 "JetBrains Mono", Consolas, "Cascadia Mono", monospace; padding: 1px 5px; border-radius: 5px; background: rgba(67, 24, 255, .08); color: #3a14d8; }
+
+/* 标注徽标（红色圆点 + 白环），位置相对手机外框 */
+.badge {
+    position: absolute; z-index: 60;
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: #FF3B30; color: #fff; font: 700 15px/1 var(--mock-font);
+    box-shadow: 0 0 0 3.5px rgba(255, 255, 255, .92), 0 5px 12px rgba(255, 59, 48, .38);
+}
+
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 76px; }
+.card { display: flex; gap: 20px; align-items: flex-start; padding: 26px 28px; border-radius: 34px; background: #fff; box-shadow: 0 10px 34px rgba(30, 20, 90, .09); }
+.card__icon { flex: none; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; color: #fff; background: linear-gradient(150deg, #7A5CFF, #4318FF); box-shadow: 0 6px 14px rgba(67, 24, 255, .3); }
+.card__icon svg { width: 26px; height: 26px; }
+.card h4 { margin: 2px 0 6px; font: 800 18px/1.3 var(--mock-font); }
+.card p { margin: 0; font: 400 14px/1.65 var(--mock-font); color: var(--sheet-ink-2); }
+.foot { margin-top: 36px; font: 400 13px/1.7 var(--mock-font); color: var(--sheet-ink-3); }
+
+/* 面板（说明性卡片，白底） */
+.panel { padding: 30px 34px; border-radius: 34px; background: #fff; box-shadow: 0 10px 34px rgba(30, 20, 90, .09); }
+.panel h3 { margin: 0 0 6px; font: 800 24px/1.25 var(--mock-font); }
+.panel > p { margin: 0 0 18px; font: 400 15px/1.65 var(--mock-font); color: var(--sheet-ink-2); }
+.panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.panel li { position: relative; padding-left: 20px; font: 500 15px/1.6 var(--mock-font); color: #23253F; }
+.panel li::before { content: ""; position: absolute; left: 2px; top: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--ft-brand); }
+.panel li b { font-weight: 800; color: var(--sheet-ink); }
+
+/* ---------------- 手机外框 ---------------- */
+.phone {
+    position: relative;
+    width: 414px; height: 873px;
+    padding: 10.5px;
+    border-radius: 66.5px;
+    background: linear-gradient(145deg, #2d2d31 0%, #101012 30%, #19191c 68%, #2c2c30 100%);
+    box-shadow: 0 0 0 1.5px #5a5a61, 0 44px 70px -30px rgba(25, 15, 90, .5), 0 18px 28px -16px rgba(25, 15, 90, .28);
+}
+.phone::before, .phone::after { content: ""; position: absolute; width: 3.5px; background: #26262a; border-radius: 2px; }
+.phone::before { left: -4.5px; top: 150px; height: 34px; box-shadow: 0 66px 0 0 #26262a, 0 130px 0 0 #26262a; }   /* 左侧：静音 / 音量 +/- */
+.phone::after { right: -4.5px; top: 236px; height: 96px; }                                                      /* 右侧：电源键 */
+
+.screen {
+    position: relative;
+    width: var(--screen-w); height: var(--screen-h);
+    border-radius: var(--screen-r);
+    /* 圆角裁剪用 mask-image（沿 border-radius 的圆角裁），而不是 overflow:hidden / clip-path：
+       嵌入 iframe 时，后两者在渲染时会在右侧两个圆角处露出一小块黑色方块（实测 #000 压在 #151518 的边框上） */
+    -webkit-mask-image: linear-gradient(#000, #000);
+    mask-image: linear-gradient(#000, #000);
+    background: transparent;
+    isolation: isolate;
+    font-family: var(--mock-font);
+}
+/* 嵌入的真实页面还原（393×852 的 iframe，视口与真机一致） */
+.screen > iframe.fill { position: absolute; inset: 0; width: var(--screen-w); height: var(--screen-h); border: 0; background: transparent; }
+
+/* 灵动岛 / 状态栏 / 手势条：始终盖在最上面 */
+.island { position: absolute; z-index: 50; top: 11px; left: 50%; width: 124px; height: 36px; margin-left: -62px; border-radius: 20px; background: #000; }
+.statusbar { position: absolute; z-index: 50; left: 0; right: 0; top: 0; height: 54px; color: #fff; pointer-events: none; }
+.statusbar--dark { color: #000; }
+.statusbar .time { position: absolute; left: 72px; top: 17px; transform: translateX(-50%); font: 600 17px/22px var(--mock-font); letter-spacing: -.2px; }
+.statusbar .icons { position: absolute; right: 37px; top: 21px; display: flex; align-items: center; gap: 6px; }
+.statusbar svg { display: block; fill: currentColor; }
+.hindicator { position: absolute; z-index: 50; left: 50%; bottom: 8px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: #fff; }
+.hindicator--dark { background: #111; }
+
+/* ---------------- 冷启动画面的积木 ---------------- */
+.boot-solid { position: absolute; inset: 0; background: var(--ft-splash-bg); }
+.boot-gradient { position: absolute; inset: 0; background: var(--ft-hero-gradient); opacity: var(--bloom, 1); }
+
+/* Logo 方块：与登录页的 .ft-login__logo 完全一致——96×96、圆角 30、图标 50，材质就是 .ft-glass-dark（取令牌） */
+.tile {
+    position: absolute; width: 96px; height: 96px; border-radius: 30px;
+    display: grid; place-items: center;
+    background: var(--ft-glass-dark-bg);
+    -webkit-backdrop-filter: var(--ft-glass-dark-filter);
+    backdrop-filter: var(--ft-glass-dark-filter);
+    box-shadow: var(--ft-glass-dark-shadow);
+}
+.tile svg { width: 50px; height: 50px; display: block; }
+/* 原生启动页版本：原生资源是一张静态图，不能做模糊 / 饱和度滤镜，所以用「预合成」的实心色。
+   #7E3EFF = 加载页里玻璃方块（白 17% + blur 20 + saturate 170%）压在渐变上的实测色（登录页真实方块 #7536FF~#7540FB，差 <3%）。
+   若改用半透明白，方块是 #8A69F9→#764FF8 的浅薰衣草色，下一帧会跳成 #7E3EFF，肉眼可见。内描边与高光沿用令牌，去掉外投影。 */
+.tile--flat {
+    background: #7E3EFF;
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    box-shadow:
+        inset 0 0 0 .75px rgba(255, 255, 255, .4),
+        inset 0 1.2px .5px rgba(255, 255, 255, .55),
+        inset 0 -1px .5px rgba(255, 255, 255, .12);
+}
+
+/* Logo 组：方块 + 标题 + 标语，间距与 .ft-login__brand 一致（22 / 6）。原点 = 方块中心，初始在屏幕正中；
+   --hand 0→1 把它整体上移到登录页位置（183px） */
+.boot-group { position: absolute; left: 0; right: 0; top: var(--logo-start-y); height: 0; transform: translateY(calc(var(--hand, 0) * var(--logo-travel) * -1)); opacity: var(--logo, 1); }
+.boot-group .tile { left: 50%; top: -48px; margin-left: -48px; }
+.boot-title { position: absolute; left: 0; right: 0; top: 70px; text-align: center; font: 800 38px/46px var(--mock-font); letter-spacing: 1px; color: #fff; opacity: var(--title, 1); transform: translateY(calc((1 - var(--title, 1)) * 10px)); }
+.boot-sub { position: absolute; left: 0; right: 0; top: 122px; text-align: center; font: 500 16px/21px var(--mock-font); color: rgba(255, 255, 255, .9); opacity: var(--title, 1); transform: translateY(calc((1 - var(--title, 1)) * 10px)); }
+
+/* 转圈 + 说明（慢启动才出现） */
+.boot-foot { position: absolute; left: 0; right: 0; bottom: 96px; display: flex; flex-direction: column; align-items: center; gap: 12px; color: rgba(255, 255, 255, .86); font: 500 13px/18px var(--mock-font); }
+.spinner { position: relative; width: 24px; height: 24px; }
+.spinner i { position: absolute; left: 50%; top: 0; width: 2.2px; height: 6.5px; margin-left: -1.1px; border-radius: 1.2px; background: #fff; transform-origin: 50% 12px; transform: rotate(calc(var(--i) * 30deg)); opacity: calc(1 - var(--i) * .075); }
+
+/* 幕布（仅「已登录 → 首页」用）：整屏渐变，向上收拢成首页 Hero。
+   渐变画在幕布自己身上（不是一张固定大小的底图被裁切），这样盒子缩到 Hero 大小时，渐变形状与真实 Hero 完全一致。
+   高度 = 852 - lift × (852 - Hero 实际高度)，圆角 = lift × 40（--ft-radius-hero） */
+.curtain {
+    position: absolute; z-index: 5; left: 0; right: 0; top: 0;
+    height: calc(var(--screen-h) - var(--lift, 0) * (var(--screen-h) - var(--hero-h, var(--hero-h-home))));
+    border-radius: 0 0 calc(var(--lift, 0) * 40px) calc(var(--lift, 0) * 40px);
+    overflow: hidden;
+    background: var(--ft-hero-gradient);
+}
+
+/* ---------------- 流程图（第二行左侧面板） ---------------- */
+.flow { display: grid; grid-template-columns: auto 1fr; gap: 0 18px; align-items: center; margin: 4px 0 22px; }
+.flow__trunk { display: flex; align-items: center; gap: 12px; }
+.flow__branches { position: relative; display: grid; gap: 14px; padding-left: 26px; }
+.flow__branches::before { content: ""; position: absolute; left: 0; top: 26px; bottom: 26px; width: 14px; border: 2px solid #C9CCE0; border-right: 0; border-radius: 14px 0 0 14px; }
+.flow__branches::after { content: ""; position: absolute; left: -18px; top: 50%; width: 18px; height: 2px; background: #C9CCE0; }
+.branch { display: flex; align-items: center; gap: 10px; }
+.node { padding: 11px 15px; border-radius: 14px; background: #F3F4FA; border: 1px solid #E1E3F0; font: 700 14.5px/1.3 var(--mock-font); color: var(--sheet-ink); white-space: nowrap; }
+.node small { display: block; margin-top: 2px; font: 400 12px/1.3 var(--mock-font); color: var(--sheet-ink-3); }
+.node--brand { background: linear-gradient(150deg, #7A5CFF, #4318FF); border-color: transparent; color: #fff; }
+.node--dest { background: var(--ft-brand-soft-2); border-color: rgba(67, 24, 255, .35); color: #3a14d8; }
+.arrow { width: 22px; height: 2px; background: #C9CCE0; position: relative; flex: none; }
+.arrow::after { content: ""; position: absolute; right: -1px; top: -4px; border: 5px solid transparent; border-left: 7px solid #C9CCE0; }
+.cond { flex: none; padding: 5px 11px; border-radius: 999px; font: 700 12.5px/1 var(--mock-font); white-space: nowrap; }
+.cond--ok { background: rgba(52, 199, 89, .16); color: #0F6B2E; }
+.cond--no { background: rgba(255, 149, 0, .16); color: #8A4A00; }

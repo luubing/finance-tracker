@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- 首页「骨架」态静态还原（现状）：Pages/Index.razor 在 _isLoading = true 时的真实标记 + 真实样式表。
+     未登录用户先看到的就是这一屏，随后被 Navigation.Replace 到 /login。放在 393×852 的 iframe 里使用。 -->
+<html lang="zh-CN" style="--ft-native-safe-top: 59px; --ft-native-safe-bottom: 34px;">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=393, initial-scale=1, viewport-fit=cover">
+<title>首页骨架（静态还原）</title>
+<link rel="stylesheet" href="file:///C:/Users/lubing/.nuget/packages/masa.blazor/1.11.9/staticwebassets/css/masa-blazor.min.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/app.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/ui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    :root { --ft-font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ft-bg); }
+    /* 与 home-screen.html 相同的 Hero 段落下边距还原（Masa 的 .m-application p 规则会撑高 Hero） */
+    .ft-home .ft-hero__date { margin-bottom: 0; }
+    .ft-home .ft-hero__label { margin-bottom: 2px; }
+    .ft-home .ft-herocard__label { margin-bottom: 3px; }
+    /* 骨架的扫光是循环动画，截图时停在一个固定相位 */
+    .ft-skeleton::after { animation-play-state: paused; animation-delay: -.62s; }
+</style>
+</head>
+<body>
+<div data-app="true" class="m-application m-application--is-ltr theme--light"><div class="m-application__wrap">
+<div class="ft-tabpage ft-home" data-scroll-root aria-busy="true">
+    <header class="ft-hero" data-statusbar-bg="dark">
+        <div class="ft-hero__bar">
+            <div class="ft-hero__titles">
+                <h1 class="ft-hero__title">记账本</h1>
+                <p class="ft-hero__date">11月25日 周三</p>
+            </div>
+            <div class="ft-hero__actions">
+                <button type="button" class="ft-hero__btn ft-hero__btn--ghost" aria-label="刷新" disabled><i class="mdi mdi-refresh" aria-hidden="true"></i></button>
+                <button type="button" class="ft-hero__btn" aria-label="待确认账单"><i class="mdi mdi-bell-outline" aria-hidden="true"></i></button>
+            </div>
+        </div>
+
+        <div class="ft-hero__metric">
+            <p class="ft-hero__label">本月支出</p>
+            <span class="ft-skeleton ft-skeleton--hero-amount" aria-hidden="true"></span>
+        </div>
+
+        <div class="ft-hero__cards">
+            <div class="ft-herocard">
+                <p class="ft-herocard__label"><i class="mdi mdi-arrow-down-circle-outline" aria-hidden="true"></i><span>收入</span></p>
+                <span class="ft-skeleton ft-skeleton--hero-card" aria-hidden="true"></span>
+            </div>
+            <div class="ft-herocard">
+                <p class="ft-herocard__label"><i class="mdi mdi-scale-balance" aria-hidden="true"></i><span>结余</span></p>
+                <span class="ft-skeleton ft-skeleton--hero-card" aria-hidden="true"></span>
+            </div>
+        </div>
+    </header>
+
+    <div class="ft-tabpage__body">
+        <section class="ft-group ft-home__banner">
+            <div class="ft-group__body">
+                <div class="ft-skeleton-row" aria-hidden="true"><span class="ft-skeleton ft-skeleton--tile"></span><span class="ft-skeleton-row__main"><span class="ft-skeleton ft-skeleton--title"></span><span class="ft-skeleton ft-skeleton--sub"></span></span></div>
+                <div class="ft-skeleton-row" aria-hidden="true"><span class="ft-skeleton ft-skeleton--tile"></span><span class="ft-skeleton-row__main"><span class="ft-skeleton ft-skeleton--title"></span><span class="ft-skeleton ft-skeleton--sub"></span></span></div>
+                <div class="ft-skeleton-row" aria-hidden="true"><span class="ft-skeleton ft-skeleton--tile"></span><span class="ft-skeleton-row__main"><span class="ft-skeleton ft-skeleton--title"></span><span class="ft-skeleton ft-skeleton--sub"></span></span></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- Tab 栏（GlassTabBar.razor 的标记） -->
+<div class="ft-tabwrap" data-active-tab="home">
+    <nav class="ft-tabbar ft-glass" role="tablist" aria-label="主导航" style="--ft-tab-x: 0">
+        <span class="ft-tabbar__thumb" aria-hidden="true"></span>
+        <button type="button" role="tab" class="ft-tab ft-tab--on" aria-selected="true">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-home-variant-outline ft-tab__o"></i><i class="mdi mdi-home-variant ft-tab__f"></i></span>
+            <span class="ft-tab__label">首页</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-text-box-multiple-outline ft-tab__o"></i><i class="mdi mdi-text-box-multiple ft-tab__f"></i></span>
+            <span class="ft-tab__label">账单</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-chart-pie ft-tab__o"></i><i class="mdi mdi-chart-pie ft-tab__f"></i></span>
+            <span class="ft-tab__label">统计</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-account-circle-outline ft-tab__o"></i><i class="mdi mdi-account-circle ft-tab__f"></i></span>
+            <span class="ft-tab__label">我的</span>
+        </button>
+    </nav>
+    <button type="button" class="ft-capsule" aria-label="展开导航，当前：首页" inert><i class="mdi mdi-home-variant" aria-hidden="true"></i><span>首页</span></button>
+    <button type="button" class="ft-fab" aria-label="记一笔"><i class="mdi mdi-plus" aria-hidden="true"></i></button>
+</div>
+</div></div>
+</body>
+</html>

@@ -1,0 +1,167 @@
+﻿<!doctype html>
+<!-- 首页静态还原：用应用真实的样式表（tokens / app / ui）+ Pages/Index.razor 与各 Ui 组件的真实标记，数据取自设计稿 screens/01-home。
+     放在 393×852 的 iframe 里使用，这样 100vh、position:fixed（Tab 栏）的行为与真机一致。仅用于冷启动设计稿，不进产品代码。 -->
+<html lang="zh-CN" style="--ft-native-safe-top: 59px; --ft-native-safe-bottom: 34px;">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=393, initial-scale=1, viewport-fit=cover">
+<title>首页（静态还原）</title>
+<link rel="stylesheet" href="file:///C:/Users/lubing/.nuget/packages/masa.blazor/1.11.9/staticwebassets/css/masa-blazor.min.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/app.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/ui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    /* 设计稿用 Inter + 思源黑体近似 SF Pro + 苹方，与其它几帧一致 */
+    :root { --ft-font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ft-bg); }
+
+    /* 画的是「设计意图」：Hero 里三处 <p> 的下边距按 ui.css 里写的值（2 / 0 / 3px）。
+       Masa 的 .m-application p { margin-bottom: 16px }（0,1,1）会盖过这些单类名选择器（0,1,0），把 Hero 与小卡撑高——
+       登录页已经用 p.类名 规避了，首页 Hero 还没有（静态还原时发现，未在真机验证）。这里用 (0,2,0) 把它们还原。 */
+    .ft-home .ft-hero__date { margin-bottom: 0; }
+    .ft-home .ft-hero__label { margin-bottom: 2px; }
+    .ft-home .ft-herocard__label { margin-bottom: 3px; }
+</style>
+</head>
+<body>
+<!-- Masa 应用外壳：真实应用里所有页面都在它里面（.m-application p { margin-bottom: 16px } 等规则会影响布局） -->
+<div data-app="true" class="m-application m-application--is-ltr theme--light"><div class="m-application__wrap">
+<div class="ft-tabpage ft-home" data-scroll-root>
+    <header class="ft-hero" data-statusbar-bg="dark">
+        <div class="ft-hero__bar">
+            <div class="ft-hero__titles">
+                <h1 class="ft-hero__title">记账本</h1>
+                <p class="ft-hero__date">11月25日 周三</p>
+            </div>
+            <div class="ft-hero__actions">
+                <button type="button" class="ft-hero__btn ft-hero__btn--ghost" aria-label="刷新"><i class="mdi mdi-refresh" aria-hidden="true"></i></button>
+                <button type="button" class="ft-hero__btn" aria-label="待确认账单，3 笔">
+                    <i class="mdi mdi-bell-outline" aria-hidden="true"></i>
+                    <span class="ft-hero__badge" aria-hidden="true">3</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="ft-hero__metric">
+            <p class="ft-hero__label">本月支出</p>
+            <span class="ft-amount ft-amount--xl" role="img" aria-label="¥8,713.50"><span class="ft-amount__sign"></span><span class="ft-amount__cur">¥</span><span class="ft-amount__int">8,713</span><span class="ft-amount__dec">.50</span></span>
+        </div>
+
+        <div class="ft-hero__cards">
+            <div class="ft-herocard">
+                <p class="ft-herocard__label"><i class="mdi mdi-arrow-down-circle-outline" aria-hidden="true"></i><span>收入</span></p>
+                <span class="ft-amount ft-amount--lg" role="img" aria-label="¥12,000.00"><span class="ft-amount__sign"></span><span class="ft-amount__cur">¥</span><span class="ft-amount__int">12,000</span><span class="ft-amount__dec">.00</span></span>
+            </div>
+            <div class="ft-herocard">
+                <p class="ft-herocard__label"><i class="mdi mdi-scale-balance" aria-hidden="true"></i><span>结余</span></p>
+                <span class="ft-amount ft-amount--lg" role="img" aria-label="¥3,286.50"><span class="ft-amount__sign"></span><span class="ft-amount__cur">¥</span><span class="ft-amount__int">3,286</span><span class="ft-amount__dec">.50</span></span>
+            </div>
+        </div>
+    </header>
+
+    <div class="ft-tabpage__body">
+        <!-- 待确认横幅 -->
+        <section class="ft-group ft-home__banner">
+            <div class="ft-group__body">
+                <button type="button" class="ft-cell ft-cell--click ft-cell--two ft-cell--lead">
+                    <span class="ft-tile ft-tile--red" aria-hidden="true"><i class="mdi mdi-bell-check"></i></span>
+                    <span class="ft-cell__main">
+                        <span class="ft-cell__title">3 笔支付等待确认</span>
+                        <span class="ft-cell__subtitle">微信支付 · 支付宝 · 银行短信</span>
+                    </span>
+                    <span class="ft-cell__trail"><i class="mdi mdi-chevron-right ft-cell__chevron" aria-hidden="true"></i></span>
+                </button>
+            </div>
+        </section>
+
+        <!-- 本月预算 -->
+        <div class="ft-section">
+            <h2 class="ft-section__title">本月预算</h2>
+            <button type="button" class="ft-section__action" aria-label="管理预算">管理<i class="mdi mdi-chevron-right" aria-hidden="true"></i></button>
+        </div>
+        <section class="ft-group">
+            <div class="ft-group__body">
+                <div class="ft-budgetrow" data-state="warning" data-percent="87">
+                    <span class="ft-tile ft-tile--soft ft-tile--purple" aria-hidden="true"><i class="mdi mdi-wallet"></i></span>
+                    <div class="ft-budgetrow__main">
+                        <div class="ft-budgetrow__head">
+                            <span class="ft-budgetrow__title"><span class="ft-budgetrow__name">总预算</span><span class="ft-budgetrow__tag">全部账本</span></span>
+                            <span class="ft-budgetrow__remain">剩余 ¥1,286.50</span>
+                        </div>
+                        <div class="ft-progress ft-progress--warning" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="87" data-tone="warning"><span class="ft-progress__fill" style="width: 87%"></span></div>
+                    </div>
+                </div>
+                <div class="ft-budgetrow" data-state="over" data-percent="120">
+                    <span class="ft-tile ft-tile--soft ft-tile--orange" aria-hidden="true"><i class="mdi mdi-food"></i></span>
+                    <div class="ft-budgetrow__main">
+                        <div class="ft-budgetrow__head">
+                            <span class="ft-budgetrow__title"><span class="ft-budgetrow__name">餐饮美食</span></span>
+                            <span class="ft-budgetrow__remain">超支 ¥360.00</span>
+                        </div>
+                        <div class="ft-progress ft-progress--danger" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" data-tone="danger"><span class="ft-progress__fill" style="width: 100%"></span></div>
+                    </div>
+                </div>
+                <div class="ft-budgetrow" data-state="normal" data-percent="62">
+                    <span class="ft-tile ft-tile--soft ft-tile--blue" aria-hidden="true"><i class="mdi mdi-car"></i></span>
+                    <div class="ft-budgetrow__main">
+                        <div class="ft-budgetrow__head">
+                            <span class="ft-budgetrow__title"><span class="ft-budgetrow__name">交通出行</span></span>
+                            <span class="ft-budgetrow__remain">剩余 ¥314.00</span>
+                        </div>
+                        <div class="ft-progress ft-progress--brand" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="62" data-tone="brand"><span class="ft-progress__fill" style="width: 62%"></span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 最近账单 -->
+        <div class="ft-section">
+            <h2 class="ft-section__title">最近账单</h2>
+            <button type="button" class="ft-section__action" aria-label="查看全部账单">全部<i class="mdi mdi-chevron-right" aria-hidden="true"></i></button>
+        </div>
+        <section class="ft-group">
+            <div class="ft-group__body">
+                <button type="button" class="ft-cell ft-cell--click ft-cell--two ft-cell--lead ft-billrow">
+                    <span class="ft-tile ft-tile--soft ft-tile--blue" aria-hidden="true"><i class="mdi mdi-car"></i></span>
+                    <span class="ft-cell__main"><span class="ft-cell__title">交通出行 · 地铁</span><span class="ft-cell__subtitle">支付宝 · 日常</span></span>
+                    <span class="ft-cell__trail"><span class="ft-billrow__side"><span class="ft-billrow__amount">-¥6.00</span><span class="ft-billrow__time">08:15</span></span></span>
+                </button>
+                <button type="button" class="ft-cell ft-cell--click ft-cell--two ft-cell--lead ft-billrow">
+                    <span class="ft-tile ft-tile--soft ft-tile--orange" aria-hidden="true"><i class="mdi mdi-food"></i></span>
+                    <span class="ft-cell__main"><span class="ft-cell__title">餐饮美食 · 午饭</span><span class="ft-cell__subtitle">微信支付 · 日常</span></span>
+                    <span class="ft-cell__trail"><span class="ft-billrow__side"><span class="ft-billrow__amount">-¥35.00</span><span class="ft-billrow__time">12:20</span></span></span>
+                </button>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- Tab 栏（GlassTabBar.razor 的标记）：position:fixed，随 iframe 视口定位 -->
+<div class="ft-tabwrap" data-active-tab="home">
+    <nav class="ft-tabbar ft-glass" role="tablist" aria-label="主导航" style="--ft-tab-x: 0">
+        <span class="ft-tabbar__thumb" aria-hidden="true"></span>
+        <button type="button" role="tab" class="ft-tab ft-tab--on" aria-selected="true">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-home-variant-outline ft-tab__o"></i><i class="mdi mdi-home-variant ft-tab__f"></i></span>
+            <span class="ft-tab__label">首页</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-text-box-multiple-outline ft-tab__o"></i><i class="mdi mdi-text-box-multiple ft-tab__f"></i></span>
+            <span class="ft-tab__label">账单</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-chart-pie ft-tab__o"></i><i class="mdi mdi-chart-pie ft-tab__f"></i></span>
+            <span class="ft-tab__label">统计</span>
+        </button>
+        <button type="button" role="tab" class="ft-tab" aria-selected="false">
+            <span class="ft-tab__glyph" aria-hidden="true"><i class="mdi mdi-account-circle-outline ft-tab__o"></i><i class="mdi mdi-account-circle ft-tab__f"></i></span>
+            <span class="ft-tab__label">我的</span>
+        </button>
+    </nav>
+    <button type="button" class="ft-capsule" aria-label="展开导航，当前：首页" inert><i class="mdi mdi-home-variant" aria-hidden="true"></i><span>首页</span></button>
+    <button type="button" class="ft-fab" aria-label="记一笔"><i class="mdi mdi-plus" aria-hidden="true"></i></button>
+</div>
+</div></div>
+</body>
+</html>

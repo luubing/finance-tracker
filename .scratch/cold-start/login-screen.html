@@ -1,0 +1,76 @@
+<!doctype html>
+<!-- 登录页静态还原：应用真实的样式表 + Pages/LoginPage.razor 的真实标记与文案（LoginPresentation）。
+     放在 393×852 的 iframe 里使用。URL 参数用来在真实 DOM 上摆出「交接中间态」（只改 transform / opacity，不改布局）：
+       hand   0 = Logo 组在加载页的位置（方块中心 y = startY），1 = 登录页位置
+       panel  0 = 白色面板在屏幕外，1 = 到位
+       orbs   光斑不透明度     pc  面板内容不透明度     startY  加载页里方块中心的 y（默认 426 = 屏幕正中） -->
+<html lang="zh-CN" style="--ft-native-safe-top: 59px; --ft-native-safe-bottom: 34px;">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=393, initial-scale=1, viewport-fit=cover">
+<title>登录页（静态还原）</title>
+<link rel="stylesheet" href="file:///C:/Users/lubing/.nuget/packages/masa.blazor/1.11.9/staticwebassets/css/masa-blazor.min.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/app.css">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/ui.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+    :root { --ft-font: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+    /* iframe 叠在别的画面上时（交接中间态）整页透明；独立使用时渐变本来就铺满 */
+</style>
+</head>
+<body>
+<div data-app="true" class="m-application m-application--is-ltr theme--light" style="background: transparent"><div class="m-application__wrap">
+<div class="ft-login" data-statusbar-bg="dark" data-testid="login-page">
+    <div class="ft-login__hero">
+        <span class="ft-login__orb ft-login__orb--a" aria-hidden="true"></span>
+        <span class="ft-login__orb ft-login__orb--b" aria-hidden="true"></span>
+        <span class="ft-login__orb ft-login__orb--c" aria-hidden="true"></span>
+        <div class="ft-login__brand">
+            <span class="ft-login__logo ft-glass-dark" aria-hidden="true"><i class="mdi mdi-wallet-outline"></i></span>
+            <h1 class="ft-login__name">记账本</h1>
+            <p class="ft-login__slogan">简单、安心的个人记账</p>
+        </div>
+    </div>
+
+    <form class="ft-login__panel" novalidate>
+        <h2 class="ft-login__title">手机号登录</h2>
+        <p class="ft-login__hint">无需验证码；首次使用将自动注册账号</p>
+
+        <label class="ft-login__field">
+            <span class="ft-login__country" aria-hidden="true">+86</span>
+            <input class="ft-login__input" type="tel" inputmode="numeric" placeholder="请输入手机号" aria-label="手机号">
+        </label>
+
+        <p class="ft-login__error" role="alert"></p>
+
+        <button type="submit" class="ft-btn ft-btn--brand ft-btn--lg ft-btn--block"><span class="ft-btn__label">登录 / 注册</span></button>
+    </form>
+</div>
+</div></div>
+
+<script>
+    // 交接中间态：只改 transform / opacity，布局保持最终态
+    (function () {
+        const q = new URLSearchParams(location.search);
+        const num = (k, d) => (q.has(k) ? parseFloat(q.get(k)) : d);
+        const hand = num('hand', 1), panel = num('panel', 1), orbs = num('orbs', 1), pc = num('pc', 1), startY = num('startY', 426);
+        const apply = () => {
+            const logo = document.querySelector('.ft-login__logo').getBoundingClientRect();
+            const logoCenterY = logo.top + logo.height / 2;
+            document.querySelector('.ft-login__brand').style.transform = 'translateY(' + ((1 - hand) * (startY - logoCenterY)).toFixed(2) + 'px)';
+            const p = document.querySelector('.ft-login__panel');
+            const panelTop = p.getBoundingClientRect().top;
+            p.style.transform = 'translateY(' + ((1 - panel) * (window.innerHeight - panelTop)).toFixed(2) + 'px)';
+            [...p.children].forEach((el) => { el.style.opacity = pc; });
+            document.querySelectorAll('.ft-login__orb').forEach((el) => { el.style.opacity = orbs; });
+            document.documentElement.setAttribute('data-ready', 'true');
+        };
+        // 不用 requestAnimationFrame：嵌在设计稿里、滚出视口的跨源 iframe 会被节流，rAF 永远不触发
+        (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => setTimeout(apply, 0));
+    })();
+</script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>01 · 冷启动：同一张画布的接力</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="shared.css">
+<style>
+    .ghost { position: absolute; z-index: 4; width: 40px; height: 40px; border-radius: 50%; border: 2px dashed rgba(255, 255, 255, .55); }
+
+    /* 第二行左侧：三块说明叠放 */
+    .stack { display: grid; gap: 28px; grid-column: 1 / span 2; align-content: start; }
+
+    /* 编排时间线 */
+    .tl { margin: 4px 0 18px; }
+    .tl h5 { margin: 0 0 10px; font: 800 15px/1.3 var(--mock-font); color: var(--sheet-ink); display: flex; align-items: baseline; gap: 10px; }
+    .tl h5 small { font: 400 12.5px/1.3 var(--mock-font); color: var(--sheet-ink-3); }
+    .tl__axis { position: relative; margin-left: 156px; width: 680px; height: 18px; border-bottom: 1px solid #D9DBEA; }
+    .tl__axis span { position: absolute; top: 0; transform: translateX(-50%); font: 500 11.5px/14px var(--mock-font); color: var(--sheet-ink-3); }
+    .tl__axis span::after { content: ""; position: absolute; left: 50%; top: 15px; width: 1px; height: 4px; background: #D9DBEA; }
+    .tl__lane { display: flex; align-items: center; height: 34px; }
+    .tl__label { width: 156px; font: 500 13.5px/1.2 var(--mock-font); color: #23253F; }
+    .tl__track { position: relative; width: 680px; height: 34px; background: repeating-linear-gradient(90deg, transparent 0 169px, #EEF0F8 169px 170px); }
+    .bar { position: absolute; top: 6px; height: 22px; border-radius: 11px; padding: 0 10px; display: flex; align-items: center; font: 600 11.5px/1 var(--mock-font); font-style: normal; color: #fff; white-space: nowrap; background: linear-gradient(90deg, #7A5CFF, #4318FF); box-shadow: 0 3px 8px rgba(67, 24, 255, .25); }
+    .bar--cond { background: transparent; color: var(--ft-brand); border: 1.5px dashed rgba(67, 24, 255, .55); box-shadow: none; padding: 0 9px; }
+    .bar--light { background: linear-gradient(90deg, #A894FF, #7A5CFF); }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+
+    <header class="sheet__head">
+        <div>
+            <h1 class="sheet__title">01 · 冷启动：同一张画布的接力</h1>
+            <p class="sheet__sub">系统启动画面 → 品牌加载页 → 首页 / 登录页。全程同一底色，内容一层层长出来；已登录路径里 Logo 的位置始终不动。取代现在的「紫色 .NET 图 → 白屏小字 → 页面一闪」。</p>
+        </div>
+        <div class="tags"><span class="tag">iOS 26 · Liquid Glass</span><span class="tag">v1 草案</span></div>
+    </header>
+
+    <!-- ================= 第一行：已登录（最常见路径） ================= -->
+    <h2 class="section">已登录用户 <small>每天打开记账的路径：四帧接力</small></h2>
+
+    <div class="row">
+        <!-- 1 系统启动画面 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="boot-solid"></div>
+                    <div class="boot-group"><div class="tile tile--flat" data-glyph></div></div>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:322px;top:150px">1</span>
+                <span class="badge" style="left:252px;top:362px">2</span>
+                <span class="badge" style="left:322px;top:62px">3</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 1 步 <i class="native">原生层</i></div>
+                <h3>系统启动画面</h3>
+                <p>由系统在进程启动的瞬间显示——我们只能给一个底色和一张静态图。</p>
+                <ol>
+                    <li data-n="1">底色是新增令牌 <code>--ft-splash-bg</code>（#5C2EF7）：取 Hero 渐变在 Logo 横带的实测均值，下一帧渐变淡入时 Logo 周围不跳色</li>
+                    <li data-n="2">方块 Logo 用预合成的实心色 <code>#7E3EFF</code>（= 加载页玻璃方块的实测色），不用半透明与模糊，下一帧才不会变色；只放图形、不放文字（Android 12+ 会把图标裁进中心圆形安全区）</li>
+                    <li data-n="3">状态栏图标从第一帧起就是白色</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 2 品牌加载页 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="boot-solid"></div>
+                    <div class="boot-gradient"></div>
+                    <div class="boot-group">
+                        <div class="tile" data-glyph></div>
+                        <div class="boot-title">记账本</div>
+                        <div class="boot-sub">简单、安心的个人记账</div>
+                    </div>
+                    <div class="ghost" style="left:176.5px;top:694px"></div>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:322px;top:196px">1</span>
+                <span class="badge" style="left:276px;top:490px">2</span>
+                <span class="badge" style="left:244px;top:672px">3</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 2 步 <i class="web">Web 层</i></div>
+                <h3>品牌加载页</h3>
+                <p><code>index.html</code> 内联，不依赖 Blazor。Blazor 启动期间一直盖在最上面，Logo 一动不动。</p>
+                <ol>
+                    <li data-n="1">Hero 渐变与光效 400 ms 淡入（<code>--ft-hero-gradient</code>），不是瞬间换底</li>
+                    <li data-n="2">「记账本」与标语晚 80 ms 上浮淡入；字号与间距同登录页的 Logo 组，交接时才对得上</li>
+                    <li data-n="3">0.6 s 内就绪的启动不出现转圈；更慢才在这里出现（见 02 · 状态）</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 3a 交接 · 已登录 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen" style="--lift:.43; --logo:.3">
+                    <iframe class="fill" src="home-screen.html" title="首页（真实样式还原）"></iframe>
+                    <div class="curtain">
+                        <div class="boot-group">
+                            <div class="tile" data-glyph></div>
+                            <div class="boot-title">记账本</div>
+                            <div class="boot-sub">简单、安心的个人记账</div>
+                        </div>
+                    </div>
+                    <div data-chrome="light" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:345px;top:596px">1</span>
+                <span class="badge" style="left:252px;top:362px">2</span>
+                <span class="badge" style="left:195px;top:707px">3</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 3 步 <i class="web">Web 层</i> · 交接</div>
+                <h3>幕布收拢成首页 Hero</h3>
+                <p>首屏就绪（首页已在幕布下面渲染完）后触发，约 0.4 s。</p>
+                <ol>
+                    <li data-n="1">幕布从底边向上收拢到 Hero 的实际高度（运行时量取），圆角同步长到 40（<code>--ft-radius-hero</code>）· 400 ms · <code>--ft-ease-sheet</code>。幕布自带渐变，缩到终点时与 Hero 完全重合</li>
+                    <li data-n="2">Logo 与文字 180 ms 淡出（<code>--ft-dur-fade</code>）</li>
+                    <li data-n="3">下方内容是被「露出来」的，不是再加载一遍；Tab 栏本来就在</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 4a 首页 -->
+        <figure class="frame" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <iframe class="fill" src="home-screen.html" title="首页（真实样式还原）"></iframe>
+                    <div data-chrome="light" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:332px;top:196px">1</span>
+                <span class="badge" style="left:195px;top:707px">2</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 4 步</div>
+                <h3>首页</h3>
+                <p>幕布与 Hero 合而为一，全程没有换过底色，状态栏图标一直是白色。</p>
+                <ol>
+                    <li data-n="1">Hero 文字随幕布淡出自然显现；金额不做数字滚动（沿用「数据出现不做动画」）</li>
+                    <li data-n="2">Tab 栏与「记一笔」圆钮在幕布收拢前就已就位，没有二次出现</li>
+                </ol>
+            </figcaption>
+        </figure>
+    </div>
+
+    <!-- ================= 第二行：首次安装 / 未登录 ================= -->
+    <h2 class="section section--gap">首次安装 / 未登录 <small>从加载页分叉：登录页的背景本来就是整屏渐变，渐变层原地交还；Logo 组上浮、白色面板升起</small></h2>
+
+    <div class="row">
+        <div class="stack">
+            <!-- 去向判定 -->
+            <section class="panel">
+                <h3>怎么决定去哪</h3>
+                <p>加载页不关心去哪，只负责「盖住」直到最终页面就绪；去向由首屏自己说了算。</p>
+                <div class="flow">
+                    <div class="flow__trunk">
+                        <div class="node node--brand">品牌加载页</div>
+                        <div class="arrow"></div>
+                        <div class="node">读取登录状态<small>本地，无需联网</small></div>
+                    </div>
+                    <div class="flow__branches">
+                        <div class="branch"><span class="cond cond--ok">已登录</span><div class="arrow"></div><div class="node">幕布收拢</div><div class="arrow"></div><div class="node node--dest">首页</div></div>
+                        <div class="branch"><span class="cond cond--no">未登录 / 首次安装</span><div class="arrow"></div><div class="node">Logo 上浮 + 面板升起</div><div class="arrow"></div><div class="node node--dest">登录页</div></div>
+                    </div>
+                </div>
+                <ul>
+                    <li><b>现状的那一闪：</b>首页总是先渲染、再判断是否登录，未登录用户会先看到首页骨架，再被 <code>Replace</code> 到 <code>/login</code>。加载页一直盖到最终页面就绪，这一闪发生在它下面，用户看不到。</li>
+                    <li><b>交接时机：</b>首屏就绪，或到 1.5 s 上限，先到者为准（建议值）。到上限仍未就绪就带着骨架交出，不让人为了看动画多等。</li>
+                </ul>
+            </section>
+
+            <!-- 编排时间线 -->
+            <section class="panel">
+                <h3>动效编排</h3>
+                <p>只有两种动效语言——幕布（高度 + 圆角）与 Logo 位移。时长与缓动全部取自现有令牌：400 ms = <code>--ft-dur-sheet</code>，180 ms = <code>--ft-dur-page</code> / <code>--ft-dur-fade</code>。</p>
+
+                <div class="tl">
+                    <h5>加载阶段 <small>从加载页首帧起算</small></h5>
+                    <div class="tl__axis"><span style="left:0">0</span><span style="left:170px">200</span><span style="left:340px">400</span><span style="left:510px">600</span><span style="left:680px">800 ms</span></div>
+                    <div class="tl__lane"><span class="tl__label">渐变与光效淡入</span><div class="tl__track"><i class="bar" style="left:0;width:340px">400 ms · ease-out</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">标题与标语上浮</span><div class="tl__track"><i class="bar bar--light" style="left:68px;width:153px">180 ms</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">转圈（仅慢启动）</span><div class="tl__track"><i class="bar bar--cond" style="left:510px;width:153px">≥ 600 ms 才出现</i></div></div>
+                </div>
+
+                <div class="tl">
+                    <h5>交接阶段 <small>从「首屏就绪」起算 · 已登录</small></h5>
+                    <div class="tl__axis"><span style="left:0">0</span><span style="left:170px">200</span><span style="left:340px">400</span><span style="left:510px">600 ms</span></div>
+                    <div class="tl__lane"><span class="tl__label">幕布收拢</span><div class="tl__track"><i class="bar" style="left:0;width:340px">400 ms · ease-sheet</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">Logo 与文字淡出</span><div class="tl__track"><i class="bar bar--light" style="left:0;width:153px">180 ms</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">幕布交还给 Hero</span><div class="tl__track"><i class="bar bar--light" style="left:255px;width:153px">180 ms</i></div></div>
+                </div>
+
+                <div class="tl" style="margin-bottom:0">
+                    <h5>交接阶段 <small>未登录 / 首次安装</small></h5>
+                    <div class="tl__axis"><span style="left:0">0</span><span style="left:170px">200</span><span style="left:340px">400</span><span style="left:510px">600 ms</span></div>
+                    <div class="tl__lane"><span class="tl__label">Logo 组上移</span><div class="tl__track"><i class="bar" style="left:0;width:340px">400 ms · ease-sheet</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">白色面板升起</span><div class="tl__track"><i class="bar" style="left:0;width:340px">400 ms · ease-sheet</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">面板内容淡入</span><div class="tl__track"><i class="bar bar--light" style="left:187px;width:153px">180 ms</i></div></div>
+                    <div class="tl__lane"><span class="tl__label">光斑淡入</span><div class="tl__track"><i class="bar bar--light" style="left:0;width:340px">400 ms</i></div></div>
+                </div>
+            </section>
+
+            <!-- 什么时候会看到 -->
+            <section class="panel">
+                <h3>什么时候会看到</h3>
+                <p>只有「进程重新创建」才走完整接力，普通的切回前台不打扰用户。</p>
+                <ul>
+                    <li><b>冷启动</b>（划掉后台、或被系统回收后再打开）：系统启动画面 → 加载页 → 首页，即上面第一行。</li>
+                    <li><b>热启动</b>（从后台切回）：不显示——应用还在内存里，直接回到离开时的页面。</li>
+                    <li><b>首次安装 / 已退出登录</b>：同样的接力，只是在第三步分叉到登录页。</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- 3b 交接 · 未登录 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <iframe class="fill" src="login-screen.html?hand=.5&amp;panel=.5&amp;orbs=.5&amp;pc=.3" title="登录页（真实样式还原，交接中间态）"></iframe>
+                    <div data-chrome="light" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:252px;top:295px">1</span>
+                <span class="badge" style="left:345px;top:668px">2</span>
+                <span class="badge" style="left:115px;top:155px">3</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 3 步 <i class="web">Web 层</i> · 交接</div>
+                <h3>Logo 上浮，面板升起</h3>
+                <p>登录页的背景本来就是整屏渐变、与加载页同一个令牌——渐变层原地交还，不需要收拢。</p>
+                <ol>
+                    <li data-n="1">Logo 组整体上移到登录页 Logo 的位置（图中 183 px，运行时量取）· 400 ms · <code>--ft-ease-sheet</code></li>
+                    <li data-n="2">白色面板像 Sheet 一样升起（<code>--ft-dur-sheet</code>），输入区随之淡入</li>
+                    <li data-n="3">光斑淡入：只属于登录页，所以加载页不画它们</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 4b 登录页 -->
+        <figure class="frame" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <iframe class="fill" src="login-screen.html" title="登录页（真实样式还原）"></iframe>
+                    <div data-chrome="light" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:254px;top:190px">1</span>
+                <span class="badge" style="left:325px;top:555px">2</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">第 4 步</div>
+                <h3>登录页</h3>
+                <p>就是现在的 <code>LoginPage</code>（22 号 ticket 交付）；冷启动只约定 Logo 组的落点。</p>
+                <ol>
+                    <li data-n="1">加载页与登录页的 Logo 组尺寸、间距完全一致（方块 96 / 圆角 30 / 标题 38），上浮落点严丝合缝</li>
+                    <li data-n="2">已登录用户永远看不到这一页；首次安装只在第一次看到</li>
+                </ol>
+            </figcaption>
+        </figure>
+    </div>
+
+    <!-- ================= 原则 ================= -->
+    <div class="cards">
+        <div class="card"><div class="card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div><div><h4>同一张画布</h4><p>启动全程同一底色，每一步只多长出一层内容，而不是换一张图。</p></div></div>
+        <div class="card"><div class="card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div><div><h4>只做状态变化</h4><p>渐变淡入、幕布收拢、面板升起；数据出现不做动画（沿用设计规范 06 的原则）。</p></div></div>
+        <div class="card"><div class="card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></div><div><h4>全部来自令牌</h4><p>只新增 1 个令牌 <code>--ft-splash-bg</code>；渐变、玻璃、字号、时长、缓动都沿用 <code>tokens.css</code>。</p></div></div>
+        <div class="card"><div class="card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/></svg></div><div><h4>可降级</h4><p>减弱动态效果：只做 100 ms 淡入；降低透明度：Logo 方块改为实色。</p></div></div>
+    </div>
+
+    <p class="foot">效果图使用 Inter + 思源黑体代替 SF Pro + 苹方。首页、登录页两个终点画面是用项目真实的 <code>tokens.css / app.css / ui.css</code> 与组件标记静态还原的（示例数据取自设计稿），不是截图；图中毫秒数是动效的设计时长，不是实测启动耗时。</p>
+</div>
+<script src="shared.js"></script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>02 · 冷启动：现状与状态</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="shared.css">
+<style>
+    .span2 { grid-column: span 2; display: grid; gap: 28px; align-content: start; }
+
+    /* 现状：原样复现 index.html 里那一行字（浏览器默认的 h2 / p 样式 + Arial） */
+    .legacy-white { position: absolute; inset: 0; background: #fff; display: flex; justify-content: center; align-items: center; font-family: Arial, "Noto Sans SC", sans-serif; color: #000; }
+    .legacy-white > div { text-align: center; }
+    .legacy-white h2 { margin: 19.92px 0; font-size: 24px; line-height: normal; font-weight: 700; }
+    .legacy-white p { margin: 16px 0; font-size: 16px; line-height: normal; font-weight: 400; }
+    .legacy-splash { position: absolute; inset: 0; background: #512BD4; }
+    .legacy-splash img { position: absolute; left: 50%; top: 426px; width: 128px; height: 128px; margin: -64px 0 0 -64px; }
+
+    /* 规格表 */
+    .spec { width: 100%; border-collapse: collapse; }
+    .spec th { padding: 0 14px 10px 0; text-align: left; font: 700 12.5px/1 var(--mock-font); letter-spacing: .4px; color: var(--sheet-ink-3); }
+    .spec td { padding: 12px 14px 12px 0; border-top: 1px solid #ECEEF7; vertical-align: top; font: 500 14.5px/1.6 var(--mock-font); color: var(--sheet-ink-2); }
+    .spec td:first-child { width: 150px; font-weight: 700; color: var(--sheet-ink); }
+    .spec td:nth-child(2) { color: #23253F; }
+    .spec--tokens td:first-child { width: 262px; }
+    .spec--tokens code { white-space: nowrap; }
+    .new { margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 59, 48, .12); color: #C0261C; font: 700 11px/1.5 var(--mock-font); vertical-align: 1px; }
+    .swatch { display: inline-block; width: 13px; height: 13px; border-radius: 4px; margin-right: 6px; vertical-align: -2px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+
+    /* 编号清单（落地影响 / 待定事项） */
+    .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
+    .steps li { position: relative; padding-left: 38px; font: 500 15px/1.65 var(--mock-font); color: #23253F; counter-increment: s; }
+    .steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%; background: var(--ft-brand-soft-2); color: var(--ft-brand); font: 800 13px/24px var(--mock-font); text-align: center; }
+    .steps b { font-weight: 800; color: var(--sheet-ink); }
+    .steps small { display: block; margin-top: 2px; font: 400 13.5px/1.6 var(--mock-font); color: var(--sheet-ink-3); }
+    .ask li::before { background: #FFF1D6; color: #8A4A00; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+
+    <header class="sheet__head">
+        <div>
+            <h1 class="sheet__title">02 · 冷启动：现状与状态</h1>
+            <p class="sheet__sub">上面是现在的启动过程和它的断点；下面是加载页随等待时间变化的几种状态，以及降级与无障碍。</p>
+        </div>
+        <div class="tags"><span class="tag">iOS 26 · Liquid Glass</span><span class="tag">v1 草案</span></div>
+    </header>
+
+    <!-- ================= 现状 ================= -->
+    <h2 class="section">现状 <small>每一步都换一张脸：紫色 .NET → 白屏黑字 → 骨架一闪 → 登录页</small></h2>
+
+    <div class="row">
+        <!-- 现状 1：系统启动画面 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="legacy-splash"><img src="../../src/FinanceTracker.App/Resources/Splash/splash.svg" alt=""></div>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:240px;top:380px">1</span>
+                <span class="badge" style="left:300px;top:190px">2</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">现状 · 1 <i class="native">原生层</i></div>
+                <h3>系统启动画面</h3>
+                <p>MAUI 模板默认的 <code>splash.svg</code>：白色「.NET」字样压在 <code>#512BD4</code> 上。</p>
+                <ol>
+                    <li data-n="1">「.NET」是模板自带的，和记账本没有关系</li>
+                    <li data-n="2"><code>#512BD4</code> 既不是应用图标的蓝，也不是界面的品牌色 <code>#4318FF</code></li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 现状 2：白屏 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="legacy-white"><div><h2>正在加载...</h2><p>请稍候</p></div></div>
+                    <div data-chrome="dark" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:276px;top:392px">1</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">现状 · 2 <i class="web">Web 层</i></div>
+                <h3>WebView 白屏</h3>
+                <p><code>MainPage</code> 底色是白色；<code>index.html</code> 里只有一行 Arial 文字，没有 Logo。而且 <code>&lt;head&gt;</code> 里的 MDI 图标字体与 ECharts 是 CDN 同步资源，会阻塞首次绘制——慢网 / 离线时这行字也要等。</p>
+                <ol>
+                    <li data-n="1">紫 → 白，整屏换一次底色；状态栏图标也要跟着翻</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 现状 3：骨架一闪 -->
+        <figure class="frame" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <iframe class="fill" src="home-skeleton.html" title="首页骨架（真实样式还原）"></iframe>
+                    <div data-chrome="light" data-hi="dark"></div>
+                </div>
+                <span class="badge" style="left:262px;top:186px">1</span>
+                <span class="badge" style="left:335px;top:420px">2</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">现状 · 3 <i class="web">Web 层</i> · 仅未登录</div>
+                <h3>首页骨架一闪</h3>
+                <p><code>Index.razor</code> 先渲染骨架、再读登录状态；未登录用户随即被 <code>Replace</code> 到 <code>/login</code>。</p>
+                <ol>
+                    <li data-n="1">未登录用户的第一屏是一个不属于他的首页</li>
+                    <li data-n="2">已登录用户读数据时也会看到这个骨架——这一段是正常的，保留</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 断点清单 -->
+        <section class="panel" style="align-self:start">
+            <h3>四个断点</h3>
+            <p>冷启动要解决的，不是「不好看」，而是前后不连贯。</p>
+            <ul>
+                <li><b>四张脸：</b>应用图标是蓝色笔记本，启动图是紫色 .NET，白屏是黑字，界面是品牌紫渐变。</li>
+                <li><b>白屏不确定：</b>首次绘制要等 CDN 资源；没有 Logo，也没有转圈。</li>
+                <li><b>去向判定太晚：</b>先渲染首页再判断登录，未登录用户的第一屏是错的。</li>
+                <li><b>卡住无兜底：</b>等待画面只有一行静态文字，没有超时与重试；启动失败时用户只能一直看着它。</li>
+            </ul>
+        </section>
+    </div>
+
+    <!-- ================= 状态 ================= -->
+    <h2 class="section section--gap">加载页的几种状态 <small>同一张画布，按等待时间往下走</small></h2>
+
+    <div class="row">
+        <!-- 正常 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="boot-solid"></div>
+                    <div class="boot-gradient"></div>
+                    <div class="boot-group">
+                        <div class="tile" data-glyph></div>
+                        <div class="boot-title">记账本</div>
+                        <div class="boot-sub">简单、安心的个人记账</div>
+                    </div>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:252px;top:362px">1</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">状态 · 1</div>
+                <h3>正常</h3>
+                <p>0.6 s 内就绪（预计占大多数）：看到的就是 Logo 与名称。</p>
+                <ol>
+                    <li data-n="1">没有转圈、没有说明——一眼就过去的画面不需要解释</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 稍慢 -->
+        <figure class="frame frame--link" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <div class="boot-solid"></div>
+                    <div class="boot-gradient"></div>
+                    <div class="boot-group">
+                        <div class="tile" data-glyph></div>
+                        <div class="boot-title">记账本</div>
+                        <div class="boot-sub">简单、安心的个人记账</div>
+                    </div>
+                    <div class="boot-foot"><div data-spinner></div><span>正在加载…</span></div>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:226px;top:704px">1</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">状态 · 2</div>
+                <h3>稍慢</h3>
+                <p>超过 0.6 s 还没就绪：底部出现转圈与一行说明。</p>
+                <ol>
+                    <li data-n="1">转圈与文字在底部，Logo 位置不动；以 <code>--ft-dur-fade</code> 淡入，避免快启动时一闪而过。文案沿用现状的「正在加载」</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 失败 -->
+        <figure class="frame" style="margin:0">
+            <div class="phone">
+                <div class="screen">
+                    <iframe class="fill" src="boot-failed.html" title="启动失败（真实样式还原）"></iframe>
+                    <div data-chrome="light"></div>
+                </div>
+                <span class="badge" style="left:354px;top:616px">1</span>
+                <span class="badge" style="left:354px;top:722px">2</span>
+            </div>
+            <figcaption class="cap">
+                <div class="step">状态 · 3</div>
+                <h3>失败</h3>
+                <p>约 12 s 仍未就绪：弹出玻璃 Alert，不再无限等待。</p>
+                <ol>
+                    <li data-n="1">样式就是 <code>GlassAlert</code>（<code>ft-alert</code>），但不要遮罩、位置下移到 Logo 下方——背景只是品牌画布，不遮住 Logo</li>
+                    <li data-n="2">只有「重新加载」一个按钮。这段是 <code>index.html</code> 里的静态标记，用本地样式表，不依赖 CDN</li>
+                </ol>
+            </figcaption>
+        </figure>
+
+        <!-- 降级与无障碍 -->
+        <section class="panel" style="align-self:start">
+            <h3>降级与无障碍</h3>
+            <p>沿用设计规范的统一做法，加载页不另立规则。</p>
+            <ul>
+                <li><b>减弱动态效果：</b>渐变不淡入、Logo 不位移、幕布不收拢，全部换成一次 <code>--ft-dur-reduced</code>（100 ms）的交叉淡入。</li>
+                <li><b>降低透明度：</b>Logo 方块用实色 <code>#7E3EFF</code>——正是系统启动画面那张图的颜色，降级版与原生那一帧完全一致。</li>
+                <li><b>读屏：</b>加载页是 <code>role="status"</code>，读一次「记账本，正在加载」；交接完成就移除，焦点交还页面。</li>
+                <li><b>离线：</b>加载页的 Logo 是内联 SVG，不等图标字体（CDN），它本身不依赖网络。</li>
+            </ul>
+        </section>
+    </div>
+
+    <p class="foot">效果图使用 Inter + 思源黑体代替 SF Pro + 苹方。首页骨架与启动失败画面是用项目真实的 <code>tokens.css / app.css / ui.css</code> 与组件标记静态还原的；「系统启动画面」现状帧直接使用 <code>Resources/Splash/splash.svg</code>。0.6 s / 12 s 是建议值，不是实测数据。</p>
+</div>
+<script src="shared.js"></script>
+</body>
+</html>

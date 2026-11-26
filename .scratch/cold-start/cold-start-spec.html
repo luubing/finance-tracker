@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>03 · 冷启动：规格与落地</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../src/FinanceTracker.Web/wwwroot/css/tokens.css">
+<link rel="stylesheet" href="shared.css">
+<style>
+    .span2 { grid-column: span 2; display: grid; gap: 28px; align-content: start; }
+
+    /* 现状：原样复现 index.html 里那一行字（浏览器默认的 h2 / p 样式 + Arial） */
+    .legacy-white { position: absolute; inset: 0; background: #fff; display: flex; justify-content: center; align-items: center; font-family: Arial, "Noto Sans SC", sans-serif; color: #000; }
+    .legacy-white > div { text-align: center; }
+    .legacy-white h2 { margin: 19.92px 0; font-size: 24px; line-height: normal; font-weight: 700; }
+    .legacy-white p { margin: 16px 0; font-size: 16px; line-height: normal; font-weight: 400; }
+    .legacy-splash { position: absolute; inset: 0; background: #512BD4; }
+    .legacy-splash img { position: absolute; left: 50%; top: 426px; width: 128px; height: 128px; margin: -64px 0 0 -64px; }
+
+    /* 规格表 */
+    .spec { width: 100%; border-collapse: collapse; }
+    .spec th { padding: 0 14px 10px 0; text-align: left; font: 700 12.5px/1 var(--mock-font); letter-spacing: .4px; color: var(--sheet-ink-3); }
+    .spec td { padding: 12px 14px 12px 0; border-top: 1px solid #ECEEF7; vertical-align: top; font: 500 14.5px/1.6 var(--mock-font); color: var(--sheet-ink-2); }
+    .spec td:first-child { width: 150px; font-weight: 700; color: var(--sheet-ink); }
+    .spec td:nth-child(2) { color: #23253F; }
+    .spec--tokens td:first-child { width: 262px; }
+    .spec--tokens code { white-space: nowrap; }
+    .new { margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 59, 48, .12); color: #C0261C; font: 700 11px/1.5 var(--mock-font); vertical-align: 1px; }
+    .swatch { display: inline-block; width: 13px; height: 13px; border-radius: 4px; margin-right: 6px; vertical-align: -2px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+
+    /* 编号清单（落地影响 / 待定事项） */
+    .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; counter-reset: s; }
+    .steps li { position: relative; padding-left: 38px; font: 500 15px/1.65 var(--mock-font); color: #23253F; counter-increment: s; }
+    .steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%; background: var(--ft-brand-soft-2); color: var(--ft-brand); font: 800 13px/24px var(--mock-font); text-align: center; }
+    .steps b { font-weight: 800; color: var(--sheet-ink); }
+    .steps small { display: block; margin-top: 2px; font: 400 13.5px/1.6 var(--mock-font); color: var(--sheet-ink-3); }
+    .ask li::before { background: #FFF1D6; color: #8A4A00; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+
+    <header class="sheet__head">
+        <div>
+            <h1 class="sheet__title">03 · 冷启动：规格与落地</h1>
+            <p class="sheet__sub">要落地的原生启动资源、令牌与时长，改动会落到哪里，以及需要你拍板的、只能在真机上确认的事项。</p>
+        </div>
+        <div class="tags"><span class="tag">iOS 26 · Liquid Glass</span><span class="tag">v1 草案</span></div>
+    </header>
+
+    <!-- ================= 规格与落地 ================= -->
+    <h2 class="section">规格与落地 <small>要做什么、改哪里、你来定什么</small></h2>
+
+    <div class="row">
+        <div class="span2">
+            <section class="panel">
+                <h3>原生启动资源</h3>
+                <p>系统启动画面是一张静态图 + 一个底色，由 <code>MauiSplashScreen</code> 在构建时生成两个平台的资源。</p>
+                <table class="spec">
+                    <thead><tr><th>项</th><th>规格</th><th>备注</th></tr></thead>
+                    <tbody>
+                        <tr><td>底色</td><td><span class="swatch" style="background:#5C2EF7"></span><code>#5C2EF7</code><span class="new">新增令牌</span></td><td><code>--ft-splash-bg</code>；对应 <code>Color</code> 属性</td></tr>
+                        <tr><td>图</td><td>96 × 96 方块，圆角 30，实心 <span class="swatch" style="background:#7E3EFF"></span><code>#7E3EFF</code>；内含白色 wallet-outline（50）。<b>不含文字</b></td><td><code>splash.svg</code> 换新，<code>BaseSize="96,96"</code></td></tr>
+                        <tr><td>iOS</td><td>图居中；状态栏白色图标</td><td>启动画面由 MAUI 生成</td></tr>
+                        <tr><td>Android 12+</td><td>系统启动画面 API 把图标裁进圆形遮罩（无图标底色时直径约 192 dp）；96 dp 的方块完整落在圆内</td><td>缩放以真机为准</td></tr>
+                        <tr><td>Android ≤ 11</td><td>整屏底色 + 居中图</td><td>—</td></tr>
+                        <tr><td>应用图标</td><td>现为蓝色笔记本（<code>appicon.png</code>）</td><td>是否一起换，见右侧第 2 项</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="panel">
+                <h3>令牌与时长</h3>
+                <p>除一个新令牌外，渐变、玻璃、圆角、时长、缓动全部取自 <code>tokens.css</code>。</p>
+                <table class="spec spec--tokens">
+                    <thead><tr><th>名称</th><th>值</th><th>用在</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>--ft-splash-bg</code><span class="new">新增</span></td><td>#5C2EF7</td><td>系统启动画面底色</td></tr>
+                        <tr><td><code>--ft-hero-gradient</code></td><td>现有</td><td>加载页 / 幕布 / 登录页背景</td></tr>
+                        <tr><td><code>--ft-glass-dark-*</code></td><td>现有</td><td>Logo 方块（全屏仅这 1 层玻璃）</td></tr>
+                        <tr><td><code>--ft-radius-hero</code></td><td>40</td><td>幕布终点圆角</td></tr>
+                        <tr><td><code>--ft-dur-sheet</code> + <code>--ft-ease-sheet</code></td><td>400 ms</td><td>渐变淡入、幕布收拢、Logo 上移、面板升起</td></tr>
+                        <tr><td><code>--ft-dur-fade</code> / <code>--ft-dur-page</code></td><td>180 ms</td><td>标题上浮、Logo 淡出、面板内容淡入、转圈淡入</td></tr>
+                        <tr><td><code>--ft-dur-reduced</code></td><td>100 ms</td><td>「减弱动态效果」下的交叉淡入</td></tr>
+                        <tr><td>脚本常量（非令牌）</td><td>0.6 s / 1.5 s / 12 s</td><td>转圈门槛 / 交接上限 / 失败兜底——均为建议值，待真机数据</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <div class="span2">
+            <section class="panel">
+                <h3>落地会改到哪里</h3>
+                <p>设计层面的预估；确认方向后再逐项核对。</p>
+                <ol class="steps">
+                    <li><b>原生资源</b><small><code>Resources/Splash/splash.svg</code> 换成新 Logo；<code>FinanceTracker.App.csproj</code> 的 <code>Color</code> / <code>BaseSize</code> 改值</small></li>
+                    <li><b>MAUI 宿主页</b><small><code>wwwroot/index.html</code>：加载页标记与关键样式内联，放在 <code>#app</code> 之外；MDI 字体 CSS 与 ECharts 改成不阻塞首次绘制（<code>defer</code> / 本地化）</small></li>
+                    <li><b>原生与 WebView 之间</b><small><code>MainPage.xaml</code> 的底色由 <code>White</code> 改为启动底色，WebView 出来前不再闪白</small></li>
+                    <li><b>令牌与共享脚本</b><small><code>tokens.css</code> 新增 <code>--ft-splash-bg</code>；一小段启动脚本放进 <code>FinanceTracker.Web</code>（两个宿主共用）：首屏就绪信号 → 交接动画 → 移除加载页，以及 12 s 兜底</small></li>
+                    <li><b>页面</b><small><code>Index.razor</code> / <code>LoginPage.razor</code> 在首屏就绪时发信号；加载页盖住那一闪，不改变登录判定逻辑</small></li>
+                    <li><b>测试与文档</b><small>E2E 手机视口加启动与交接断言；Web.Server 宿主同样放加载页；ADR 0007 追加「启动」一节</small></li>
+                </ol>
+            </section>
+
+            <section class="panel">
+                <h3>需要你定的事</h3>
+                <p>下面几项没有标准答案，取决于你想要的观感。</p>
+                <ol class="steps ask">
+                    <li><b>已登录交接用什么？</b><small>本稿：幕布收拢，约 400 ms，有一点仪式感。另一种：朴素的 180 ms 交叉淡入——更快更稳，也是「减弱动态效果」下的行为。</small></li>
+                    <li><b>应用图标要不要一起换？</b><small>现在是蓝色笔记本。不换的话，点开图标 → 紫色启动画面会有一次变色。这不在冷启动范围内，但直接影响观感。</small></li>
+                    <li><b>要不要做「启动失败」兜底？</b><small>它需要看门狗与「重新加载」的能力，行为要在真机验证。不做的话，卡住时仍只有转圈。</small></li>
+                    <li><b>快启动是否保留渐变淡入？</b><small>首屏若不到 400 ms 就绪，淡入会被截断。可以接受，也可以走快路径：直接从底色切到渐变。</small></li>
+                </ol>
+            </section>
+
+            <section class="panel">
+                <h3>只有真机能确认的事</h3>
+                <p>这份设计稿是用真实样式表在浏览器里还原的，下面这些它验证不了。</p>
+                <ol class="steps">
+                    <li><b>原生 → WebView 之间会不会闪白</b><small>iOS、Android 12+、Android ≤ 11 各看一遍；只改 <code>MainPage</code> 底色是否足够。</small></li>
+                    <li><b>Android 12+ 的启动图标缩放</b><small>96 dp 方块在圆形遮罩里实际多大，是否需要调整 <code>BaseSize</code>。</small></li>
+                    <li><b>加载页首帧距点击图标多久</b><small>CDN 资源不再阻塞后量一次；0.6 s / 1.5 s / 12 s 三个门槛都要按这个分布重定。</small></li>
+                    <li><b>「重新加载」在 BlazorWebView 里的效果</b><small>重载页面能否让 Blazor 重新启动，还是需要原生层配合。</small></li>
+                    <li><b>中低端 Android 上的帧率</b><small>幕布的高度 + 圆角动画若掉帧，就退化为交叉淡入（即第 1 项的另一种选择）。</small></li>
+                </ol>
+            </section>
+        </div>
+    </div>
+
+    <p class="foot">令牌与时长取自 <code>src/FinanceTracker.Web/wwwroot/css/tokens.css</code>；0.6 s / 1.5 s / 12 s 是建议值，不是实测数据；Android 12+ 的图标缩放以真机为准。落地清单是设计层面的预估，确认方向后再逐项核对代码。</p>
+</div>
+<script src="shared.js"></script>
+</body>
+</html>
