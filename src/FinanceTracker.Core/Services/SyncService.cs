@@ -711,7 +711,7 @@ public class SyncService : ISyncService
                 .IgnoreQueryFilters()
                 .FirstAsync(u => u.Id == userId);
 
-            if (user.PhoneNumber.StartsWith("stub_") && user.PhoneNumber != phoneNumber
+            if (User.IsStubPhoneNumber(user.PhoneNumber) && user.PhoneNumber != phoneNumber
                 && !await IsPhoneNumberTakenAsync(phoneNumber, userId))
             {
                 user.PhoneNumber = phoneNumber;
@@ -759,7 +759,7 @@ public class SyncService : ISyncService
     /// </summary>
     private static string BuildStubPhoneNumber(Guid userId)
     {
-        return $"stub_{userId.ToString("N")[..15]}";
+        return $"{User.StubPhonePrefix}{userId.ToString("N")[..15]}";
     }
 }
 

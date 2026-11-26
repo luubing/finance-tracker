@@ -26,7 +26,25 @@ select,
     -webkit-touch-callout: default;
 }
 
-.m-toolbar__content .m-btn.m-btn--icon.m-size--default, .m-toolbar__extension .m-btn.m-btn--icon.m-size--default {
-     height: unset!important; 
-     width:  unset!important; 
+/* ============================================
+   沉浸式与安全区（iOS UI 重构 · 02 号）
+
+   页面内容铺满整个屏幕（含状态栏、刘海 / 灵动岛、底部手势条之下），
+   被系统占用的区域统一通过安全区变量避让：
+     --ft-safe-top / --ft-safe-right / --ft-safe-bottom / --ft-safe-left
+   取值优先级：原生宿主注入（--ft-native-safe-*，由 immersive.js 写入）→ CSS env(safe-area-inset-*) → 0。
+   Web.Server（浏览器）没有原生安全区，值恒为 0，布局与改造前一致；
+   E2E / 人工验收可直接在 <html> 上覆盖这些变量来模拟刘海与手势条。
+
+   状态栏图标颜色由 immersive.js 判定并写到 <html data-statusbar-icons="light|dark">；
+   页面可在顶部背景元素上声明 data-statusbar-bg="dark|light" 显式告知背景明暗（渐变 / 图片背景必须声明）。
+
+   所有页面都自己使用 --ft-safe-*（二级页面的顶栏与内容区见 ui.css 的「二级页面」一节，Tab 根页面见各页自己的样式），
+   没有任何依赖页面栈内部 DOM 的全局兼容规则（迁移期的兼容层已在 24 号清理）。
+   ============================================ */
+:root {
+    --ft-safe-top: var(--ft-native-safe-top, env(safe-area-inset-top, 0px));
+    --ft-safe-right: var(--ft-native-safe-right, env(safe-area-inset-right, 0px));
+    --ft-safe-bottom: var(--ft-native-safe-bottom, env(safe-area-inset-bottom, 0px));
+    --ft-safe-left: var(--ft-native-safe-left, env(safe-area-inset-left, 0px));
 }

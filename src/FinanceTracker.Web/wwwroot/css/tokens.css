@@ -1,0 +1,459 @@
+/* ============================================================
+   设计令牌（iOS UI 重构 · 03 号）
+   数值以设计稿 06「设计规范」为准（docs/design/ios-ui-refactor/06-spec.png）。
+
+   Web.Server（_Layout.cshtml）与 MAUI App（index.html）都在 app.css / ui.css 之前加载这同一份文件。
+   规则：
+   - 组件样式只引用令牌（var(--ft-*)），不写颜色 / 圆角 / 字号字面量；
+   - 玻璃材质一律从下面的 --ft-glass-* 取值，「降低透明度」回退（23 号 ticket）只需在这里一处切换；
+   - 品牌色 --ft-brand 与 MASA 主题 primary 必须一致：C# 侧由 FinanceTracker.Web.Design.DesignTokens.BrandColor 驱动
+     MASA 主题，单元测试 DesignTokensTests 校验两处取值相同（改品牌色时两处一起改，测试会拦住漏改）。
+   ============================================================ */
+:root {
+    /* ---------- 品牌 ---------- */
+    --ft-brand: #4318FF;                                   /* 主色 Tint */
+    --ft-brand-rgb: 67, 24, 255;                           /* 供 rgba(var(--ft-brand-rgb), .x) 使用 */
+    --ft-brand-2: #7A45FF;                                 /* 主渐变起点（终点为 --ft-brand） */
+    --ft-brand-gradient: linear-gradient(160deg, var(--ft-brand-2), var(--ft-brand));
+    --ft-brand-soft: rgba(var(--ft-brand-rgb), .10);       /* 主色浅底 */
+    --ft-brand-soft-2: rgba(var(--ft-brand-rgb), .16);
+    /* Hero 渐变：首页 / 登录页等大面积紫色背景（渐变 / 图片背景必须声明 data-statusbar-bg，见 02 号 ticket） */
+    --ft-hero-gradient:
+        radial-gradient(120% 90% at 92% -8%, rgba(255, 255, 255, .30), transparent 52%),
+        radial-gradient(80% 70% at -6% 108%, rgba(255, 92, 200, .42), transparent 62%),
+        radial-gradient(70% 60% at 60% 120%, rgba(70, 160, 255, .35), transparent 60%),
+        linear-gradient(162deg, #3A10F0 0%, #5629F6 46%, #7B47FF 100%);
+
+    /* 系统启动画面（冷启动设计稿 docs/design/cold-start/03）：原生启动画面只能是「纯色底 + 一张静态图」，下面两个值是它的两块颜色，
+       启动加载页（wwwroot/css/boot.css）从它们接力，Logo 周围与方块自身都不跳色。
+       - --ft-splash-bg：底色，取 Hero 渐变在 Logo 所在横带（距顶 330–620 px）的屏幕均值；
+       - --ft-splash-tile：Logo 方块的实心色，= 深色玻璃（白 17% + 模糊 + 饱和度）压在渐变上的实测色。静态图不能做模糊，只能用预合成的实色。
+       MAUI 一侧必须同值：FinanceTracker.App.csproj 的 MauiSplashScreen Color、MainPage.xaml 的 BackgroundColor、
+       Resources/Splash/splash.svg 里的方块色——DesignTokensTests 校验（改这里要一起改，测试会拦住漏改）。 */
+    --ft-splash-bg: #5C2EF7;
+    --ft-splash-tile: #7E3EFF;
+
+    /* ---------- 语义色（沿用 iOS 系统色；文字用色已另行加深） ---------- */
+    --ft-expense: #E8362C;                                 /* 支出（汇总文字） */
+    --ft-income: #1FA544;                                  /* 收入 */
+    --ft-warning: #FF9500;                                 /* 预警 ≥ 80% */
+    --ft-danger: #FF3B30;                                  /* 超支 / 危险 */
+    --ft-info: #007AFF;                                    /* 信息 */
+    --ft-success: #34C759;                                 /* 成功 / 开关打开 */
+
+    /* iOS 系统色板（分类色等装饰用途） */
+    --ft-red: #FF3B30;
+    --ft-green: #34C759;
+    --ft-orange: #FF9500;
+    --ft-yellow: #FFCC00;
+    --ft-blue: #007AFF;
+    --ft-teal: #30B0C7;
+    --ft-indigo: #5856D6;
+    --ft-purple: #AF52DE;
+    --ft-pink: #FF2D55;
+    --ft-mint: #00C7BE;
+    --ft-cyan: #32ADE6;
+    --ft-brown: #A2845E;
+    --ft-gray: #8E8E93;
+
+    /* ---------- 中性色 ---------- */
+    --ft-bg: #F2F2F7;                                      /* 页面背景 */
+    --ft-bg-outside: #E9EBF3;                              /* 桌面宽屏时应用壳之外的底色 */
+    --ft-card: #FFFFFF;                                    /* 卡片 */
+    --ft-label: #000000;                                   /* 主文字 */
+    --ft-label-2: rgba(60, 60, 67, .76);                   /* 次文字（占位文字也用它）。iOS 原生是 .60，但那在白卡片上只有 3.6:1、在页面底色 / 搜索框底上更低；
+                                                              23 号要求文字 ≥ 4.5:1：.76 在白（5.3）/ 页面底色（5.0）/ 搜索框底（4.6）上都达标，是视觉上刻意的小幅加深（见 ticket 23 判断记录） */
+    --ft-label-3: rgba(60, 60, 67, .32);                   /* 仅用于「图形」：箭头、空状态大图标、分隔虚线、禁用的描边——不得用作文字颜色（对比度只有约 1.8:1，DesignTokensTests 检查） */
+    --ft-separator: rgba(60, 60, 67, .13);
+    --ft-fill: rgba(120, 120, 128, .12);                   /* 填充（输入框、芯片底） */
+    --ft-fill-2: rgba(120, 120, 128, .07);
+
+    /* ---------- 材质：玻璃 ---------- */
+    /* 浅色玻璃（浅色背景之上）：白 58% + 模糊 22 + 饱和 200%，内描边与高光 */
+    --ft-glass-bg: rgba(255, 255, 255, .58);
+    --ft-glass-filter: blur(22px) saturate(200%) brightness(1.03);
+    --ft-glass-shadow:
+        0 8px 26px rgba(30, 20, 90, .15),
+        0 1px 3px rgba(30, 20, 90, .08),
+        inset 0 0 0 .75px rgba(255, 255, 255, .62),
+        inset 0 1.6px .6px rgba(255, 255, 255, .95),
+        inset 0 -1.4px .6px rgba(255, 255, 255, .4),
+        inset 0 0 16px rgba(255, 255, 255, .32);
+    /* 深色玻璃（Hero 之上的小卡与按钮）：白 17% + 模糊 20。首页 Hero 上的元素只取 bg / shadow、不叠 filter（玻璃层预算，见 ADR 0007 §9） */
+    --ft-glass-dark-bg: rgba(255, 255, 255, .17);
+    --ft-glass-dark-filter: blur(20px) saturate(170%);
+    --ft-glass-dark-shadow:
+        inset 0 0 0 .75px rgba(255, 255, 255, .4),
+        inset 0 1.2px .5px rgba(255, 255, 255, .55),
+        inset 0 -1px .5px rgba(255, 255, 255, .12),
+        0 6px 18px rgba(30, 10, 120, .18);
+    /* 玻璃上的 Tab 栏高光块（选中项）*/
+    --ft-glass-thumb-bg: rgba(120, 120, 128, .15);
+    --ft-glass-thumb-shadow:
+        inset 0 0 0 .6px rgba(255, 255, 255, .55),
+        inset 0 1.4px .6px rgba(255, 255, 255, .85),
+        inset 0 -1px .5px rgba(255, 255, 255, .3),
+        0 1px 3px rgba(0, 0, 0, .07);
+    /* 按下「抬起」时：高光更亮，投影加深 */
+    --ft-glass-thumb-shadow-lifted:
+        inset 0 0 0 .6px rgba(255, 255, 255, .75),
+        inset 0 1.6px .6px rgba(255, 255, 255, .95),
+        inset 0 -1px .5px rgba(255, 255, 255, .4),
+        0 6px 14px rgba(30, 20, 90, .24),
+        0 1px 3px rgba(0, 0, 0, .1);
+    /* 降级为不透明（23 号）时所有玻璃表面改用的实色，取值切换见文件末尾的覆盖块。
+       浅色玻璃 → 白底 + 一圈细描边（白底压在白卡 / Sheet 上时靠它与投影分出边界）；
+       深色玻璃（Hero 之上）→ 比 Hero 渐变中段 #5629F6 略亮的紫，白字对比度 ≥ 4.5:1（DesignTokensTests 校验） */
+    --ft-glass-solid-bg: #FFFFFF;
+    --ft-glass-solid-shadow:
+        0 4px 14px rgba(30, 20, 90, .12),
+        0 1px 3px rgba(30, 20, 90, .08),
+        inset 0 0 0 .75px rgba(60, 60, 67, .16);
+    --ft-glass-dark-solid-bg: #6A42F2;
+    --ft-glass-dark-solid-shadow:
+        inset 0 0 0 .75px rgba(255, 255, 255, .3),
+        0 4px 14px rgba(30, 10, 120, .22);
+
+    /* ---------- 字体与字号层级（格式：字重 字号/行高 字体） ---------- */
+    --ft-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", Roboto, "Noto Sans SC", "Segoe UI", "Helvetica Neue", sans-serif;
+    --ft-type-large-title: 800 34px/41px var(--ft-font);   /* 大标题 */
+    --ft-type-amount-xl: 800 52px/60px var(--ft-font);     /* 金额 · 特大 */
+    --ft-type-amount-input: 800 56px/64px var(--ft-font);  /* 金额 · 输入 */
+    --ft-type-section: 800 22px/28px var(--ft-font);       /* 节标题 */
+    --ft-type-nav-title: 600 17px/22px var(--ft-font);     /* 导航标题 */
+    --ft-type-body: 500 16px/21px var(--ft-font);          /* 正文 */
+    --ft-type-amount-list: 600 16.5px/21px var(--ft-font);/* 金额 · 列表 */
+    --ft-type-caption: 400 13px/18px var(--ft-font);       /* 副文本 */
+    --ft-type-footnote: 600 10.5px/12px var(--ft-font);    /* 脚注 / Tab 标签（固定，不随系统字号放大） */
+
+    /* ---------- 圆角（同心圆角：外层 = 内层 + 间距） ---------- */
+    --ft-radius-hero: 40px;                                /* Hero 底部 */
+    --ft-radius-sheet: 40px;                               /* Sheet 顶部 */
+    --ft-radius-card: 26px;                                /* 分组卡片 */
+    --ft-radius-input: 18px;                               /* 输入框 */
+    --ft-radius-tile: 12px;                                /* 图标块（设计稿 11–13） */
+    /* 胶囊 = 高度 / 2：用 999px 即可，取值与高度无关 */
+    --ft-radius-pill: 999px;
+
+    /* ---------- 间距与尺寸 ---------- */
+    --ft-space-page: 16px;                                 /* 页面左右边距 */
+    --ft-space-group: 20px;                                /* 分组卡片之间 */
+    --ft-space-section-top: 26px;                          /* 节标题上 */
+    --ft-space-section-bottom: 10px;                       /* 节标题下 */
+    --ft-cell-height: 56px;                                /* 单元格：普通 */
+    --ft-cell-height-2: 66px;                              /* 单元格：双行 */
+    --ft-cell-height-form: 42px;                           /* 单元格：表单行 */
+    --ft-hit: 44px;                                        /* 点击热区下限（44 × 44） */
+    --ft-nav-height: 44px;                                 /* 导航栏（玻璃圆按钮 44 × 44） */
+    --ft-tabbar-height: 62px;                              /* Tab 栏 */
+    --ft-tabbar-side: 16px;                                /* Tab 栏左右边距 */
+    --ft-tabbar-bottom: 21px;                              /* Tab 栏距底（在底部安全区之上，另加 --ft-safe-bottom） */
+    --ft-tabbar-gap: 10px;                                 /* Tab 栏与「记一笔」圆钮的间距 */
+    --ft-fab-size: 62px;                                   /* 「记一笔」圆钮 */
+    /* 一级页面底部为悬浮 Tab 栏预留的高度：Tab 栏占位 + 呼吸空间，最后一项内容可完整滚出 Tab 栏之上 */
+    --ft-tabbar-clearance: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + var(--ft-safe-bottom, 0px) + 24px);
+    --ft-shell-max-width: 480px;                           /* 宽屏（桌面浏览器）下应用壳的最大宽度，保持手机比例 */
+
+    /* ---------- 动效 ---------- */
+    --ft-dur-press: 120ms;                                 /* 点按反馈：按下缩放 0.96，松开回弹 */
+    --ft-press-scale: .96;
+    --ft-dur-icon: 160ms;                                  /* Tab 图标：线框 → 实心交叉淡入、灰 → 品牌色 */
+    --ft-dur-page: 180ms;                                  /* 页面交叉淡入（目标页 0.985 → 1） */
+    --ft-page-enter-scale: .985;
+    --ft-dur-number: 300ms;                                /* 数字滚动 */
+    --ft-dur-tabbar: 280ms;                                /* Tab 栏显示 / 隐藏 */
+    --ft-dur-reduced: 100ms;                               /* 「减弱动态效果」下的交叉淡入 */
+    --ft-ease-out: cubic-bezier(.22, .61, .36, 1);
+    --ft-ease-in-out: cubic-bezier(.65, 0, .35, 1);
+    --ft-ease-spring: cubic-bezier(.34, 1.45, .52, 1);     /* 弹簧的 CSS 近似（420ms），真正的弹簧由脚本按下面两个参数积分 */
+    --ft-spring-response: .42;                             /* 弹簧 response（秒）；脚本读取它做数值积分 */
+    --ft-spring-damping: .62;                              /* Tab 高光弹簧阻尼系数；脚本读取 */
+    --ft-spring-sheet-damping: .85;                        /* Sheet 弹簧阻尼系数 */
+    /* Tab 高光滑块（tabBar.js 读取下面的无单位数值） */
+    --ft-stretch-max: .7;                                  /* 水平拉伸增量上限：最大 1 + 0.7 = 1.7× */
+    --ft-squash-max: .07;                                  /* 拉伸到最大时垂直方向的压缩比例上限 */
+    --ft-lift-scale: 1.08;                                 /* 按下时高光「抬起」的放大倍数 */
+    --ft-lift-icon-scale: .9;                              /* 按下时目标图标缩小到 */
+    --ft-fab-press-scale: .92;                             /* 按下「记一笔」圆钮时的缩放 */
+    --ft-collapse-threshold: 24;                           /* 向下滚动超过多少像素，Tab 栏收缩成「当前页胶囊」 */
+    --ft-tabbar-capsule-width: 124px;                      /* 收缩后胶囊的宽度 */
+
+    /* ---------- 二级页面 / 弹层 / 单元格（05 号） ---------- */
+    --ft-bg-rgb: 242, 242, 247;                            /* 页面背景的 RGB：用于「渐隐到透明」的渐变（不用 color-mix，iOS 14 不支持） */
+    --ft-nav-fade: 14px;                                   /* 二级页导航栏底部渐隐高度：内容从导航栏下滚过时不和按钮 / 标题糊在一起 */
+    --ft-type-button: 600 16px/20px var(--ft-font);        /* 按钮文字 */
+    --ft-type-cell-title: 600 16.5px/22px var(--ft-font);  /* 双行单元格标题 */
+    --ft-tile-size: 40px;                                  /* 单元格左侧图标块 */
+    --ft-cell-pad: 16px;                                   /* 单元格左右内边距 */
+    --ft-cell-gap: 12px;                                   /* 单元格内元素间距 */
+    --ft-cell-inset: 68px;                                 /* 带图标块的单元格：分隔线左缩进 = 内边距 + 图标块 + 间距 */
+    --ft-swipe-action-width: 76px;                         /* 左滑操作按钮宽度 */
+    --ft-dur-swipe: 240ms;                                 /* 左滑行展开 / 收起 */
+    --ft-scrim: rgba(0, 0, 0, .36);                        /* 弹层遮罩（只变暗、不做模糊——不占玻璃层预算） */
+    --ft-glass-alert-bg: rgba(255, 255, 255, .8);          /* Alert / 操作面板 / Toast：压在遮罩或内容之上，比普通玻璃更不透明，保证文字对比 */
+    --ft-alert-width: 286px;
+    --ft-alert-radius: 22px;
+    --ft-dur-sheet: 400ms;                                 /* Sheet 升起：弹簧 response .42 / damping .85 的 CSS 近似 */
+    --ft-dur-sheet-out: 260ms;
+    --ft-dur-fade: 180ms;
+    --ft-ease-sheet: cubic-bezier(.2, .9, .25, 1);
+    --ft-toast-bottom: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + 14px); /* Toast 距底：始终在 Tab 栏之上（在二级页面上显得略高，但全局位置一致） */
+    --ft-brand-button-gradient: linear-gradient(155deg, #7A5CFF 0%, var(--ft-brand) 62%, #3510D6 100%); /* 主按钮 / 「记一笔」圆钮 */
+    --ft-brand-button-shadow:
+        0 8px 20px rgba(var(--ft-brand-rgb), .38),
+        0 2px 5px rgba(var(--ft-brand-rgb), .26),
+        inset 0 0 0 .75px rgba(255, 255, 255, .35),
+        inset 0 1.6px .8px rgba(255, 255, 255, .7),
+        inset 0 -1.8px 1px rgba(20, 0, 120, .32);
+
+    /* 图标块配色：浅色起点 → iOS 系统色（白色图标放在上面） */
+    --ft-tile-purple: linear-gradient(150deg, #8F8DF0 0%, var(--ft-indigo) 100%);
+    --ft-tile-teal: linear-gradient(150deg, #5AC8DD 0%, var(--ft-teal) 100%);
+    --ft-tile-pink: linear-gradient(150deg, #FF7A93 0%, var(--ft-pink) 100%);
+    --ft-tile-orange: linear-gradient(150deg, #FFC04D 0%, var(--ft-orange) 100%);
+    --ft-tile-blue: linear-gradient(150deg, #5CB1FF 0%, var(--ft-blue) 100%);
+    --ft-tile-green: linear-gradient(150deg, #5EDB82 0%, var(--ft-green) 100%);
+    --ft-tile-gray: linear-gradient(150deg, #B0B0B6 0%, var(--ft-gray) 100%);
+    --ft-tile-red: linear-gradient(150deg, #FF8A80 0%, var(--ft-red) 100%);
+
+    /* ---------- 首页 / 账单行 / 预算行（07 号） ---------- */
+    /* 图标块「柔和」配色：浅色底 + 加深的同色图标。账单行、预算行用它，让金额与进度条而不是图标抢视线；
+       实心渐变图标块（--ft-tile-*）留给设置类单元格 */
+    --ft-tint-purple: rgba(88, 86, 214, .13);
+    --ft-ink-purple: #4F4DC7;
+    --ft-tint-teal: rgba(48, 176, 199, .15);
+    --ft-ink-teal: #1B8296;
+    --ft-tint-pink: rgba(255, 45, 85, .12);
+    --ft-ink-pink: #D81B45;
+    --ft-tint-orange: rgba(255, 149, 0, .15);
+    --ft-ink-orange: #D97C00;
+    --ft-tint-blue: rgba(0, 122, 255, .12);
+    --ft-ink-blue: #0A66D4;
+    --ft-tint-green: rgba(52, 199, 89, .15);
+    --ft-ink-green: #1E9A43;
+    --ft-tint-red: rgba(255, 59, 48, .12);
+    --ft-ink-red: #E02A1F;
+    --ft-tint-gray: rgba(142, 142, 147, .16);
+    --ft-ink-gray: #6C6C72;
+    --ft-warning-text: #9A5000;                            /* 预警文字：橙色在白底上对比度不足，文字改用加深的橙（白底、徽标的 16% 橙浅底、直接叠在页面底色上的 16% 橙浅底上都 ≥ 4.5:1，DesignTokensTests 校验） */
+    --ft-income-text: #188540;                             /* 收入文字（金额）：--ft-income 在白底上只有 3.2:1，文字改用加深的绿（≥ 4.5:1） */
+    --ft-danger-text: #D3221A;                             /* 超支 / 危险文字：--ft-expense 在白底上只有 4.2:1，文字改用加深的红（≥ 5:1） */
+    --ft-success-text: #127436;                            /* 成功 / 正向状态的徽标文字（「可编辑」）：压在 16% 绿浅底上，白底 5.2:1、页面底色 4.7:1；--ft-income-text 在这块浅绿底上只有约 4.1:1 */
+    --ft-herocard-scrim: rgba(20, 4, 100, .10);            /* 首页 Hero 小卡里的一层暗纱：小卡压在渐变最亮的一角（右下）时，白色说明文字也要 ≥ 4.5:1（没有这层只有约 4.3:1；DesignTokensTests 校验） */
+    --ft-badge-solid: #E02A1F;                             /* 角标 / 红点底色：白字对比度 ≥ 4.5:1 */
+    --ft-type-amount-card: 700 20px/26px var(--ft-font);   /* 金额 · Hero 小卡 */
+    --ft-amount-fit-xl: .62;                               /* Hero 主指标的收缩系数（无单位）：每个字符约 .476em（符号与小数缩到 .54em）× 1.3（系统字体放大到 130% 仍放得下）；ui.css 首页一节用 */
+    --ft-amount-fit-card: .70;                             /* Hero 小卡金额的收缩系数：每个字符最宽约 .534em（全是宽数字的 ¥99,999,999.99：7.47em ÷ 14）× 1.3 */
+    --ft-radius-hero-card: 22px;                           /* Hero 之上的深色玻璃小卡 */
+    --ft-hero-pad-bottom: 22px;                            /* Hero 内容到底边 */
+    --ft-progress-height: 6px;                             /* 进度条（预算）高度 */
+    /* 下拉刷新（pullRefresh.js 读取无单位数值 / px 值） */
+    --ft-ptr-threshold: 72;                                /* 松手时位移达到多少像素才触发刷新 */
+    --ft-ptr-max: 132;                                     /* 位移上限（阻尼之后） */
+    --ft-ptr-hold: 48px;                                   /* 刷新进行中，转圈区域保留的高度 */
+    --ft-dur-ptr: 280ms;                                   /* 刷新结束后收起 / 松手回弹 */
+
+    /* ---------- 账单 Tab / 大标题页 / 分段控件（08 号） ---------- */
+    --ft-seg-height: 44px;                                 /* 分段控件轨道高度（每段的点击区域也是这个高度） */
+    --ft-seg-pad: 3px;                                     /* 轨道与白色滑块之间的留白 */
+    --ft-dur-segment: 220ms;                               /* 分段滑块滑动 */
+    --ft-type-segment: 500 15px/20px var(--ft-font);       /* 分段文字 */
+    --ft-type-segment-on: 700 15px/20px var(--ft-font);    /* 选中的分段文字（加粗） */
+    --ft-seg-thumb-shadow:
+        0 3px 8px rgba(0, 0, 0, .12),
+        0 1px 1px rgba(0, 0, 0, .06);
+    --ft-type-day-title: 800 17px/22px var(--ft-font);     /* 账单按天分组的组头标题 */
+    --ft-type-amount-summary: 700 18px/24px var(--ft-font);/* 汇总卡金额 */
+    --ft-type-amount-summary-long: 700 14px/24px var(--ft-font); /* 汇总卡金额位数太多（≥ 12 个字符）时缩小，避免挤出单元格 */
+    --ft-type-amount-summary-xlong: 700 12px/24px var(--ft-font); /* 窄屏（< 360pt）上 KPI 卡金额位数太多时再缩一档：320pt 屏每栏只有 96pt 宽，¥98,765,432.10 在 14px 下会挤出栏 */
+    --ft-shadow-bar: 0 6px 18px rgba(30, 20, 90, .10);     /* 悬浮在 Tab 栏之上的批量操作栏 */
+    --ft-lnav-title-max: 40%;                              /* 折叠后小标题的最大宽度（右侧操作按钮要留出位置） */
+
+    /* ---------- 条件标签 / 筛选 Sheet / 多选操作栏（09 号） ---------- */
+    --ft-chip-height: 36px;                                /* 标签的视觉高度；按钮本体取 --ft-hit（44）保证命中区域，胶囊用伪元素画在按钮中间 */
+    --ft-chip-pad: 12px;                                   /* 标签文字到胶囊边缘（设计稿 13：「今天 / 本周 / 本月 / 本年 / 自定义」五个在 390 宽里排成一行，14 会多出 3 而折行） */
+    --ft-chip-gap: 8px;                                    /* 标签之间的水平间距 */
+    --ft-chip-bg: var(--ft-card);                          /* 未选中：白底（页面灰底与 Sheet 灰底上都清晰） */
+    --ft-chip-border: var(--ft-separator);                 /* 未选中：细描边 */
+    --ft-chip-on-bg: var(--ft-brand-soft-2);               /* 选中 / 已设置条件：品牌色浅底 */
+    --ft-chip-on-border: rgba(var(--ft-brand-rgb), .55);   /* 选中 / 已设置条件：品牌色描边 */
+    --ft-type-chip: 600 15px/20px var(--ft-font);          /* 标签文字（选中与否同字重，避免选中时宽度变化让标签重排） */
+    --ft-actionbar-height: 56px;                           /* 多选模式的底部操作栏 */
+    --ft-actionbar-gap: 10px;                              /* 操作栏与 Tab 栏之间 */
+
+    /* ---------- 统计 Tab：胶囊 / KPI 卡 / 构成圆环（11 号） ---------- */
+    --ft-hue: var(--ft-gray);                              /* 小圆点 / 圆环 / 图例当前这一项的颜色：默认灰，由 .ft-hue--N 与 .ft-dot--* 在各自元素上覆盖 */
+    --ft-shadow-capsule: 0 2px 10px rgba(30, 20, 90, .08); /* 月份 / 账本胶囊：白色，浮在灰色页面底上 */
+    --ft-donut-size: 200px;                                /* 构成圆环的盒子宽（SVG 外圈占 98%，外径 196）；设计稿 03 实测外径 184，再小中心的孔放不下长金额 */
+    --ft-type-amount-donut: 800 21px/28px var(--ft-font);  /* 圆环中心的总额（孔宽 = 盒子宽 × 0.68 = 136；11 个字符的 ¥123,456.78 约 126；设计稿 03 约 21） */
+    --ft-type-amount-donut-long: 800 16px/22px var(--ft-font); /* 总额位数太多（≥ 12 个字符）时缩小，不挤出圆环中心的孔（14 个字符的 ¥10,005,439.58 约 130） */
+
+    /* ---------- 我的 Tab：资料卡 / 云端同步行 / 入口摘要（13 号） ---------- */
+    --ft-avatar-size: 52px;                                /* 资料卡头像 */
+    --ft-type-profile-phone: 800 20px/26px var(--ft-font); /* 资料卡里的脱敏手机号 */
+    --ft-sync-pill-height: 34px;                           /* 「立即同步」胶囊的视觉高度；按钮本体取 --ft-hit（44）保证命中区域 */
+    --ft-count-size: 22px;                                 /* 入口行右侧的红色计数角标（待确认账单） */
+
+    /* ---------- 记一笔 Sheet：背景缩放 / 数字键盘 / 分类网格 / 弹出菜单（15 号） ---------- */
+    --ft-sheet-bg-scale: .94;                              /* Sheet 升起时，下面的页面缩小到的比例（以顶边中点为原点，顶边不动，所以状态栏下仍露出页面的 Hero） */
+    --ft-sheet-bg-radius: 28px;                            /* 缩小后的页面圆角 */
+    --ft-key-height: 48px;                                 /* 数字键盘：每个键的高度（≥ 44 热区）；设计稿 05 是 50，这里让出 8 给设置行：393×852 刘海机上四行设置整行放得下 */
+    --ft-key-gap: 8px;                                     /* 数字键盘：键与键的间距 */
+    --ft-radius-key: 14px;                                 /* 数字键盘：键圆角 */
+    --ft-type-key: 600 24px/1 var(--ft-font);              /* 数字键盘：数字 */
+    --ft-type-key-save: 700 20px/1 var(--ft-font);         /* 数字键盘：「保存」 */
+    --ft-key-shadow: 0 1px 0 rgba(60, 60, 67, .16);        /* 数字键盘：白键底边的一道细影，像系统键盘 */
+    --ft-key-fn-bg: rgba(142, 142, 147, .24);              /* 数字键盘：功能键（退格）的底色 */
+    --ft-key-save-off-bg: rgba(142, 142, 147, .20);        /* 数字键盘：置灰的「保存」键面（条件没凑齐） */
+    --ft-cell-height-compact: 44px;                        /* 紧凑单元格：记一笔里的四行设置（账本 / 支付渠道 / 时间 / 备注），比普通单元格矮，整屏才放得下键盘；整行是点击区域，取 44 下限 */
+    --ft-tile-size-compact: 30px;                          /* 紧凑单元格左侧的图标块 */
+    --ft-cat-size: 48px;                                   /* 分类网格：图标圆（设计稿 05 实测 48） */
+    --ft-cat-row-height: 77px;                             /* 分类网格：一行（图标圆 + 名称）的高度（设计稿 05 实测行距 77；≥ 6 + 图标圆 + 6 + 名称行高） */
+    --ft-type-cat-label: 500 12px/16px var(--ft-font);     /* 分类网格：分类名称 */
+    --ft-type-cat-label-on: 700 12px/16px var(--ft-font);  /* 分类网格：选中的分类名称（加粗） */
+    --ft-popover-min-width: 232px;                         /* 弹出菜单：最小宽度（账本 / 支付渠道菜单） */
+    --ft-popover-item-height: 48px;                        /* 弹出菜单：每一项的高度（≥ 44 热区） */
+    --ft-radius-popover: 18px;                             /* 弹出菜单：圆角 */
+    --ft-shadow-popover: 0 14px 44px rgba(0, 0, 0, .20), 0 2px 8px rgba(0, 0, 0, .08); /* 弹出菜单：白色卡片的投影（不是玻璃，不占玻璃层） */
+    --ft-dur-shake: 460ms;                                 /* 引导抖动（缺账本 / 缺金额时点保存） */
+    --ft-dur-caret: 1000ms;                                /* 金额光标闪烁周期 */
+
+    /* ---------- 语音记账覆盖层（17 号）：盖满屏幕的浅色磨砂（设计稿 06 的灰紫），白字 ----------
+       第 2 轮评审按用户决定从「深靛紫 78%」改成贴近设计稿的浅磨砂。代价是对比度：透上来的页面纯白（最不利）时白字约 4.0:1、淡紫高亮约 3.3:1，
+       到不了正文要求的 4.5:1——所以直接压在覆盖层上的小字（状态 / 提示 / 底部说明 / 取消）都放大加粗成「大号文字」（≥ 18.66px 且 ≥ 700，要求 3:1），
+       已识别芯片换成深色半透明底（白字约 5.8:1，字号不变）。逐项由 DesignTokensTests 在「最亮的底（纯白）」上计算。 */
+    --ft-voice-bg: rgba(44, 36, 100, .60);                 /* 覆盖层底色：靛紫 60%，叠在模糊过的 Sheet 之上；纯白透上来时约为设计稿取样的灰紫（128, 124, 162） */
+    --ft-voice-bg-cancel: rgba(110, 24, 32, .62);          /* 手指进入取消区时的底色：泛红，提示「松手即放弃」 */
+    --ft-voice-bg-solid: #3A3178;                          /* 「降低透明度」下不模糊、不透明的覆盖层底色（降级分支保持深色，白字 ≥ 4.5:1，不依赖大号文字） */
+    --ft-voice-bg-cancel-solid: #6B1C26;                   /* 同上，取消区的底色 */
+    --ft-voice-filter: blur(28px) saturate(140%);          /* 覆盖层的模糊（整屏只占 1 个玻璃层） */
+    --ft-voice-text: #FFFFFF;                              /* 转写文字、芯片文字 */
+    --ft-voice-text-2: rgba(255, 255, 255, .92);           /* 提示、底部说明 */
+    --ft-voice-mark: #EAE6FF;                              /* 识别出的片段：淡薰衣草色 + 下划线（不靠颜色一种线索：下划线与 data-kind 都在）；再深一点在浅磨砂上就低于 3:1 了 */
+    --ft-voice-rec: #FF453A;                               /* 录音红点 */
+    --ft-voice-chip-bg: rgba(52, 40, 120, .34);            /* 已识别芯片的底：深色半透明（设计稿里芯片比四周更深），不模糊、不占玻璃层 */
+    --ft-voice-chip-border: rgba(255, 255, 255, .42);
+    --ft-voice-ring: rgba(255, 255, 255, .34);             /* 大麦克风外的光圈 */
+    --ft-voice-wave: rgba(255, 255, 255, .92);             /* 波形条（顶端） */
+    --ft-voice-wave-fade: rgba(255, 255, 255, .42);        /* 波形条（底端）：设计稿里条自上而下渐隐 */
+    --ft-voice-mic-size: 104px;                            /* 大麦克风按钮（点按形态是「说完了」按钮，远大于 44 热区） */
+    --ft-voice-ring-gap: 22px;                             /* 光圈每一圈向外多出的距离 */
+    --ft-voice-wave-height: 72px;                          /* 波形区高度 */
+    --ft-voice-bar-width: 5px;                             /* 波形条宽度 */
+    --ft-voice-bar-gap: 5px;                               /* 波形条间距 */
+    --ft-voice-max-width: 400px;                           /* 内容区最大宽度（宽屏下保持手机比例） */
+    --ft-voice-transcript-height: 114px;                   /* 转写区固定 3 行高（38 × 3）：文字从 1 行长到 3 行时下面的波形与芯片不跟着跳 */
+    --ft-voice-chip-height: 38px;                          /* 已识别芯片的高度 */
+    --ft-voice-chips-height: 86px;                         /* 芯片区预留 2 行（38 × 2 + 间距 10），同样避免布局跳动 */
+    --ft-type-voice-transcript: 800 28px/38px var(--ft-font); /* 转写文字（设计稿 screens 06：白色粗体大字） */
+    --ft-type-voice-status: 700 19px/24px var(--ft-font);  /* 顶部状态「正在聆听…」与转写占位：大号文字（≥ 18.66px 且 ≥ 700），在浅磨砂上只要求 3:1 */
+    --ft-type-voice-chip: 600 15px/20px var(--ft-font);    /* 已识别芯片：压在深色芯片底上（白字约 5.8:1），不必放大 */
+    --ft-type-voice-note: 700 19px/24px var(--ft-font);    /* 「上滑取消」提示、底部说明与「取消」：大号文字，同上 */
+    --ft-dur-voice-bar: 880ms;                             /* 波形条起伏一个来回 */
+    --ft-dur-voice-ring: 1800ms;                           /* 光圈外扩一轮 */
+    --ft-dur-voice-dot: 1200ms;                            /* 录音红点呼吸 */
+
+    /* ---------- 预算页：进度环 / 总览卡 / 提示条 / 编辑表单（18 号） ---------- */
+    --ft-ring-size: min(120px, 33vw);                      /* 预算总览进度环外径（设计稿 screens 09-budgets 约 118pt）；窄屏按屏宽收小，右边的额度才放得下 */
+    --ft-type-ring-percent: 800 clamp(20px, 7.2vw, 28px)/32px var(--ft-font); /* 环中心的使用百分比（随屏宽收缩） */
+    --ft-type-ring-percent-long: 800 clamp(16px, 5.6vw, 22px)/32px var(--ft-font); /* 超过 3 位数封顶的「999%+」（5 个字符）：用常规字号会压到环线上，缩一档才留得出两侧的空隙 */
+    --ft-type-amount-total: 800 clamp(18px, 6.6vw, 26px)/32px var(--ft-font); /* 总览卡里的总预算额度（随屏宽在 18–26 之间） */
+    --ft-type-amount-total-long: 800 18px/24px var(--ft-font); /* 额度位数太多（≥ 12 个字符）时缩小 */
+    --ft-dur-ring: 500ms;                                  /* 进度环弧长变化的过渡 */
+    --ft-callout-warning-bg: rgba(255, 149, 0, .16);       /* 提示条（日均可用）：16% 橙浅底，直接叠在页面底色上（不像徽标有白色衬底，底比白色略暗）；文字用 --ft-warning-text（23 号已把它加深到在这块底上也 ≥ 4.5:1，不再需要单独的文字色令牌） */
+    --ft-type-amount-entry: 800 40px/48px var(--ft-font);  /* 半屏 Sheet 里键盘输入的金额（预算表单、确认账单；AmountEntry） */
+
+    /* ---------- 待确认账单 / 短信识别（19 号） ---------- */
+    --ft-capture-ready-bg: rgba(52, 199, 89, .15);         /* 「均已开启」状态条：15% 绿浅底（与 --ft-tint-green 同值），直接叠在页面底色上 */
+    --ft-capture-ready-text: #0F6B2E;                      /* 状态条文字：--ft-ink-green 在这块底上只有约 3:1，文字改用深绿（≥ 4.5:1，DesignTokensTests 校验） */
+    --ft-pcard-missing-bg: rgba(255, 59, 48, .10);         /* 账本芯片没选账本时的浅红底（比 --ft-tint-red 的 12% 淡一点：12% 上 --ft-danger-text 只有 4.46:1）；文字用 --ft-danger-text（≥ 4.5:1，DesignTokensTests 校验） */
+    --ft-pagefoot-height: 76px;                            /* 页面底部固定主按钮区的高度（按钮 52 + 上下留白 12 + 12；不含底部安全区）；内容的底部留白据此计算 */
+
+    /* ---------- 层级 ---------- */
+    --ft-z-actionbar: 90;                                  /* 多选操作栏：在列表内容之上，低于 Tab 栏（二者本就上下排开、不重叠；真重叠时 Tab 栏优先） */
+    --ft-z-tabbar: 100;                                    /* 在页面内容之上，低于 MASA 对话框 / 页面栈二级页（202） */
+    --ft-z-sheet: 120;                                     /* 底部 Sheet 与遮罩：高于 Tab 栏；放在二级页里时只在该页的层叠上下文内比较 */
+    --ft-z-popover: 125;                                   /* 弹出菜单（账本 / 支付渠道）：在 Sheet 之上、Alert 之下 */
+    --ft-z-voice: 127;                                     /* 语音覆盖层：盖住 Sheet 与弹出菜单，仍在 Alert / Toast 之下（识别失败的 Toast 要看得见） */
+    --ft-z-alert: 130;                                     /* Alert / 操作面板：在 Sheet 之上 */
+    --ft-z-toast: 1100;                                    /* Toast：高于 MASA 对话框（202）与排队消息容器（1048） */
+}
+
+/* ============================================================
+   材质降级（23 号）：把所有玻璃令牌改成不透明、不模糊的实色。三种触发条件共用同一组取值——
+     1. 系统「降低透明度」（iOS）：@media (prefers-reduced-transparency: reduce)；
+     2. 应用根开关 <html data-ft-solid="true">：宿主判定为低端设备（Android 低内存）/ 读到系统「降低透明度」时，
+        由 UiRuntime 经 ui.js 的 setSolid 写入（IRenderingProfileService，见 ADR 0007 §26）；
+     3. 浏览器不支持 backdrop-filter：@supports not (…)。
+   组件样式只引用 --ft-glass-* / --ft-voice-* 令牌（模糊用令牌里的 filter、底色用令牌里的 bg），所以这里是唯一要切换的地方。
+   三处的声明必须逐条一致——DesignTokensTests 校验（改一处要三处一起改，测试会拦住漏改）。
+   遮罩 --ft-scrim 只变暗不透出内容，不算玻璃，保持不变。
+   ============================================================ */
+@media (prefers-reduced-transparency: reduce) {
+    :root {
+        --ft-glass-bg: var(--ft-glass-solid-bg);
+        --ft-glass-filter: none;
+        --ft-glass-shadow: var(--ft-glass-solid-shadow);
+        --ft-glass-dark-bg: var(--ft-glass-dark-solid-bg);
+        --ft-glass-dark-filter: none;
+        --ft-glass-dark-shadow: var(--ft-glass-dark-solid-shadow);
+        --ft-glass-alert-bg: var(--ft-glass-solid-bg);
+        --ft-voice-bg: var(--ft-voice-bg-solid);
+        --ft-voice-bg-cancel: var(--ft-voice-bg-cancel-solid);
+        --ft-voice-filter: none;
+    }
+}
+
+:root[data-ft-solid="true"] {
+    --ft-glass-bg: var(--ft-glass-solid-bg);
+    --ft-glass-filter: none;
+    --ft-glass-shadow: var(--ft-glass-solid-shadow);
+    --ft-glass-dark-bg: var(--ft-glass-dark-solid-bg);
+    --ft-glass-dark-filter: none;
+    --ft-glass-dark-shadow: var(--ft-glass-dark-solid-shadow);
+    --ft-glass-alert-bg: var(--ft-glass-solid-bg);
+    --ft-voice-bg: var(--ft-voice-bg-solid);
+    --ft-voice-bg-cancel: var(--ft-voice-bg-cancel-solid);
+    --ft-voice-filter: none;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    :root {
+        --ft-glass-bg: var(--ft-glass-solid-bg);
+        --ft-glass-filter: none;
+        --ft-glass-shadow: var(--ft-glass-solid-shadow);
+        --ft-glass-dark-bg: var(--ft-glass-dark-solid-bg);
+        --ft-glass-dark-filter: none;
+        --ft-glass-dark-shadow: var(--ft-glass-dark-solid-shadow);
+        --ft-glass-alert-bg: var(--ft-glass-solid-bg);
+        --ft-voice-bg: var(--ft-voice-bg-solid);
+        --ft-voice-bg-cancel: var(--ft-voice-bg-cancel-solid);
+        --ft-voice-filter: none;
+    }
+}
+
+/* ============================================================
+   动效降级（23 号）：系统「减弱动态效果」（prefers-reduced-motion）开启时，所有动效时长在这里一处压成同一个「简短淡入」时长。
+   组件的动画 / 过渡时长都取自 --ft-dur-* 令牌，所以改令牌就覆盖到每个页面，以后新增的组件只要用令牌也自动受益；
+   弹簧、拉伸、位移、缩放这些「运动本身」由各组件的 reduce 规则与脚本另行去掉（ui.css 里各处的 @media (prefers-reduced-motion: reduce)、tabBar.js）。
+   不压的两类：① 金额光标的闪烁周期 --ft-dur-caret（1 Hz 的状态指示）；② 语音覆盖层的循环周期 --ft-dur-voice-*
+   （reduce 下它们的循环动画被各自的规则关掉；真要把循环周期压成 100 ms，反而成了频闪）。
+   「简短」的口径：≤ 150 ms（a11y_degradation_test.py 的 R 节按这个口径扫描整个应用）。
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --ft-dur-press: var(--ft-dur-reduced);
+        --ft-dur-icon: var(--ft-dur-reduced);
+        --ft-dur-page: var(--ft-dur-reduced);
+        --ft-dur-number: var(--ft-dur-reduced);
+        --ft-dur-tabbar: var(--ft-dur-reduced);
+        --ft-dur-swipe: var(--ft-dur-reduced);
+        --ft-dur-sheet: var(--ft-dur-reduced);
+        --ft-dur-sheet-out: var(--ft-dur-reduced);
+        --ft-dur-fade: var(--ft-dur-reduced);
+        --ft-dur-ptr: var(--ft-dur-reduced);
+        --ft-dur-segment: var(--ft-dur-reduced);
+        --ft-dur-shake: var(--ft-dur-reduced);
+        --ft-dur-ring: var(--ft-dur-reduced);
+    }
+}

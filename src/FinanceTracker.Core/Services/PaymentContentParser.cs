@@ -6,7 +6,7 @@ namespace FinanceTracker.Core.Services;
 /// <summary>
 /// 支付内容解析器：从短信/通知栏文本中提取金额、收入/支出类型和支付渠道。
 /// <para>
-/// 短信识别页（SmsRecognition.razor）、短信广播接收器（SmsBroadcastReceiver）与通知栏监听
+/// 短信识别页（SmsRecognition.razor，经 SmsCapture）、短信广播接收器（SmsBroadcastReceiver）与通知栏监听
 /// （NotificationCaptureService）三个入口必须共用这一份解析规则——各自带一份实现会让同一条短信在不同入口得到不同结果。
 /// </para>
 /// </summary>

@@ -51,17 +51,23 @@ public sealed class StatisticsControllerTests : IAsyncLifetime
         };
     }
 
-    private Task AddExpenseAsync(DateTime wallTime, decimal amount) =>
-        _billService.CreateBillAsync(new Bill
+    private async Task AddExpenseAsync(DateTime wallTime, decimal amount)
+    {
+        // 账本必填：这些用例关心的是同比口径，账单统一记在默认账本里
+        var ledger = await _db.GetDefaultLedgerAsync();
+
+        await _billService.CreateBillAsync(new Bill
         {
             UserId = _db.User.Id,
             Amount = amount,
             Type = BillType.Expense,
             CategoryId = _db.ExpenseCategory.Id,
             PaymentChannelId = _db.Channel.Id,
+            LedgerId = ledger.Id,
             TransactionTime = DateTime.SpecifyKind(wallTime, DateTimeKind.Unspecified),
             Source = BillSource.Manual
         });
+    }
 
     private static JsonElement Body(IActionResult result)
     {

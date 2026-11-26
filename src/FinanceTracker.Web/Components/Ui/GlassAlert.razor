@@ -1,0 +1,100 @@
+@namespace FinanceTracker.Web.Components.Ui
+@inherits OverlayBase
+
+@*
+    玻璃 Alert（设计稿 06 · 对话框）：用于破坏性操作确认（删除）和必须读完的提示。
+    标题 + 说明 + 底部左右两个按钮（取消 / 确认）；确认按钮默认品牌色，Destructive 时是红色。
+    ShowCancel=false 时只有一个按钮（纯告知）。
+    - 点遮罩不会关闭（避免误触放弃了本应明确选择的决定）；Esc 等同于「取消」。
+    - 点「确认」先关闭弹层再触发 OnConfirm；点「取消」/ Esc 先关闭再触发 OnCancel。
+    - 观察属性（E2E）：data-testid="alert"、alert-title、alert-message、alert-confirm、alert-cancel。
+*@
+@if (Mounted)
+{
+    <div class="ft-alert-host @(Closing ? "ft-alert-host--closing" : null)"
+         @ref="HostRef"
+         tabindex="-1"
+         data-state="@(Closing ? "closing" : "open")"
+         data-testid="alert-host"
+         @onkeydown="OnKeyDownAsync">
+        <div class="ft-scrim ft-scrim--alert"></div>
+        <div class="ft-alert"
+             role="alertdialog"
+             aria-modal="true"
+             aria-labelledby="@_titleId"
+             aria-describedby="@_messageId"
+             data-testid="@(TestId ?? "alert")">
+            <div class="ft-alert__body">
+                <h2 class="ft-alert__title" id="@_titleId" data-testid="alert-title">@Title</h2>
+                @if (!string.IsNullOrEmpty(Message))
+                {
+                    <p class="ft-alert__message" id="@_messageId" data-testid="alert-message">@Message</p>
+                }
+            </div>
+            <div class="ft-alert__actions">
+                @if (ShowCancel)
+                {
+                    <button type="button" class="ft-alert__btn" data-testid="alert-cancel" @onclick="CancelAsync">@CancelText</button>
+                }
+                <button type="button"
+                        class="ft-alert__btn ft-alert__btn--strong @(Destructive ? "ft-alert__btn--danger" : null)"
+                        data-testid="alert-confirm"
+                        @onclick="ConfirmAsync">@ConfirmText</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly string _titleId = $"ft-alert-title-{Guid.NewGuid():N}";
+    private readonly string _messageId = $"ft-alert-msg-{Guid.NewGuid():N}";
+
+    /// <summary>标题</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>说明</summary>
+    [Parameter] public string? Message { get; set; }
+
+    [Parameter] public string ConfirmText { get; set; } = "确定";
+
+    [Parameter] public string CancelText { get; set; } = "取消";
+
+    /// <summary>显示「取消」按钮</summary>
+    [Parameter] public bool ShowCancel { get; set; } = true;
+
+    /// <summary>破坏性操作：确认按钮用红色</summary>
+    [Parameter] public bool Destructive { get; set; }
+
+    /// <summary>点击确认（弹层已关闭）</summary>
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    /// <summary>点击取消或按 Esc（弹层已关闭）</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    protected override int ClosingMilliseconds => 180;
+
+    private async Task ConfirmAsync()
+    {
+        if (Closing)
+        {
+            return;
+        }
+
+        await CloseCoreAsync();
+        await OnConfirm.InvokeAsync();
+    }
+
+    private async Task CancelAsync()
+    {
+        if (Closing)
+        {
+            return;
+        }
+
+        await CloseCoreAsync();
+        await OnCancel.InvokeAsync();
+    }
+
+    private Task OnKeyDownAsync(KeyboardEventArgs e) =>
+        e.Key == "Escape" ? (ShowCancel ? CancelAsync() : ConfirmAsync()) : Task.CompletedTask;
+}

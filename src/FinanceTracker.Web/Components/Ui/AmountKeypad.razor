@@ -1,0 +1,94 @@
+@namespace FinanceTracker.Web.Components.Ui
+@inject IHapticFeedbackService Haptics
+
+@*
+    自定义数字键盘（设计稿 04）：4 列 × 4 行——1 2 3 退格 / 4 5 6 / 7 8 9 / . 0 00，右侧一个跨三行的高大「保存」键。
+    - 金额输入不唤起系统键盘：金额由键盘按键一个个拼出来，规则（两位小数、上限、不允许多个小数点…）见 Models/AmountInput，
+      本组件只转发按键（"0".."9"、"."、"00"、"backspace"、"clear"），不持有金额。
+    - 退格键长按清空：长按由 wwwroot/js/ui.js 的 data-hold-click 驱动，到点后「点击」同一键盘里隐藏的 clear 按钮；
+      松手产生的那次 click 由脚本吞掉，所以长按之后不会再多退一格。
+    - 保存键：SaveEnabled=false 时是置灰外观（aria-disabled），但仍然可以点——「记一笔」里点按置灰的保存键要让账本行抖动并弹出账本菜单，
+      所以不能用 disabled 吞掉点击；Busy（保存中）时才真正 disabled，防止重复提交。
+    - 点按反馈：按下缩放（--ft-press-scale）；每个按键一次轻触（IHapticFeedbackService，Web.Server 为空实现）。
+    - 观察属性（E2E）：keypad；key-0..key-9、key-dot、key-00、key-backspace、key-clear（隐藏）；保存键默认 keypad-save（SaveTestId 可改）。
+*@
+<div class="ft-keypad" role="group" aria-label="数字键盘" data-testid="keypad" data-hold-scope>
+    @foreach (var key in DigitKeys)
+    {
+        var current = key;
+        <button type="button"
+                class="ft-key"
+                data-testid="@($"key-{current.Id}")"
+                data-key="@current.Value"
+                @onclick="() => PressAsync(current.Value)">@current.Label</button>
+
+        @if (current.Value == "3")
+        {
+            @* 第一行末尾：退格（长按清空）。clear 按钮视觉隐藏，由长按触发 *@
+            <button type="button"
+                    class="ft-key ft-key--fn"
+                    aria-label="退格，长按清空"
+                    data-testid="key-backspace"
+                    data-key="@AmountInput.KeyBackspace"
+                    data-hold-click="[data-testid='key-clear']"
+                    @onclick="() => PressAsync(AmountInput.KeyBackspace)">
+                <i class="mdi mdi-backspace-outline" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="ft-sr-only"
+                    tabindex="-1"
+                    aria-hidden="true"
+                    data-testid="key-clear"
+                    data-key="@AmountInput.KeyClear"
+                    @onclick="() => PressAsync(AmountInput.KeyClear)"></button>
+        }
+    }
+
+    <button type="button"
+            class="ft-key ft-key--save @(SaveEnabled ? null : "ft-key--save-off")"
+            aria-disabled="@(SaveEnabled ? null : "true")"
+            aria-busy="@(Busy ? "true" : null)"
+            disabled="@Busy"
+            data-testid="@SaveTestId"
+            @onclick="SaveAsync">@(Busy ? BusyLabel : SaveLabel)</button>
+</div>
+
+@code {
+    private sealed record Key(string Id, string Value, string Label);
+
+    // 按 DOM 顺序：1 2 3 | 4 5 6 | 7 8 9 | . 0 00；退格紧跟在 3 之后（第一行末尾），保存键靠样式固定在第四列、跨三行
+    private static readonly Key[] DigitKeys =
+    [
+        new("1", "1", "1"), new("2", "2", "2"), new("3", "3", "3"),
+        new("4", "4", "4"), new("5", "5", "5"), new("6", "6", "6"),
+        new("7", "7", "7"), new("8", "8", "8"), new("9", "9", "9"),
+        new("dot", AmountInput.KeyDot, "."), new("0", "0", "0"), new("00", AmountInput.KeyDoubleZero, "00"),
+    ];
+
+    /// <summary>按了某个键（"0".."9"、"."、"00"、"backspace"、"clear"）</summary>
+    [Parameter] public EventCallback<string> OnKey { get; set; }
+
+    /// <summary>保存键可用（false 时置灰，但仍可点击——由调用方决定点按置灰的保存键该做什么）</summary>
+    [Parameter] public bool SaveEnabled { get; set; } = true;
+
+    /// <summary>保存中：保存键真正禁用并显示 <see cref="BusyLabel"/></summary>
+    [Parameter] public bool Busy { get; set; }
+
+    [Parameter] public string SaveLabel { get; set; } = "保存";
+
+    [Parameter] public string BusyLabel { get; set; } = "保存中";
+
+    /// <summary>点了保存键（含置灰状态）</summary>
+    [Parameter] public EventCallback OnSave { get; set; }
+
+    /// <summary>保存键的 E2E 钩子</summary>
+    [Parameter] public string SaveTestId { get; set; } = "keypad-save";
+
+    private async Task PressAsync(string key)
+    {
+        Haptics.SelectionChanged();
+        await OnKey.InvokeAsync(key);
+    }
+
+    private Task SaveAsync() => OnSave.InvokeAsync();
+}

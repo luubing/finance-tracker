@@ -1,0 +1,24 @@
+@* 启动加载页的「外壳就绪」信号（冷启动设计稿 docs/design/cold-start）：全局只放一个（Main.razor 根部）。本身不渲染任何内容，
+   首次交互渲染完成后通知 wwwroot/js/boot.js——Blazor 已经起来、页面栈已经渲染了第一屏。加载页据此决定何时交接并收走。
+   预渲染阶段（Blazor Server）不会走到 OnAfterRenderAsync，电路接管之后才算就绪：此前点按没有反应，不能把加载页收走。
+   「首屏就绪」不在这里判定，由页面根节点自己声明 data-ft-ready（Index.razor / LoginPage.razor）。 *@
+@inject IJSRuntime JS
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("FtBoot.shellReady");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or ObjectDisposedException)
+        {
+            // 电路已断开，或宿主页没有引入 boot.js：没有加载页可通知，应用照常使用
+        }
+    }
+}

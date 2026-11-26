@@ -1,0 +1,32 @@
+@* 沉浸式宿主：全局只放一个（Main.razor 根部）。本身不渲染任何内容，只负责
+   1) 把原生安全区同步成 CSS 变量 --ft-safe-top/right/bottom/left；
+   2) 监听状态栏下方的页面背景明暗，自动切换状态栏图标颜色（页面可用 data-statusbar-bg 显式声明）。
+   细节见 ImmersiveCoordinator 与 wwwroot/js/immersive.js。*@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ISafeAreaService SafeArea
+@inject IStatusBarService StatusBar
+
+@code {
+    private ImmersiveCoordinator? _coordinator;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 预渲染阶段不会走到这里；首次交互渲染后再接管，避免 Blazor Server 预渲染时调用 JS
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _coordinator = new ImmersiveCoordinator(JS, SafeArea, StatusBar);
+        await _coordinator.StartAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_coordinator is not null)
+        {
+            await _coordinator.DisposeAsync();
+        }
+    }
+}

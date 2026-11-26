@@ -1,94 +1,74 @@
 # -*- coding: utf-8 -*-
 """
-E2E 测试：完整登录 + 记一笔账单流程。
+E2E 测试：完整登录 + 升起记一笔 Sheet（手机视口，每次用全新手机号注册）。
 
 前置条件：
-  1. pip install playwright && python -m playwright install chromium
+  1. pip install -r tests/e2e/requirements.txt && python -m playwright install chromium
   2. FinanceTracker.Web.Server 已用 http 启动配置运行（监听 http://localhost:5999）：
-     dotnet run --project server/FinanceTracker.Web.Server --launch-profile http
+     powershell tests/e2e/server.ps1 -Action start
 
 验证点（对应历史 bug：AuthenticationService.IsPrerendering 判断错误导致
 localStorage 未写入 userId → 记账时 UserId=Guid.Empty → SQLite FOREIGN KEY constraint failed）：
   - 登录成功后 localStorage 正确写入 userId / phoneNumber（核心回归点）
-  - 登录后首页显示"本月概览"（认证状态事件通知生效，无需整页刷新；首页改版后不再有"欢迎回来"文案）
-  - /add-bill 页面正常加载分类与支付渠道
-  - 注意：MASA 下拉框在无头浏览器中难以自动化选择支付渠道，
-    表单提交依赖该项，故本脚本止步于页面加载验证；完整的"保存账单"提交请手动验证
-    （保存逻辑本身由 tests/unit 里的 BillService 测试覆盖，见 tests/e2e/README.md）
+  - 登录后首页显示"本月支出"（Hero 里的主指标；认证状态事件通知生效，无需整页刷新）
+  - 点 Tab 栏的「记一笔」升起记一笔 Sheet：分类与支付渠道正常加载
+  - 完整的"保存账单"（键盘输入金额、选分类 / 账本 / 支付渠道、保存、落库核对）见 addbill_sheet_test.py；
+    保存逻辑本身由 tests/unit 里的 BillService 测试覆盖（见 tests/e2e/README.md）
 """
+import re
 import sys
-import os
-import json
-from playwright.sync_api import sync_playwright
 
-# ======== 配置 ========
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")   # Web.Server 的 http 启动配置（见 launchSettings.json）
-TEST_PHONE = "13800138000"
-TIMEOUT_MS = 30_000
+from e2e_base import (
+    TestRun,
+    dump_html,
+    login,
+    require_server,
+    session,
+    shot,
+    wait_attr,
+    wait_text,
+)
 
-# Windows 控制台默认 GBK，统一切换 UTF-8
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 def main() -> int:
-    console_msgs: list[str] = []
-    page_errors: list[str] = []
-    result = {}
+    require_server()
+    run = TestRun("login-addbill")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.on("console", lambda m: console_msgs.append(f"[{m.type}] {m.text}"))
-        page.on("pageerror", lambda e: page_errors.append(str(e)))
-
-        page.goto(f"{BASE_URL}/", wait_until="networkidle", timeout=TIMEOUT_MS)
-        page.wait_for_selector("input[type='tel']", timeout=25_000)
+    with session() as s:
+        page = s.page
 
         # ---- 登录 ----
-        page.locator("input[type='tel']").fill(TEST_PHONE)
-        page.get_by_role("button", name="登录/注册").click()
-        page.wait_for_timeout(4_000)
-
-        body = page.inner_text("body")
-        result["home_shown"] = "本月概览" in body
+        info = login(page)
+        user_id = page.evaluate("() => localStorage.getItem('userId')")
+        phone = page.evaluate("() => localStorage.getItem('phoneNumber')")
 
         # 核心回归点：localStorage 必须写入 userId（修复前为 null）
-        result["localStorage_userId"] = page.evaluate("() => localStorage.getItem('userId')")
-        result["localStorage_phone"] = page.evaluate("() => localStorage.getItem('phoneNumber')")
+        run.check("localStorage 写入合法 userId", bool(user_id and GUID_RE.match(user_id)), str(user_id))
+        run.check("localStorage 写入手机号", phone == info.phone, f"{phone} != {info.phone}")
 
-        # ---- 进入记一笔页面 ----
-        # 首页有两个"记一笔"按钮（快捷操作；无账单时还有空状态里的一个），都跳转到记账页，取第一个即可。
-        # 不加 .first 会触发 Playwright 严格模式的"匹配到多个元素"错误
+        wait_text(page, "本月支出")
+        run.check("登录后首页显示'本月支出'", "本月支出" in page.inner_text("body"))
+        shot(page, "login-addbill-home")
+
+        # ---- 升起记一笔 Sheet ----
+        # 记一笔的入口是 Tab 栏上的圆钮（aria-label「记一笔」）；.first 兜底，避免页面里再出现同名按钮时触发严格模式报错
         page.get_by_role("button", name="记一笔").first.click()
-        page.wait_for_timeout(3_000)
-        add_bill_body = page.inner_text("body")
-        result["add_bill_loaded"] = "选择分类" in add_bill_body
-        result["categories_rendered"] = add_bill_body.count("支出") >= 1 and "餐饮" in add_bill_body
-        result["payment_channels_rendered"] = "支付渠道" in add_bill_body
+        sheet = page.get_by_test_id("addbill-sheet")
+        sheet.wait_for(state="visible")
+        wait_attr(page, '[data-testid="addbill-sheet"]', "data-ready", "true")
 
-        with open("e2e_addbill_page.html", "w", encoding="utf-8") as f:
-            f.write(page.content())
+        body = sheet.inner_text()
+        run.check("记账 Sheet 升起（标题「记一笔」），地址不变", "记一笔" in body and page.evaluate("() => location.pathname") == "/")
+        run.check("分类渲染（支出 / 收入分段 + 餐饮美食）", "支出" in body and "收入" in body and "餐饮美食" in body)
+        run.check("账本 / 支付渠道行渲染", "账本" in body and "支付渠道" in body)
+        shot(page, "login-addbill-add-bill")
+        dump_html(page, "login_addbill_add-bill")
 
-        browser.close()
+        run.check_clean(s.errors)
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    print("=== PAGE ERRORS ===")
-    print("\n".join(page_errors) or "(none)")
-    print("=== CONSOLE ERRORS ===")
-    print("\n".join(m for m in console_msgs if m.startswith("[error]")) or "(none)")
-
-    ok = (
-        result["home_shown"]
-        and result["localStorage_userId"]           # 非 null 且为合法 GUID
-        and result["localStorage_phone"] == TEST_PHONE
-        and result["add_bill_loaded"]
-        and result["categories_rendered"]
-        and result["payment_channels_rendered"]
-        and not page_errors
-    )
-    print("E2E LOGIN+ADDBILL TEST:", "PASSED" if ok else "FAILED")
-    return 0 if ok else 1
+    return run.finish()
 
 
 if __name__ == "__main__":

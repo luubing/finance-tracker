@@ -1,0 +1,306 @@
+@namespace FinanceTracker.Web.Components.PendingBills
+@implements IDisposable
+@inject IPopupService PopupService
+
+@*
+    确认账单 Sheet（待确认账单的「修改后入账」；短信识别页读到的短信也是先进待确认账单，再走这里确认）：半屏、自定义数字键盘，不唤起系统键盘。
+    布局：标题栏 → 来源行（支付渠道 · 通知栏 / 短信识别 · 时间）与备注原文摘要 → 可选的提示（支付渠道没匹配到）→「支出 | 收入」分段
+    → 金额（AmountEntry，键盘一个个键拼出来）→ 两行设置（支付渠道 / 账本）→ 固定在底部的数字键盘（右侧高大的「入账」键）。
+    - 分类不在这里选：待确认项 / 短信里没有分类，入账时按类型取「其他支出 / 其他收入」（PendingBillConversion.PickCategory）；
+      要改分类，入账后到账单里编辑。这与旧页面的行为一致。
+    - 账本必填：置灰的「入账」键仍可点，点了会引导——缺金额：金额抖动并提示；缺支付渠道 / 账本：对应行抖动并直接弹出菜单
+      （账本菜单里有「新建账本…」，行内建好后自动选中）。通过前端校验后调用 OnConfirm，由页面写库并返回结果：
+      Saved 则收起；Invalid / Failed 页面已经提示过，Sheet 留着让用户改了重试（保存期间不可下滑收起、不可重复提交）。
+    - 每次打开按 Draft 重置：金额、类型、支付渠道、账本都以 Draft 为准；收起动画期间保持原样。
+    - 弹出菜单（账本 / 支付渠道）渲染在 BottomSheet 之外：它们是 fixed 定位，放进 Sheet 的动画容器里坐标会错位。
+    - 观察属性（E2E）：confirm-sheet（data-type）、confirm-source / confirm-time / confirm-note / confirm-hint、confirm-type（分段）、
+      confirm-amount（data-value / data-empty / data-shake）、confirm-channel-row / confirm-ledger-row（data-value / data-missing）、
+      confirm-channel-menu / confirm-ledger-menu（选项 channel-option / ledger-option）、键盘 keypad / key-*、入账键 confirm-save。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             Title="@Draft.Title"
+             Dismissible="@(!_saving)"
+             TestId="confirm-sheet"
+             data-variant="confirm"
+             data-type="@(_isIncome ? "income" : "expense")">
+    <ChildContent>
+        <div class="ft-confirm" data-testid="confirm-body">
+            <div class="ft-confirm__source">
+                <span data-testid="confirm-source">@Draft.SourceLine</span>
+                <span class="ft-confirm__dot" aria-hidden="true">·</span>
+                <span data-testid="confirm-time">@Draft.TimeText</span>
+            </div>
+            @if (!string.IsNullOrEmpty(Draft.NoteText))
+            {
+                <div class="ft-confirm__note" data-testid="confirm-note">@Draft.NoteText</div>
+            }
+            @if (!string.IsNullOrEmpty(Draft.Hint))
+            {
+                <div class="ft-callout ft-callout--warning ft-confirm__hint" role="status" data-testid="confirm-hint">
+                    <i class="mdi mdi-information-outline ft-callout__icon" aria-hidden="true"></i>
+                    <span class="ft-callout__text">@Draft.Hint</span>
+                </div>
+            }
+
+            <SegmentedControl Options="TypeOptions"
+                              Value="@CategoryPresentation.SegmentOf(_isIncome ? BillType.Income : BillType.Expense)"
+                              ValueChanged="OnTypeChanged"
+                              AriaLabel="账单类型"
+                              TestId="confirm-type" />
+
+            <AmountEntry Value="@_amount" SpokenLabel="账单金额" Shake="_shakeAmount" TestId="confirm-amount" />
+
+            @* 两行设置沿用「记一笔」的紧凑单元格样式（ft-addbill__rows / __field / __anchor：行高、右值省略、没选时的红字、抖动） *@
+            <GroupedList Class="ft-addbill__rows ft-confirm__rows" TestId="confirm-rows">
+                <div class="ft-addbill__anchor" @ref="_channelAnchor" data-shake="@(_shakeChannel ? "true" : null)">
+                    <ListCell Icon="mdi-credit-card-outline"
+                              Tone="green"
+                              Title="支付渠道"
+                              Value="@ChannelValue"
+                              Class="@(ChannelMissing ? "ft-addbill__field ft-addbill__field--missing" : "ft-addbill__field")"
+                              Chevron
+                              TestId="confirm-channel-row"
+                              AriaLabel="@($"支付渠道，{ChannelValue}")"
+                              aria-haspopup="menu"
+                              aria-expanded="@(_channelMenuOpen ? "true" : "false")"
+                              data-value="@(_channelId?.ToString())"
+                              data-missing="@(ChannelMissing ? "true" : "false")"
+                              OnClick="OpenChannelMenu" />
+                </div>
+                <div class="ft-addbill__anchor" @ref="_ledgerAnchor" data-shake="@(_shakeLedger ? "true" : null)">
+                    <ListCell Icon="mdi-book-open-variant"
+                              Tone="purple"
+                              Title="账本"
+                              Value="@LedgerValue"
+                              Class="@(LedgerMissing ? "ft-addbill__field ft-addbill__field--missing" : "ft-addbill__field")"
+                              Chevron
+                              TestId="confirm-ledger-row"
+                              AriaLabel="@($"账本，{LedgerValue}")"
+                              aria-haspopup="menu"
+                              aria-expanded="@(_ledgerMenuOpen ? "true" : "false")"
+                              data-value="@(_ledgerId?.ToString())"
+                              data-missing="@(LedgerMissing ? "true" : "false")"
+                              OnClick="OpenLedgerMenu" />
+                </div>
+            </GroupedList>
+        </div>
+    </ChildContent>
+    <Footer>
+        <AmountKeypad OnKey="OnKeyAsync"
+                      OnSave="SaveAsync"
+                      SaveEnabled="@CanSave"
+                      Busy="_saving"
+                      SaveLabel="@Draft.SaveLabel"
+                      BusyLabel="@PendingBillPresentation.SheetSavingLabel"
+                      SaveTestId="confirm-save" />
+    </Footer>
+</BottomSheet>
+
+<LedgerMenu @bind-Visible="_ledgerMenuOpen"
+            Anchor="_ledgerAnchor"
+            Ledgers="Ledgers"
+            SelectedId="_ledgerId"
+            OnSelect="SelectLedger"
+            OnCreate="OpenLedgerSheet"
+            TestId="confirm-ledger-menu" />
+
+<PopoverMenu @bind-Visible="_channelMenuOpen"
+             Anchor="_channelAnchor"
+             AriaLabel="选择支付渠道"
+             TestId="confirm-channel-menu">
+    @foreach (var channel in Channels)
+    {
+        var current = channel;
+        <PopoverMenuItem Label="@current.Name"
+                         Icon="@PaymentChannelPresentation.NormalizeIcon(current.Icon)"
+                         Selected="@(current.Id == _channelId)"
+                         Value="@current.Id.ToString()"
+                         TestId="channel-option"
+                         OnClick="() => SelectChannel(current.Id)" />
+    }
+</PopoverMenu>
+
+<LedgerFormSheet @bind-Visible="_ledgerSheetOpen"
+                 UserId="UserId"
+                 OnCreated="OnLedgerCreatedAsync" />
+
+@code {
+    /// <summary>与样式里的 ft-shake 时长一致（AddBillSheet 同一个值）</summary>
+    private const int ShakeMilliseconds = 460;
+
+    private static readonly IReadOnlyList<SegmentOption> TypeOptions =
+        CategoryPresentation.Segments.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
+
+    private ElementReference _channelAnchor;
+    private ElementReference _ledgerAnchor;
+    private bool _wasVisible;
+    private bool _saving;
+    private bool _disposed;
+    private string _amount = string.Empty;
+    private bool _isIncome;
+    private Guid? _channelId;
+    private Guid? _ledgerId;
+    private bool _channelMenuOpen;
+    private bool _ledgerMenuOpen;
+    private bool _ledgerSheetOpen;
+    private bool _shakeAmount;
+    private bool _shakeChannel;
+    private bool _shakeLedger;
+
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>这一次要确认的内容（每次打开按它重置）</summary>
+    [Parameter, EditorRequired] public PendingConfirmDraft Draft { get; set; } = new("确认账单", string.Empty, string.Empty, null, null, null, false, null, null);
+
+    /// <summary>可选的支付渠道</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PaymentChannel> Channels { get; set; } = [];
+
+    /// <summary>可选的账本（用户自己的账本）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<LedgerModel> Ledgers { get; set; } = [];
+
+    /// <summary>当前用户（行内新建账本用）</summary>
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 点了「入账」且前端校验通过：由页面写库并返回结果。Saved 时 Sheet 收起；其余结果页面已经提示过，Sheet 保持打开
+    /// </summary>
+    [Parameter] public Func<PendingConfirmValues, Task<ConfirmResult>>? OnConfirm { get; set; }
+
+    /// <summary>行内新建了账本：页面把它放进账本列表（Sheet 自己会选中它）</summary>
+    [Parameter] public EventCallback<Ledger> OnLedgerCreated { get; set; }
+
+    private bool ChannelMissing => _channelId is null;
+
+    private bool LedgerMissing => _ledgerId is null;
+
+    private string ChannelValue => Channels.FirstOrDefault(c => c.Id == _channelId)?.Name ?? "选择支付渠道";
+
+    private string LedgerValue => Ledgers.FirstOrDefault(l => l.Id == _ledgerId)?.Name ?? PendingBillPresentation.ChooseLedgerText;
+
+    private bool CanSave => PendingBillPresentation.Validate(AmountInput.Parse(_amount), _channelId, _ledgerId) is null;
+
+    protected override void OnParametersSet()
+    {
+        // 每次升起按 Draft 重置；收起动画期间（Visible 已为 false 但还在屏幕上）保持原样，所以只在「由关到开」时重置
+        if (Visible && !_wasVisible)
+        {
+            _amount = Draft.Amount is { } amount ? AmountInput.FromDecimal(amount) : string.Empty;
+            _isIncome = Draft.IsIncome;
+            _channelId = Draft.ChannelId;
+            _ledgerId = Draft.LedgerId;
+            _saving = false;
+            _channelMenuOpen = false;
+            _ledgerMenuOpen = false;
+            _ledgerSheetOpen = false;
+            _shakeAmount = false;
+            _shakeChannel = false;
+            _shakeLedger = false;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void OnTypeChanged(string segment) => _isIncome = CategoryPresentation.TypeOf(segment) == BillType.Income;
+
+    private Task OnKeyAsync(string key)
+    {
+        _amount = AmountInput.Apply(_amount, key);
+        return Task.CompletedTask;
+    }
+
+    private void OpenChannelMenu() => _channelMenuOpen = true;
+
+    private void OpenLedgerMenu() => _ledgerMenuOpen = true;
+
+    private void OpenLedgerSheet() => _ledgerSheetOpen = true;
+
+    private void SelectChannel(Guid id) => _channelId = id;
+
+    private void SelectLedger(Guid id) => _ledgerId = id;
+
+    private async Task OnLedgerCreatedAsync(Ledger created)
+    {
+        _ledgerId = created.Id;
+        await OnLedgerCreated.InvokeAsync(created);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving || OnConfirm is null)
+        {
+            return;
+        }
+
+        var amount = AmountInput.Parse(_amount);
+        var message = PendingBillPresentation.Validate(amount, _channelId, _ledgerId);
+        if (message is not null || amount is not { } value || _channelId is not { } channelId || _ledgerId is not { } ledgerId)
+        {
+            await GuideAsync(amount, message ?? PendingBillPresentation.InvalidAmountMessage);
+            return;
+        }
+
+        _saving = true;
+        StateHasChanged();
+
+        ConfirmResult result;
+        try
+        {
+            result = await OnConfirm(new PendingConfirmValues(value, _isIncome, channelId, ledgerId));
+        }
+        finally
+        {
+            _saving = false;
+        }
+
+        if (result.Status == ConfirmStatus.Saved)
+        {
+            await VisibleChanged.InvokeAsync(false);
+        }
+    }
+
+    /// <summary>
+    /// 点按置灰的「入账」键：告诉用户缺什么。缺金额：金额抖动 + 提示；缺支付渠道 / 账本：对应行抖动并直接弹出菜单
+    /// （账本菜单里有「新建账本…」）。
+    /// </summary>
+    private async Task GuideAsync(decimal? amount, string message)
+    {
+        if (amount is not > 0m)
+        {
+            Shake(v => _shakeAmount = v);
+            await PopupService.EnqueueSnackbarAsync(message, AlertTypes.Warning);
+        }
+        else if (_channelId is null)
+        {
+            _channelMenuOpen = true;
+            Shake(v => _shakeChannel = v);
+        }
+        else
+        {
+            _ledgerMenuOpen = true;
+            Shake(v => _shakeLedger = v);
+        }
+    }
+
+    /// <summary>把一个抖动标志置为 true，过一会儿再复位（样式据 data-shake 播放动画）</summary>
+    private void Shake(Action<bool> set)
+    {
+        set(true);
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(ShakeMilliseconds);
+            if (_disposed)
+            {
+                return;
+            }
+
+            set(false);
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose() => _disposed = true;
+}

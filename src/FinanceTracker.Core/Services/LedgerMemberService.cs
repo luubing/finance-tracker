@@ -307,15 +307,21 @@ public class LedgerMemberService : ILedgerMemberService
     }
 
     /// <inheritdoc />
-    public async Task<List<Ledger>> GetSharedLedgersAsync(Guid userId)
+    public Task<List<Ledger>> GetSharedLedgersAsync(Guid userId)
     {
-        return await _context.LedgerMembers
-            .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active &&
-                !m.IsDeleted && m.Role != LedgerMemberRole.Owner)
-            .Where(m => !m.Ledger.IsDeleted)
-            .Select(m => m.Ledger)
-            .OrderBy(l => l.CreatedAt)
-            .ToListAsync();
+        return LedgerMemberQueries.GetSharedLedgersAsync(_context, userId);
+    }
+
+    /// <inheritdoc />
+    public Task<Dictionary<Guid, int>> GetActiveMemberCountsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds)
+    {
+        return LedgerMemberQueries.CountActiveMembersAsync(_context, userId, ledgerIds);
+    }
+
+    /// <inheritdoc />
+    public Task<HashSet<Guid>> GetReadOnlyLedgerIdsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds)
+    {
+        return LedgerMemberQueries.GetReadOnlyLedgerIdsAsync(_context, userId, ledgerIds);
     }
 
     /// <summary>

@@ -7,16 +7,17 @@
 - **手动记账**：支持支出/收入账单录入
 - **分类管理**：预设分类 + 用户自定义分类（区分支出/收入）
 - **支付渠道管理**：预设渠道（微信支付、支付宝、现金等）+ 用户自定义渠道
-- **账单列表**：查看历史账单
+- **账单列表**：独立的「账单」Tab，按日分组、左滑编辑 / 删除；可按时间、分类、支付渠道、账本、类型等条件筛选，也可按关键字（备注 / 分类名称 / 金额）搜索；顶部汇总卡显示当前条件下**全部**账单的支出、收入与笔数（不受分页影响）；历史上没有账本的账单可批量「归属账本」
 - **账单导入**：微信/支付宝账单 CSV 导入，自动匹配分类与支付渠道
 - **自动识别**：短信识别、通知栏支付监听（Android）、语音记账（识别结果仅预填表单，确认后保存）
-- **统计报表**：月度统计（饼图）、趋势图（折线图）、年度报表、自定义报表（分类环比、CSV 导出）
-- **预算管理**：总预算 + 分类预算（可按账本独立设置），超支本地通知（每日最多一次）
+- **统计报表**：「统计」Tab 里的月度 / 趋势 / 年度三个分段（月度环形图与分类排行、趋势折线图、年度同比），自定义报表（分类环比、CSV 导出）从统计页右上角进入
+- **预算管理**：总预算 + 分类预算（可按账本独立设置），环形总览与「日均可用」提示（查看当前月份时），超支本地通知（每日最多一次）
 - **多账本与共享账本**：账本数据隔离；共享账本支持邀请确认与 Owner/Editor/Viewer 三角色权限
 - **默认值偏好**：在分类、支付渠道、账本管理页点击星标，可把常用的支出分类、收入分类、支付渠道、账本设为默认（再点一次取消），记账时自动预选；每个用户独立保存，共享账本不能设为默认
 - **用户登录**：手机号注册/登录（JWT 认证）
 - **云端同步**：离线缓存（最多 1000 条）+ 手动触发同步（「同步状态」组件；导入账单后会自动触发一次），冲突采用"后写入优先"（Last Write Wins）。联网后自动同步尚未实现，详见 [Issue 11](.scratch/finance-tracker/issues/11-cloud-sync.md)
 - **错误日志查看**：用 Serilog 把 Error 及以上级别的日志写入本地文件（按天滚动、保留 14 天、单文件 ≤ 20 MB），在「我的 → 错误日志」里按时间/级别/关键字筛选、查看详情、导出与清空（MAUI 端）
+- **iOS 风格界面**：液态玻璃的四个 Tab（首页 / 账单 / 统计 / 我的）+ 独立的「记一笔」圆钮，沉浸式状态栏与安全区，Tab 滑块切换；系统「降低透明度」「减弱动态效果」、低端设备与大字号下自动降级。设计令牌与复用组件见 [ADR 0007](docs/adr/0007-ios-visual-system.md)，设计稿在 [docs/design/](docs/design/)；只有浅色主题
 
 各版本功能的拆解与完成情况详见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
 
@@ -25,7 +26,7 @@
 | 类别 | 技术 |
 |------|------|
 | 运行时 | .NET 10.0 |
-| 移动端 | .NET MAUI Blazor (Android/iOS) + MASA Blazor UI |
+| 移动端 | .NET MAUI Blazor (Android/iOS) + MASA Blazor（基础组件与页面栈）；视觉是 iOS 风格设计系统（设计令牌 + 复用组件，见 [ADR 0007](docs/adr/0007-ios-visual-system.md)） |
 | Web 端 | Blazor Server |
 | 后端 | ASP.NET Core Web API + Swagger |
 | ORM | Entity Framework Core |
@@ -50,7 +51,8 @@ FinanceTracker/
 │   ├── unit/                               # xUnit 单元测试（真实 SQLite + 迁移）
 │   └── e2e/                                # 端到端测试脚本（Python），见 tests/e2e/README.md
 ├── docs/
-│   └── adr/                                # 架构决策记录 (ADR)
+│   ├── adr/                                # 架构决策记录 (ADR)
+│   └── design/                             # UI 设计稿（iOS 风格重构、冷启动）
 └── docker-compose.yml                      # PostgreSQL 开发环境
 ```
 
@@ -176,5 +178,6 @@ API 服务配置位于 `server/FinanceTracker.Api/appsettings.json`：
 - [CLAUDE.md](CLAUDE.md) — AI 辅助开发指引（架构、命令、注意事项）
 - [CONTEXT.md](CONTEXT.md) — 领域语言定义
 - [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) — 完整实现计划与数据模型
-- [docs/adr/](docs/adr/) — 架构决策记录
+- [docs/adr/](docs/adr/) — 架构决策记录（UI 的视觉体系见 [0007](docs/adr/0007-ios-visual-system.md)）
+- [docs/design/](docs/design/) — UI 设计稿（iOS 风格重构总览与分屏、冷启动）
 - [tests/e2e/README.md](tests/e2e/README.md) — 端到端测试说明

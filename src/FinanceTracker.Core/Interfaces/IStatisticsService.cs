@@ -30,6 +30,18 @@ public interface IStatisticsService
     Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type, Guid? ledgerId = null);
 
     /// <summary>
+    /// 获取账本统计数据（某月当前用户的账单按账本汇总，金额降序）。
+    /// 用于"全部账本"视图：此时再按分类汇总意义不大，改为看钱花在了哪些账本上。
+    /// 账单没有账本（账本必填之前创建的历史账单）时归入 <see cref="LedgerStatistics.UnassignedLedgerName"/>。
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="year">年份</param>
+    /// <param name="month">月份</param>
+    /// <param name="type">账单类型</param>
+    /// <returns>账本统计数据</returns>
+    Task<List<LedgerStatistics>> GetLedgerStatisticsAsync(Guid userId, int year, int month, BillType type);
+
+    /// <summary>
     /// 获取趋势数据
     /// </summary>
     /// <param name="userId">用户ID</param>
@@ -41,7 +53,9 @@ public interface IStatisticsService
     Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, TrendDimension dimension, Guid? ledgerId = null);
 
     /// <summary>
-    /// 获取年度统计数据
+    /// 获取年度统计数据：全年及各月的收支汇总，分类统计有三份——
+    /// <see cref="AnnualStatistics.CategoryStats"/>（收支混合，REST 接口沿用）、
+    /// <see cref="AnnualStatistics.ExpenseCategoryStats"/>（只含支出）、<see cref="AnnualStatistics.IncomeCategoryStats"/>（只含收入），后两份的占比各自占本类合计
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>

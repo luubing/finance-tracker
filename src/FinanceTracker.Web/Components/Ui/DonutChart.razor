@@ -1,0 +1,69 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    构成圆环（设计稿 screens 03-stats ④）：一圈粗环按金额占比分成若干段，段与段之间留一道小缺口，环中心放总额（ChildContent）。
+    用 SVG 画（不用 ECharts）：环很简单，不需要交互，纯 SVG 没有脚本与 CDN 依赖，加载快、手机上不卡，
+    每一段又是一个独立元素，E2E 能直接数出段数、读出占比。几何由 DonutGeometry（纯函数）计算。
+    - 颜色来自图例行的 ColorIndex（CSS 类 ft-hue--N → 自定义属性 --ft-hue），所以环与图例的颜色永远一致，且只引用设计令牌。
+    - 没有数据时画一圈灰色的空环（版面不跳），中心照常显示总额（0）。
+    - 读屏：SVG 本身是装饰（aria-hidden），信息由中心文字与旁边的图例（LegendList）承担。
+    - 观察属性（E2E）：根 data-testid（TestId）、data-slices（段数）；每段 data-testid="donut-arc"、data-name、data-fraction（占整圈的比例）。
+*@
+<div class="ft-donut @Class" data-testid="@TestId" data-slices="@_arcs.Count">
+    <svg class="ft-donut__svg" viewBox="0 0 @Num(DonutGeometry.ViewBox) @Num(DonutGeometry.ViewBox)" aria-hidden="true" focusable="false">
+        @if (_arcs.Count == 0)
+        {
+            <circle class="ft-donut__track" cx="@Num(Center)" cy="@Num(Center)" r="@Num(DonutGeometry.Radius)" fill="none" stroke-width="@Num(DonutGeometry.StrokeWidth)"></circle>
+        }
+        else
+        {
+            @* 从 12 点钟方向开始、顺时针；每段是一个圆，用虚线只显示自己的那段弧 *@
+            <g transform="rotate(-90 @Num(Center) @Num(Center))">
+                @foreach (var arc in _arcs)
+                {
+                    var row = Rows[arc.Index];
+                    <circle class="ft-donut__arc ft-hue--@row.ColorIndex"
+                            cx="@Num(Center)" cy="@Num(Center)" r="@Num(DonutGeometry.Radius)"
+                            fill="none"
+                            stroke-width="@Num(DonutGeometry.StrokeWidth)"
+                            stroke-dasharray="@Num(arc.Length) @Num(DonutGeometry.Circumference - arc.Length)"
+                            stroke-dashoffset="@Num(-arc.Offset)"
+                            data-testid="donut-arc"
+                            data-name="@row.Name"
+                            data-fraction="@Fraction(arc)"></circle>
+                }
+            </g>
+        }
+    </svg>
+    <div class="ft-donut__center">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    private const double Center = DonutGeometry.ViewBox / 2d;
+
+    private IReadOnlyList<DonutArc> _arcs = [];
+
+    /// <summary>图例行（环的每一段对应一行，金额决定占比，ColorIndex 决定颜色）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<LegendRow> Rows { get; set; } = [];
+
+    /// <summary>环中心的内容（通常是「总支出」小字 + 总额）</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "donut";
+
+    protected override void OnParametersSet()
+    {
+        _arcs = DonutGeometry.Arcs(Rows.Select(r => r.Amount).ToList());
+    }
+
+    // SVG 属性里的数字：固定用 . 作小数点（不随设备区域设置变化），最多三位小数
+    private static string Num(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Fraction(DonutArc arc) => arc.Fraction.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+}

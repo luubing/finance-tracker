@@ -1,0 +1,231 @@
+@namespace FinanceTracker.Web.Components.Statistics
+@using Masa.Blazor.Presets.PageStack.NavController
+@inherits StatisticsViewBase
+@inject IStatisticsService StatisticsService
+@inject IBudgetService BudgetService
+@inject PageStackNavController NavController
+
+@*
+    月度视图（设计稿 screens 03-stats；统计 Tab「月度」分段的内容）。
+    月份由外壳（Pages/Statistics.razor）的月份胶囊持有、账本由外壳的账本胶囊持有，经参数传进来；本视图只负责取数与摆放：
+      KPI 单卡（支出 / 收入 / 结余）
+      → 支出构成（圆环 + 图例；标题旁的小按钮切换看支出 / 收入，右侧「按账本 / 按分类」切换汇总口径）
+      → 预算执行（当月有预算才显示）→ 分类排行 → 支出日历 → 累计收支。
+    数据口径与以前完全一致（ADR 0005）：月份是应用时区的自然月、区间左闭右开；统计只算当前用户自己记的账单；
+    无账本的历史账单在「按账本」里归「未归属账本」；预算的账本口径随账本筛选（null = 全部账本的预算）。
+    一次加载把本页要用的数据全取回来（含支出 / 收入两套、分类 / 账本两种汇总），所以切换「支出 ↔ 收入」「按账本 ↔ 按分类」不再查库。
+    观察属性（E2E）：根 data-testid="stats-monthly"（data-year / data-month / data-state = loading | ready | reloading | failed）；
+    KPI stats-kpi 与 stats-kpi-expense / -income / -balance；构成 stats-comp-title / stats-comp-switch（data-target）/ stats-comp-dimension（data-mode）、
+    stats-composition、stats-donut（donut-arc）、stats-donut-total、stats-legend（legend-row）、stats-composition-empty；
+    预算 stats-budget-header / stats-budget-manage / stats-budget-group（budget-row）；图表容器 stats-rank / stats-calendar / stats-cumulative。
+*@
+<div class="ft-stats-view"
+     data-testid="stats-monthly"
+     data-year="@Year"
+     data-month="@Month"
+     data-state="@StateKey"
+     aria-busy="@(IsLoading ? "true" : null)">
+    @if (LoadFailed)
+    {
+        <EmptyState Icon="mdi-alert-circle-outline"
+                    Title="统计加载失败"
+                    Text="下拉刷新，再试一次"
+                    TestId="stats-load-failed" />
+    }
+    else
+    {
+        <KpiCard Items="_kpi" Loading="@(!HasLoaded)" TestId="stats-kpi" />
+
+        @* 支出构成：标题旁的小按钮切换支出 / 收入；右侧切换按分类 / 按账本（只有「全部账本」且有账本时才有意义） *@
+        <div class="ft-section" data-testid="stats-comp-header">
+            <div class="ft-section__lead">
+                <h2 class="ft-section__title" data-testid="stats-comp-title">@StatisticsPresentation.CompositionTitle(_type)</h2>
+                <button type="button"
+                        class="ft-chip"
+                        aria-label="@StatisticsPresentation.SwitchTypeAriaLabel(_type)"
+                        data-target="@TypeKey(StatisticsPresentation.Other(_type))"
+                        data-testid="stats-comp-switch"
+                        @onclick="SwitchType">
+                    <i class="mdi mdi-swap-horizontal ft-chip__icon" aria-hidden="true"></i>
+                    <span class="ft-chip__label">@StatisticsPresentation.SwitchTypeText(_type)</span>
+                </button>
+            </div>
+            @if (CanGroupByLedger)
+            {
+                <button type="button"
+                        class="ft-section__action"
+                        aria-label="@StatisticsPresentation.DimensionActionAriaLabel(ByLedger)"
+                        data-mode="@(ByLedger ? "ledger" : "category")"
+                        data-testid="stats-comp-dimension"
+                        @onclick="ToggleDimension">@StatisticsPresentation.DimensionActionText(ByLedger)<i class="mdi mdi-chevron-right" aria-hidden="true"></i></button>
+            }
+        </div>
+        <ChartPanel Loading="@(!HasLoaded)" TestId="stats-composition" SkeletonHeight="330">
+            <DonutChart Rows="CurrentRows" TestId="stats-donut">
+                <span class="ft-donut__caption" data-testid="stats-donut-label">@StatisticsPresentation.TotalLabel(_type)</span>
+                <AmountDisplay Amount="CurrentTotal"
+                               Size="AmountSize.Lg"
+                               Class="@(StatisticsPresentation.IsLongAmount(CurrentTotal) ? "ft-donut__total ft-amount--long" : "ft-donut__total")"
+                               TestId="stats-donut-total" />
+            </DonutChart>
+            @if (CurrentRows.Count > 0)
+            {
+                <LegendList Rows="CurrentRows"
+                            AriaLabel="@StatisticsPresentation.LegendAriaLabel(_type, ByLedger)"
+                            TestId="stats-legend" />
+            }
+            else
+            {
+                <p class="ft-panel__note" data-testid="stats-composition-empty">@StatisticsPresentation.CompositionEmptyText(_type)</p>
+            }
+        </ChartPanel>
+
+        @* 预算执行：当月没有预算时整节不显示（与以前一致） *@
+        @if (_budgetRows.Count > 0)
+        {
+            <SectionHeader Title="@StatisticsPresentation.BudgetTitle"
+                           ActionText="管理"
+                           ActionAriaLabel="管理预算"
+                           OnAction="OpenBudgets"
+                           TestId="stats-budget-header"
+                           ActionTestId="stats-budget-manage" />
+            <GroupedList TestId="stats-budget-group">
+                @foreach (var row in _budgetRows)
+                {
+                    <BudgetRow Model="row" />
+                }
+            </GroupedList>
+        }
+
+        <SectionHeader Title="@StatisticsPresentation.RankTitle" TestId="stats-rank-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_expenseCategories.Count == 0)"
+                    EmptyText="@StatisticsPresentation.RankEmptyText"
+                    SkeletonHeight="260"
+                    TestId="stats-rank">
+            <CategoryRankChart Categories="_expenseCategories" TopN="8" />
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.CalendarTitle" TestId="stats-calendar-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(!_daily.Any(t => t.Expense > 0))"
+                    EmptyText="@StatisticsPresentation.CalendarEmptyText"
+                    EmptyIcon="mdi-calendar-month"
+                    SkeletonHeight="240"
+                    TestId="stats-calendar">
+            <CalendarHeatmapChart DailyData="_daily" Year="Year" Month="Month" />
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.CumulativeTitle" TestId="stats-cumulative-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_daily.Count == 0)"
+                    EmptyText="@StatisticsPresentation.CumulativeEmptyText"
+                    EmptyIcon="mdi-chart-areaspline"
+                    SkeletonHeight="260"
+                    TestId="stats-cumulative">
+            <CumulativeNetChart DailyData="_daily" Year="Year" Month="Month" />
+        </ChartPanel>
+    }
+</div>
+
+@code {
+    /// <summary>年份（应用时区）</summary>
+    [Parameter, EditorRequired] public int Year { get; set; }
+
+    /// <summary>月份 1–12（应用时区）</summary>
+    [Parameter, EditorRequired] public int Month { get; set; }
+
+    /// <summary>用户自己的账本个数：决定「按账本」汇总有没有意义（外壳加载账本列表后传入）</summary>
+    [Parameter] public int LedgerCount { get; set; }
+
+    // 构成区的两个视图状态（切换不查库）：看支出还是收入；按分类还是按账本
+    private BillType _type = BillType.Expense;
+    private bool _byLedger;
+
+    // 加载结果（一次取齐、一起写入）
+    private IReadOnlyList<KpiItem> _kpi = BuildKpi(0m, 0m);
+    private decimal _totalExpense;
+    private decimal _totalIncome;
+    private List<CategoryStatistics> _expenseCategories = [];
+    private IReadOnlyList<LegendRow> _expenseCategoryRows = [];
+    private IReadOnlyList<LegendRow> _incomeCategoryRows = [];
+    private IReadOnlyList<LegendRow> _expenseLedgerRows = [];
+    private IReadOnlyList<LegendRow> _incomeLedgerRows = [];
+    private IReadOnlyList<BudgetRowModel> _budgetRows = [];
+    private List<TrendData> _daily = [];
+
+    protected override object? LoadKey => (Year, Month, LedgerCount > 0);
+
+    private bool CanGroupByLedger => StatisticsPresentation.CanGroupByLedger(LedgerId, LedgerCount);
+
+    private bool ByLedger => _byLedger && CanGroupByLedger;
+
+    private decimal CurrentTotal => _type == BillType.Income ? _totalIncome : _totalExpense;
+
+    private IReadOnlyList<LegendRow> CurrentRows => (_type, ByLedger) switch
+    {
+        (BillType.Income, true) => _incomeLedgerRows,
+        (BillType.Income, false) => _incomeCategoryRows,
+        (_, true) => _expenseLedgerRows,
+        _ => _expenseCategoryRows,
+    };
+
+    protected override void OnParametersSet()
+    {
+        // 选了具体账本 / 账本被删光之后，「按账本」没有意义：回到按分类（之后回到全部账本也保持按分类，与默认一致）
+        if (_byLedger && !CanGroupByLedger)
+        {
+            _byLedger = false;
+        }
+    }
+
+    protected override async Task LoadAsync()
+    {
+        // 参数在 await 期间可能变化：先取快照，用同一份参数取完所有数据
+        var userId = UserId;
+        var year = Year;
+        var month = Month;
+        var ledgerId = LedgerId;
+        var canGroup = StatisticsPresentation.CanGroupByLedger(ledgerId, LedgerCount);
+
+        var monthly = await StatisticsService.GetMonthlyStatisticsAsync(userId, year, month, ledgerId);
+        var expense = await StatisticsService.GetCategoryStatisticsAsync(userId, year, month, BillType.Expense, ledgerId);
+        var income = await StatisticsService.GetCategoryStatisticsAsync(userId, year, month, BillType.Income, ledgerId);
+
+        // 按账本汇总只在「全部账本」且有账本时用得上；统计服务的账本汇总不受账本筛选影响，也只算当前用户自己的账单
+        var expenseLedgers = canGroup
+            ? await StatisticsService.GetLedgerStatisticsAsync(userId, year, month, BillType.Expense)
+            : [];
+        var incomeLedgers = canGroup
+            ? await StatisticsService.GetLedgerStatisticsAsync(userId, year, month, BillType.Income)
+            : [];
+
+        var budgets = await BudgetService.GetBudgetStatusAsync(userId, year, month, ledgerId);
+
+        // 日粒度趋势（支出日历 / 累计收支用）：整月，终点取月末最后一刻
+        var daily = await StatisticsService.GetTrendDataAsync(
+            userId, new DateTime(year, month, 1), TimeBoundaries.EndOfMonth(year, month), TrendDimension.Day, ledgerId);
+
+        _totalExpense = monthly.TotalExpense;
+        _totalIncome = monthly.TotalIncome;
+        _kpi = BuildKpi(monthly.TotalExpense, monthly.TotalIncome);
+        _expenseCategories = expense;
+        _expenseCategoryRows = StatisticsPresentation.LegendOfCategories(expense);
+        _incomeCategoryRows = StatisticsPresentation.LegendOfCategories(income);
+        _expenseLedgerRows = StatisticsPresentation.LegendOfLedgers(expenseLedgers);
+        _incomeLedgerRows = StatisticsPresentation.LegendOfLedgers(incomeLedgers);
+        _budgetRows = budgets.Select(BudgetPresentation.ToRow).ToList();
+        _daily = daily;
+    }
+
+    private static IReadOnlyList<KpiItem> BuildKpi(decimal expense, decimal income) =>
+        BuildKpi(expense, income, "stats-kpi-expense", "stats-kpi-income", "stats-kpi-balance");
+
+    private static string TypeKey(BillType type) => type == BillType.Income ? "income" : "expense";
+
+    private void SwitchType() => _type = StatisticsPresentation.Other(_type);
+
+    private void ToggleDimension() => _byLedger = !ByLedger;
+
+    private void OpenBudgets() => NavController.Push("/budgets");
+}

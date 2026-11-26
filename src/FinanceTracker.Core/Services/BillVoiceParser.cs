@@ -150,6 +150,7 @@ public sealed partial class BillVoiceParser : IBillVoiceParser
         draft.TransactionTime = ParseRelativeTime(text);
         draft.CategoryId = MatchCategory(text, categories, draft.Type);
         draft.PaymentChannelId = MatchChannel(text, paymentChannels);
+        draft.Matches = LocateMatches(text, draft, categories, paymentChannels);
 
         return draft;
     }
@@ -517,5 +518,164 @@ public sealed partial class BillVoiceParser : IBillVoiceParser
         }
 
         return best is null ? null : idSelector(best);
+    }
+
+    // ===== 命中片段定位（只供界面在转写文本里高亮，不参与解析） =====
+
+    /// <summary>
+    /// 定位解析结果在原文里对应的片段：金额、时间用与解析相同的正则去找；分类 / 支付渠道按解析的口径
+    /// （名称整体出现优先，其次最长的同义词）找到实际命中的那一处。只读，不改变任何解析结果；
+    /// 解析没认出的字段不产生片段。结果按出现位置排序。
+    /// </summary>
+    private static List<VoiceMatchSpan> LocateMatches(
+        string text,
+        ParsedBillDraft draft,
+        IReadOnlyList<Category> categories,
+        IReadOnlyList<PaymentChannel> channels)
+    {
+        var spans = new List<VoiceMatchSpan>(4);
+
+        if (draft.Amount.HasValue && LocateAmount(text) is { } amount)
+        {
+            spans.Add(new VoiceMatchSpan(amount.Index, amount.Length, VoiceMatchKind.Amount));
+        }
+
+        if (draft.TransactionTime.HasValue && LocateTime(text) is { } time)
+        {
+            spans.Add(new VoiceMatchSpan(time.Index, time.Length, VoiceMatchKind.Time));
+        }
+
+        if (draft.CategoryId is { } categoryId
+            && categories.FirstOrDefault(c => c.Id == categoryId) is { } category
+            && LocateName(text, category.Name, CategorySynonyms) is { } categorySpan)
+        {
+            spans.Add(new VoiceMatchSpan(categorySpan.Index, categorySpan.Length, VoiceMatchKind.Category));
+        }
+
+        if (draft.PaymentChannelId is { } channelId
+            && channels.FirstOrDefault(c => c.Id == channelId) is { } channel
+            && LocateName(text, channel.Name, ChannelSynonyms) is { } channelSpan)
+        {
+            spans.Add(new VoiceMatchSpan(channelSpan.Index, channelSpan.Length, VoiceMatchKind.PaymentChannel));
+        }
+
+        spans.Sort((left, right) => left.Start.CompareTo(right.Start));
+        return spans;
+    }
+
+    /// <summary>
+    /// 金额片段：在原文里找各种金额写法（中文数字 + 块 / 元、阿拉伯数字 + 块 / 元、货币符号、人民币），
+    /// 取最先出现的一处（同一起点取更长的，如「三十五块五」而不是「三十五块」）；都没有时是无单位数字的兜底（取最后一个）。
+    /// </summary>
+    private static (int Index, int Length)? LocateAmount(string text)
+    {
+        Match? best = null;
+
+        foreach (var pattern in new[]
+                 {
+                     ChineseFractionAfterUnitPattern(),
+                     ChineseAmountPattern(),
+                     ArabicAmountWithUnitPattern(),
+                     CurrencySymbolAmountPattern(),
+                     RmbAmountPattern(),
+                 })
+        {
+            var match = pattern.Match(text);
+            if (match.Success &&
+                (best is null || match.Index < best.Index || (match.Index == best.Index && match.Length > best.Length)))
+            {
+                best = match;
+            }
+        }
+
+        if (best is not null)
+        {
+            return (best.Index, best.Length);
+        }
+
+        var bare = BareNumberPattern().Matches(text);
+        return bare.Count > 0 ? (bare[^1].Index, bare[^1].Length) : null;
+    }
+
+    /// <summary>时间片段：按 <see cref="ParseRelativeTime"/> 同样的先后顺序找第一个有效的时间说法</summary>
+    private static (int Index, int Length)? LocateTime(string text)
+    {
+        foreach (var pattern in new[] { ThreeDaysAgoPattern(), TwoDaysAgoPattern(), YesterdayPattern(), TodayPattern() })
+        {
+            var match = pattern.Match(text);
+            if (match.Success)
+            {
+                return (match.Index, match.Length);
+            }
+        }
+
+        var lastWeekDay = LastWeekDayPattern().Match(text);
+        if (lastWeekDay.Success && ParseWeekDay(lastWeekDay.Groups["day"].Value).HasValue)
+        {
+            return (lastWeekDay.Index, lastWeekDay.Length);
+        }
+
+        foreach (var pattern in new[] { LastWeekPattern(), LastMonthPattern() })
+        {
+            var match = pattern.Match(text);
+            if (match.Success)
+            {
+                return (match.Index, match.Length);
+            }
+        }
+
+        var monthDay = MonthDayPattern().Match(text);
+        if (monthDay.Success &&
+            int.TryParse(monthDay.Groups["month"].Value, out var month) &&
+            int.TryParse(monthDay.Groups["day"].Value, out var day) &&
+            TryCreateDate(DateTime.Today.Year, month, day, out _))
+        {
+            return (monthDay.Index, monthDay.Length);
+        }
+
+        var dayOfMonth = DayOfMonthPattern().Match(text);
+        if (dayOfMonth.Success &&
+            int.TryParse(dayOfMonth.Groups["day"].Value, out day) &&
+            TryCreateDate(DateTime.Today.Year, DateTime.Today.Month, day, out _))
+        {
+            return (dayOfMonth.Index, dayOfMonth.Length);
+        }
+
+        return null;
+    }
+
+    /// <summary>名称片段：名称整体出现优先；否则是原文里出现的最长同义词（解析的评分口径：名称 &gt; 同义词，越长越优先）</summary>
+    private static (int Index, int Length)? LocateName(
+        string text,
+        string name,
+        IReadOnlyDictionary<string, string[]> synonymMap)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var index = text.IndexOf(name, StringComparison.OrdinalIgnoreCase);
+        if (index >= 0)
+        {
+            return (index, name.Length);
+        }
+
+        if (!synonymMap.TryGetValue(name, out var synonyms))
+        {
+            return null;
+        }
+
+        (int Index, int Length)? best = null;
+        foreach (var synonym in synonyms)
+        {
+            var at = text.IndexOf(synonym, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0 && (best is null || synonym.Length > best.Value.Length))
+            {
+                best = (at, synonym.Length);
+            }
+        }
+
+        return best;
     }
 }

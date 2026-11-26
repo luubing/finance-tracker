@@ -1,0 +1,40 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    构成图例（设计稿 screens 03-stats ④ 圆环下方的列表）：每行「彩色圆点 · 名称 · 占比 · 金额」，行间细分隔线。
+    配合 DonutChart：圆点颜色来自图例行的 ColorIndex（ft-hue--N），与圆环同一套。
+    - 语义：ul / li；金额是 AmountDisplay（读屏读完整金额）。
+    - 观察属性（E2E）：根 data-testid（TestId）；每行 data-testid="legend-row"、data-name、data-amount（两位小数）、data-percent、data-count；金额 legend-amount。
+*@
+<ul class="ft-legend @Class" aria-label="@AriaLabel" data-testid="@TestId">
+    @foreach (var row in Rows)
+    {
+        <li class="ft-legend__row ft-hue--@row.ColorIndex"
+            data-testid="legend-row"
+            data-name="@row.Name"
+            data-amount="@(row.Amount.ToString("0.00", Invariant))"
+            data-percent="@(row.Percentage.ToString("0.##", Invariant))"
+            data-count="@row.Count">
+            <span class="ft-dot" aria-hidden="true"></span>
+            <span class="ft-legend__name">@row.Name</span>
+            <span class="ft-legend__pct">@row.PercentText</span>
+            <AmountDisplay Amount="row.Amount" Size="AmountSize.Md" Class="ft-legend__amount" TestId="legend-amount" />
+        </li>
+    }
+</ul>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Invariant = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>图例行</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<LegendRow> Rows { get; set; } = [];
+
+    /// <summary>列表的读屏名称（例如「支出构成明细（按分类）」）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "legend";
+}

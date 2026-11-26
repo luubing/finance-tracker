@@ -1,0 +1,38 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    节标题（设计稿 06 · 节标题）：左边 22px 粗体标题，右边可选的文字操作（「管理 ›」「全部 ›」）。
+    - 标题是 h2；操作是可聚焦的按钮，点击区域 ≥ 44 高，读屏名称可单独指定（例如「查看全部账单」）。
+    - 观察属性（E2E）：根 data-testid、操作按钮 data-testid（ActionTestId）。
+*@
+<div class="ft-section" data-testid="@TestId">
+    <h2 class="ft-section__title">@Title</h2>
+    @if (!string.IsNullOrEmpty(ActionText))
+    {
+        <button type="button"
+                class="ft-section__action"
+                aria-label="@ActionAriaLabel"
+                data-testid="@ActionTestId"
+                @onclick="OnAction">@ActionText<i class="mdi mdi-chevron-right" aria-hidden="true"></i></button>
+    }
+</div>
+
+@code {
+    /// <summary>标题</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>右侧操作的文字；为空不显示操作</summary>
+    [Parameter] public string? ActionText { get; set; }
+
+    /// <summary>操作的读屏名称；不给时读 ActionText</summary>
+    [Parameter] public string? ActionAriaLabel { get; set; }
+
+    /// <summary>点击操作</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnAction { get; set; }
+
+    /// <summary>E2E 钩子：整个节标题</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>E2E 钩子：操作按钮</summary>
+    [Parameter] public string? ActionTestId { get; set; }
+}

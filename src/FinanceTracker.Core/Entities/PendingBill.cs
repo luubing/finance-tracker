@@ -3,7 +3,7 @@ using FinanceTracker.Core.Enums;
 namespace FinanceTracker.Core.Entities;
 
 /// <summary>
-/// 待确认账单：由通知栏监听或短信实时监听自动捕获的支付记录，
+/// 待确认账单：由通知栏监听、短信实时监听或短信识别页读取自动捕获的支付记录，
 /// 用户在待确认账单页面确认后才转为正式账单（Bill）。
 /// </summary>
 public class PendingBill

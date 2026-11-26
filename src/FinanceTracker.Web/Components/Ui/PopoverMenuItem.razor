@@ -1,0 +1,85 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    弹出菜单项（PopoverMenu 里的一行）：图标 + 文字 + 可选的右侧内容（例如「共享」徽标）+ 选中对勾。
+    - Selected 为 null：普通菜单项（role="menuitem"）；true / false：单选项（role="menuitemradio" + aria-checked），选中时右侧有对勾。
+    - 点击后先触发 OnClick，再通知所在的 PopoverMenu 收起，调用方只处理「选了什么」。
+    - Accent：品牌色（菜单末尾的「新建…」）。
+    - Danger：破坏性操作（红色文字与图标，例如错误日志页「⋯」菜单里的「清除日志」）；点击后仍应由调用方用 Alert 二次确认。
+    - 观察属性（E2E）：data-testid = TestId，data-value = Value，data-selected。
+*@
+<button type="button"
+        role="@(Selected is null ? "menuitem" : "menuitemradio")"
+        aria-checked="@(Selected is null ? null : (Selected == true ? "true" : "false"))"
+        class="@CssClass"
+        disabled="@Disabled"
+        data-testid="@TestId"
+        data-value="@Value"
+        data-selected="@(Selected == true ? "true" : null)"
+        @onclick="ClickAsync"
+        @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <i class="mdi @Icon ft-popover__icon" aria-hidden="true"></i>
+    }
+    <span class="ft-popover__label">@Label</span>
+    @Trailing
+    @if (Selected == true)
+    {
+        <i class="mdi mdi-check ft-popover__check" aria-hidden="true"></i>
+    }
+</button>
+
+@code {
+    /// <summary>所在的菜单：点击后让它收起（没有菜单时只触发 OnClick）</summary>
+    [CascadingParameter] private PopoverMenu? Menu { get; set; }
+
+    /// <summary>MDI 图标类名</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>文字</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>右侧附加内容（徽标等）</summary>
+    [Parameter] public RenderFragment? Trailing { get; set; }
+
+    /// <summary>null：普通菜单项；true / false：单选项（选中时显示对勾）</summary>
+    [Parameter] public bool? Selected { get; set; }
+
+    /// <summary>品牌色（「新建…」）</summary>
+    [Parameter] public bool Accent { get; set; }
+
+    /// <summary>破坏性操作：红色文字与图标</summary>
+    [Parameter] public bool Danger { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>E2E：data-value</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string CssClass => string.Join(' ', new[]
+    {
+        "ft-popover__item",
+        Selected == true ? "ft-popover__item--on" : null,
+        Accent ? "ft-popover__item--accent" : null,
+        Danger ? "ft-popover__item--danger" : null,
+    }.Where(c => !string.IsNullOrEmpty(c)));
+
+    private async Task ClickAsync()
+    {
+        await OnClick.InvokeAsync();
+
+        if (Menu is not null)
+        {
+            await Menu.CloseAsync();
+        }
+    }
+}

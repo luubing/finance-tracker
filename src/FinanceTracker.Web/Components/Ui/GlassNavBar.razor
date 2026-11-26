@@ -1,0 +1,39 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    玻璃导航栏的内容：左侧玻璃圆形返回按钮 + 居中的内联标题 + 右侧操作插槽（设计稿 05 · 二级页面）。
+    本组件只渲染这一行，不负责「挂在页面栈顶栏里」——那是 SecondaryPage 的事，这样 Sheet 等其他容器也能复用同样的一行。
+    - 返回：默认走页面栈的返回（由 SecondaryPage 传入 OnBack）；ShowBack=false 时左侧留空。
+    - 标题是 h1，绝对居中，不受两侧按钮个数影响；过长时省略。
+*@
+<div class="ft-nav" data-testid="nav-bar">
+    <div class="ft-nav__side">
+        @if (ShowBack)
+        {
+            <GlassButton Round Icon="mdi-chevron-left" AriaLabel="@BackLabel" TestId="nav-back" OnClick="HandleBackAsync" />
+        }
+    </div>
+    <h1 class="ft-nav__title" data-testid="nav-title">@Title</h1>
+    <div class="ft-nav__side ft-nav__side--end">
+        @Actions
+    </div>
+</div>
+
+@code {
+    /// <summary>标题</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>是否显示返回按钮</summary>
+    [Parameter] public bool ShowBack { get; set; } = true;
+
+    /// <summary>返回按钮的读屏名称</summary>
+    [Parameter] public string BackLabel { get; set; } = "返回";
+
+    /// <summary>点击返回</summary>
+    [Parameter] public EventCallback OnBack { get; set; }
+
+    /// <summary>右侧操作（通常是一到两个 GlassButton）</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private Task HandleBackAsync() => OnBack.InvokeAsync();
+}

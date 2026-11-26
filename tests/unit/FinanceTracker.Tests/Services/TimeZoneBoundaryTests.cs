@@ -37,21 +37,27 @@ public sealed class TimeZoneBoundaryTests : IAsyncLifetime
     private static IDisposable UseUtcPlus8() => AppTimeZone.UseZone(TestZones.UtcPlus8);
 
     /// <summary>以应用时区的墙上时间创建账单（和 AddBill 页面表单一致：Kind=Unspecified）</summary>
-    private Task<Bill> AddBillAsync(
+    private async Task<Bill> AddBillAsync(
         DateTime wallTime,
         decimal amount = 10m,
         BillType type = BillType.Expense,
-        Guid? categoryId = null) =>
-        _billService.CreateBillAsync(new Bill
+        Guid? categoryId = null)
+    {
+        // 账本必填：这些用例关心的是时区口径，账单统一记在默认账本里
+        var ledger = await _db.GetDefaultLedgerAsync();
+
+        return await _billService.CreateBillAsync(new Bill
         {
             UserId = _db.User.Id,
             Amount = amount,
             Type = type,
             CategoryId = categoryId ?? (type == BillType.Expense ? _db.ExpenseCategory.Id : _incomeCategoryId),
             PaymentChannelId = _db.Channel.Id,
+            LedgerId = ledger.Id,
             TransactionTime = DateTime.SpecifyKind(wallTime, DateTimeKind.Unspecified),
             Source = BillSource.Manual
         });
+    }
 
     private async Task<DateTime> ReadRawStoredTimeAsync()
     {
@@ -130,6 +136,7 @@ public sealed class TimeZoneBoundaryTests : IAsyncLifetime
             Type = read.Type,
             CategoryId = read.CategoryId,
             PaymentChannelId = read.PaymentChannelId,
+            LedgerId = read.LedgerId,
             TransactionTime = read.TransactionTime,
             Note = "只改备注"
         });
@@ -152,6 +159,7 @@ public sealed class TimeZoneBoundaryTests : IAsyncLifetime
             Type = created.Type,
             CategoryId = created.CategoryId,
             PaymentChannelId = created.PaymentChannelId,
+            LedgerId = created.LedgerId,
             TransactionTime = new DateTime(2026, 3, 5, 9, 15, 0)
         });
 

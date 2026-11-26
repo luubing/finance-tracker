@@ -1,0 +1,426 @@
+@namespace FinanceTracker.Web.Components.Bills
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ILogger<BillFilterSheet> Logger
+
+@*
+    账单筛选 Sheet（设计稿 13-filter / 05 · 半屏 Sheet）：时间 / 账本（含「未归属账本」）/ 分类 / 支付渠道四组标签，
+    左上「重置」、右上关闭、底部固定的主按钮显示「查看 N 笔账单」。
+    - 编辑的是草稿：打开时复制页面当前生效的筛选（Applied），点「查看」才交给页面（OnApply）；点遮罩 / ✕ / Esc / 下拉把手收起 = 放弃改动。
+    - 时间 / 账本 / 支付渠道是单选：再点一次已选中的标签 = 取消；账本多一个「全部」（不限）。「未归属账本」与具体账本互斥（同一个「账本」维度的不同取值）。
+      分类可多选（设计稿 13 里「餐饮美食」「交通出行」同时高亮）：点一下选中、再点取消，账单属于所选分类中的任意一个即符合。
+    - 时间：今天 / 本周 / 本月 / 本年（周一为一周之始）是预设，查询时才按当时的应用时区日期换算；「自定义」展开起止日期（含当天），
+      自定义与预设互斥（点「自定义」时若已选预设，会把预设的起止预填进日期框，方便微调）。
+      「本月」是账单 Tab 的默认视图，打开 Sheet 时它就是选中的；取消它 = 不限时间；左上「重置」回到默认（本月 + 其他不限），已经是默认时置灰。
+    - 底部按钮的笔数每次改草稿都重新估算：用页面传入的 CountAsync（与账单页汇总同一个查询、同一口径），
+      过期的结果（又改了条件）直接丢弃。按钮始终是「查看 N 笔账单」且可点——笔数为 0 也一样（设计稿 13），点了之后账单页给出「没有符合条件的账单」的空状态与清除入口；
+      估算失败时是「查看账单」，同样可点。
+    - 带着 Focus 打开时（从条件条上的标签进入）滚动到对应那一组。
+    - 观察属性（E2E）：filter-sheet(-host)、filter-reset、filter-apply（文案即笔数提示，data-count 是笔数）、
+      filter-section-{time|ledger|category|channel}、filter-time-{today|week|month|year|custom}、filter-start / filter-end、
+      filter-ledger-any / filter-ledger-unassigned / filter-ledger-chip、filter-category-chip、filter-channel-chip（各带 data-id、data-selected）。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             OnClosed="OnClosed"
+             Title="筛选"
+             TestId="filter-sheet">
+    <HeaderStart>
+        <GlassButton Kind="ButtonKind.Neutral"
+                     Disabled="@_draft.IsDefaultPanel"
+                     TestId="filter-reset"
+                     OnClick="ResetAsync">重置</GlassButton>
+    </HeaderStart>
+    <ChildContent>
+        @* ───────── 时间 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@TitleId(BillFilterDimension.Time)" data-testid="filter-section-time" @ref="_timeSection">
+            <h3 class="ft-filtersec__title" id="@TitleId(BillFilterDimension.Time)">@BillListPresentation.DimensionName(BillFilterDimension.Time)</h3>
+            <div class="ft-chips" role="group" aria-labelledby="@TitleId(BillFilterDimension.Time)">
+                @foreach (var preset in BillTimePresets.All)
+                {
+                    var current = preset;
+                    <ChoiceChip Label="@BillTimePresets.Label(current)"
+                                Selected="@(_draft.TimePreset == current)"
+                                TestId="@("filter-time-" + current.ToString().ToLowerInvariant())"
+                                OnClick="() => TogglePresetAsync(current)" />
+                }
+                <ChoiceChip Label="自定义"
+                            Icon="mdi-calendar-month-outline"
+                            Selected="_showCustom"
+                            TestId="filter-time-custom"
+                            OnClick="ToggleCustomAsync" />
+            </div>
+            @if (_showCustom)
+            {
+                <GroupedList Class="ft-filtersec__custom" TestId="filter-custom-range">
+                    <label class="ft-field">
+                        <span class="ft-field__label">开始日期</span>
+                        <input class="ft-field__input ft-field__input--end"
+                               type="date"
+                               data-testid="filter-start"
+                               value="@_draft.StartDate"
+                               @onchange="OnStartChangedAsync" />
+                    </label>
+                    <label class="ft-field">
+                        <span class="ft-field__label">结束日期</span>
+                        <input class="ft-field__input ft-field__input--end"
+                               type="date"
+                               data-testid="filter-end"
+                               value="@_draft.EndDate"
+                               @onchange="OnEndChangedAsync" />
+                    </label>
+                </GroupedList>
+            }
+        </section>
+
+        @* ───────── 账本 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@TitleId(BillFilterDimension.Ledger)" data-testid="filter-section-ledger" @ref="_ledgerSection">
+            <h3 class="ft-filtersec__title" id="@TitleId(BillFilterDimension.Ledger)">@BillListPresentation.DimensionName(BillFilterDimension.Ledger)</h3>
+            <div class="ft-chips" role="group" aria-labelledby="@TitleId(BillFilterDimension.Ledger)">
+                <ChoiceChip Label="@BillListPresentation.AnyLedgerText"
+                            Selected="@(!_draft.HasLedger)"
+                            TestId="filter-ledger-any"
+                            OnClick="() => ChooseLedgerAsync(null)" />
+                @foreach (var ledger in Ledgers)
+                {
+                    var current = ledger;
+                    <ChoiceChip Label="@current.DisplayText"
+                                Icon="@LedgerPresentation.NormalizeIcon(current.Icon)"
+                                Selected="@(_draft.LedgerId == current.Id)"
+                                TestId="filter-ledger-chip"
+                                data-id="@current.Id"
+                                OnClick="() => ChooseLedgerAsync(current.Id)" />
+                }
+                <ChoiceChip Label="@BillListPresentation.UnassignedLedgerText"
+                            Icon="mdi-book-off-outline"
+                            Selected="_draft.UnassignedLedger"
+                            TestId="filter-ledger-unassigned"
+                            OnClick="ToggleUnassignedAsync" />
+            </div>
+        </section>
+
+        @* ───────── 分类 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@TitleId(BillFilterDimension.Category)" data-testid="filter-section-category" @ref="_categorySection">
+            <h3 class="ft-filtersec__title" id="@TitleId(BillFilterDimension.Category)">@BillListPresentation.DimensionName(BillFilterDimension.Category)</h3>
+            <div class="ft-chips" role="group" aria-labelledby="@TitleId(BillFilterDimension.Category)">
+                @foreach (var category in VisibleCategories)
+                {
+                    var current = category;
+                    <ChoiceChip Label="@current.Name"
+                                Icon="@current.Icon"
+                                Tone="@current.Tone"
+                                Selected="@_draft.CategoryIds.Contains(current.Id)"
+                                TestId="filter-category-chip"
+                                data-id="@current.Id"
+                                OnClick="() => ToggleCategoryAsync(current.Id)" />
+                }
+            </div>
+            @if (!VisibleCategories.Any())
+            {
+                <p class="ft-filtersec__empty" role="status" data-testid="filter-category-empty">暂无分类</p>
+            }
+        </section>
+
+        @* ───────── 支付渠道 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@TitleId(BillFilterDimension.Channel)" data-testid="filter-section-channel" @ref="_channelSection">
+            <h3 class="ft-filtersec__title" id="@TitleId(BillFilterDimension.Channel)">@BillListPresentation.DimensionName(BillFilterDimension.Channel)</h3>
+            <div class="ft-chips" role="group" aria-labelledby="@TitleId(BillFilterDimension.Channel)">
+                @foreach (var channel in Channels)
+                {
+                    var current = channel;
+                    <ChoiceChip Label="@current.Name"
+                                Icon="@current.Icon"
+                                Selected="@(_draft.PaymentChannelId == current.Id)"
+                                TestId="filter-channel-chip"
+                                data-id="@current.Id"
+                                OnClick="() => ToggleChannelAsync(current.Id)" />
+                }
+            </div>
+            @if (Channels.Count == 0)
+            {
+                <p class="ft-filtersec__empty" role="status" data-testid="filter-channel-empty">暂无支付渠道</p>
+            }
+        </section>
+    </ChildContent>
+    <Footer>
+        @* 笔数变化时读屏播报按钮文案：这是用户调条件时唯一能听到的「现在有多少笔」反馈 *@
+        <div aria-live="polite">
+            <GlassButton Kind="ButtonKind.Brand"
+                         Large
+                         Block
+                         TestId="filter-apply"
+                         data-count="@(_count?.ToString(System.Globalization.CultureInfo.InvariantCulture))"
+                         OnClick="ApplyAsync">@BillListPresentation.ConfirmText(_count)</GlassButton>
+        </div>
+    </Footer>
+</BottomSheet>
+
+@code {
+    private readonly string _idPrefix = $"ft-filter-{Guid.NewGuid():N}";
+
+    private BillListFilter _draft = new();
+    private bool _showCustom;
+    private int? _count;
+    private int _countVersion;
+    private bool _wasVisible;
+    private bool _disposed;
+    private BillFilterDimension? _pendingScroll;
+    private IJSObjectReference? _ui;
+
+    private ElementReference _timeSection;
+    private ElementReference _ledgerSection;
+    private ElementReference _categorySection;
+    private ElementReference _channelSection;
+
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>页面当前生效的筛选：打开时复制成草稿，之后不再读它（草稿与页面状态互不影响，直到点「查看」）</summary>
+    [Parameter, EditorRequired] public BillListFilter Applied { get; set; } = null!;
+
+    /// <summary>打开后滚动到哪一组（从条件条上的标签进入时给）；为空则停在顶部</summary>
+    [Parameter] public BillFilterDimension? Focus { get; set; }
+
+    /// <summary>可选的账本：自己的账本 + 共享给我的账本（后者在标签上带「（共享）」）</summary>
+    [Parameter] public IReadOnlyList<LedgerModel> Ledgers { get; set; } = [];
+
+    /// <summary>可选的分类（支出 + 收入）；账单类型已限定为支出 / 收入时只列对应的那一类</summary>
+    [Parameter] public IReadOnlyList<BillFilterOption> Categories { get; set; } = [];
+
+    /// <summary>可选的支付渠道</summary>
+    [Parameter] public IReadOnlyList<BillFilterOption> Channels { get; set; } = [];
+
+    /// <summary>刚打开时按钮上先显示的笔数（页面当前汇总里的笔数）：打开瞬间就有数字，不先闪一下「查看账单」</summary>
+    [Parameter] public int? InitialCount { get; set; }
+
+    /// <summary>
+    /// 估算符合草稿条件的账单笔数。必须与账单页的汇总同一口径（同一份 BillFilter、同一个查询），页面负责经 PageDataGate 排队读库
+    /// </summary>
+    [Parameter, EditorRequired] public Func<BillListFilter, Task<int>> CountAsync { get; set; } = null!;
+
+    /// <summary>点「查看」：把草稿交给页面生效（Sheet 先收起，再触发这个回调）</summary>
+    [Parameter] public EventCallback<BillListFilter> OnApply { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发（页面在这里清掉「打开时定位到哪一组」）</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private string TitleId(BillFilterDimension dimension) => $"{_idPrefix}-{dimension.ToString().ToLowerInvariant()}";
+
+    /// <summary>
+    /// 账单类型限定为支出 / 收入时只列那一类分类（已选中的分类除外，避免条件看不见）；「全部」时支出在前、收入在后
+    /// </summary>
+    private IEnumerable<BillFilterOption> VisibleCategories => Categories
+        .Where(c => _draft.Type is null || c.Type == _draft.Type || _draft.CategoryIds.Contains(c.Id))
+        .OrderBy(c => c.Type);
+
+    protected override void OnParametersSet()
+    {
+        // 只在「从隐藏变为显示」的那一刻复制页面的筛选作为草稿；之后页面重绘（例如后台刷新了账本列表）不能冲掉用户正在调的条件
+        if (Visible && !_wasVisible)
+        {
+            _draft = Applied.Clone();
+            _showCustom = _draft.HasDateRange;
+            _count = InitialCount;
+            _pendingScroll = Focus;
+            _ = RefreshCountAsync();
+        }
+
+        _wasVisible = Visible;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingScroll is not { } target || !Visible)
+        {
+            return;
+        }
+
+        _pendingScroll = null;
+        await ScrollToAsync(target);
+    }
+
+    // ------------------------------------------------------------------ 编辑草稿
+
+    private async Task TogglePresetAsync(BillTimePreset preset)
+    {
+        _draft.SelectPreset(_draft.TimePreset == preset ? BillTimePreset.None : preset);
+        _showCustom = false;
+        await RefreshCountAsync();
+    }
+
+    private async Task ToggleCustomAsync()
+    {
+        if (_showCustom)
+        {
+            // 收起自定义 = 取消时间条件
+            _showCustom = false;
+            _draft.SelectPreset(BillTimePreset.None);
+        }
+        else
+        {
+            _showCustom = true;
+
+            // 已选预设时把它的起止预填进日期框：「改一改」比「从头填」顺手，笔数也不变
+            if (_draft.TimePreset != BillTimePreset.None)
+            {
+                var (start, end) = BillTimePresets.RangeOf(_draft.TimePreset, AppTimeZone.ToLocal(DateTime.UtcNow));
+                _draft.SetCustomRange(
+                    start.ToString(BillListFilter.DateFormat, System.Globalization.CultureInfo.InvariantCulture),
+                    end.ToString(BillListFilter.DateFormat, System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        await RefreshCountAsync();
+    }
+
+    private async Task OnStartChangedAsync(ChangeEventArgs e)
+    {
+        _draft.SetCustomRange(DateText(e), _draft.EndDate);
+        await RefreshCountAsync();
+    }
+
+    private async Task OnEndChangedAsync(ChangeEventArgs e)
+    {
+        _draft.SetCustomRange(_draft.StartDate, DateText(e));
+        await RefreshCountAsync();
+    }
+
+    /// <summary>日期框清空时给 ""：当作没填</summary>
+    private static string? DateText(ChangeEventArgs e) =>
+        e.Value?.ToString() is { Length: > 0 } text ? text : null;
+
+    private async Task ChooseLedgerAsync(Guid? ledgerId)
+    {
+        if (ledgerId is not { } id || _draft.LedgerId == id)
+        {
+            // 「全部」，或再点一次已选中的账本：取消账本条件
+            _draft.Clear(BillFilterDimension.Ledger);
+        }
+        else
+        {
+            _draft.SelectLedger(id);
+        }
+
+        await RefreshCountAsync();
+    }
+
+    private async Task ToggleUnassignedAsync()
+    {
+        if (_draft.UnassignedLedger)
+        {
+            _draft.Clear(BillFilterDimension.Ledger);
+        }
+        else
+        {
+            _draft.SelectUnassignedLedger();
+        }
+
+        await RefreshCountAsync();
+    }
+
+    private async Task ToggleCategoryAsync(Guid categoryId)
+    {
+        // 多选：点一下选中，再点取消
+        _draft.ToggleCategory(categoryId);
+        await RefreshCountAsync();
+    }
+
+    private async Task ToggleChannelAsync(Guid channelId)
+    {
+        _draft.PaymentChannelId = _draft.PaymentChannelId == channelId ? null : channelId;
+        await RefreshCountAsync();
+    }
+
+    /// <summary>重置：回到默认视图（本月，账本 / 分类 / 支付渠道不限），不是「全部清空」——默认的「本月」不算条件</summary>
+    private async Task ResetAsync()
+    {
+        _draft.ResetPanel();
+        _showCustom = false;
+        await RefreshCountAsync();
+    }
+
+    private async Task ApplyAsync()
+    {
+        // 笔数是 0 也照常生效（设计稿 13：按钮始终是「查看 N 笔账单」）：账单页会给出「没有符合条件的账单」与清除入口
+
+        // 先收起 Sheet 再让页面重新查询：不要让用户盯着 Sheet 等一次读库
+        var applied = _draft.Clone();
+        await VisibleChanged.InvokeAsync(false);
+        await OnApply.InvokeAsync(applied);
+    }
+
+    // ------------------------------------------------------------------ 笔数估算
+
+    /// <summary>
+    /// 按当前草稿重新估算笔数。连续点标签时会有多次查询在途：只有最后一次的结果生效，过期的丢弃。
+    /// 估算失败不拦着用户：按钮退回「查看账单」，仍可点（查询失败会在页面上给出提示）
+    /// </summary>
+    private async Task RefreshCountAsync()
+    {
+        var version = ++_countVersion;
+        var snapshot = _draft.Clone();
+        int? count;
+
+        try
+        {
+            count = await CountAsync(snapshot);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "估算筛选结果的账单笔数失败");
+            count = null;
+        }
+
+        if (_disposed || version != _countVersion)
+        {
+            return;
+        }
+
+        _count = count;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ------------------------------------------------------------------ 定位到某一组
+
+    private async Task ScrollToAsync(BillFilterDimension dimension)
+    {
+        var section = dimension switch
+        {
+            BillFilterDimension.Time => _timeSection,
+            BillFilterDimension.Ledger => _ledgerSection,
+            BillFilterDimension.Category => _categorySection,
+            _ => _channelSection,
+        };
+
+        try
+        {
+            _ui ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/FinanceTracker.Web/js/ui.js");
+            await _ui.InvokeVoidAsync("scrollSheetTo", section);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException
+            or TaskCanceledException or ObjectDisposedException)
+        {
+            // 定位只是便利：脚本没加载 / 电路断开 / 元素已被替换时停在顶部
+            Logger.LogDebug(ex, "筛选 Sheet 定位到分组失败");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+
+        if (_ui is not null)
+        {
+            try
+            {
+                await _ui.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException or JSException or TaskCanceledException or ObjectDisposedException)
+            {
+                // 电路已断开：模块引用随之失效，无需处理
+            }
+        }
+    }
+}

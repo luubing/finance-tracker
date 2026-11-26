@@ -24,4 +24,9 @@ public static class TimeBoundaries
     /// 某个月的含端点结束时刻（下月 1 日 00:00 减 1 个 tick）。
     /// </summary>
     public static DateTime EndOfMonth(int year, int month) => new DateTime(year, month, 1).AddMonths(1).AddTicks(-1);
+
+    /// <summary>
+    /// 某一天所在那一周的第一天（周一 00:00）。全应用统一以周一为一周之始（统计趋势、语音记账的「本周 / 上周」也是如此）。入参只取日期部分。
+    /// </summary>
+    public static DateTime StartOfWeek(DateTime date) => date.Date.AddDays(-(((int)date.DayOfWeek + 6) % 7));
 }

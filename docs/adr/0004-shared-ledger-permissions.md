@@ -33,6 +33,17 @@
 
 - Owner 不能退出账本，必须先转让所有权（转让后原 Owner 降为 Editor）。
 - 成员被移除或退出后，其本地账单副本保留（本地数据），但云端不再向其下发共享账本数据。
+- **Viewer 的「不能修改任何账单」在服务层强制，不只靠界面隐藏入口**：Viewer 自己早先（还是 Editor 时 / 本地）记在该账本里的账单，同样不能删除、不能批量「归属账本」、不能编辑（包括把它挪去自己的账本）——
+  这三类修改都要随同步推到云端，而云端对 Viewer 的推送一律拒绝（`SyncController.Push` 对每笔账单校验写权限，已软删除的也一样），放行只会留下「本地已改、云端还是原样」永远对不上的账单。
+  `BillService.DeleteBillAsync` / `AssignBillsToLedgerAsync`（整批拒绝）/ `UpdateBillAsync`（认**原账本**）抛 `ForbiddenAccessException`，REST 返回 403（不是 401，客户端不登出）。
+  判定只认「生效的 Viewer 成员行 + 账本未删除 + 账本不是我的」（`LedgerMemberQueries.GetReadOnlyLedgerIdsAsync`，客户端与服务端共用）：被移出 / 退出 / 待确认的成员、账本已删除、历史无账本的账单不算只读，仍可管理。
+  界面据同一份判定不给入口（账单 Tab 无左滑「删除」且不可多选，编辑 Sheet 无「删除账单」行）；编辑 Sheet 照常打开、保存时才被拒绝。
+- 成员关系的拉取（`SyncController.PullLedgerMembers`）只返回「我自己的成员行（含已删除 / 待确认）」与「我所在账本里其他人的生效成员行」：
+  **被移除成员的行不会再返回给 Owner**，所以 Owner 移除成员成功后，客户端必须自己把本地缓存里该成员行标记为删除
+  （`HttpLedgerMemberService.RemoveMemberAsync`，在 `SyncTimestampScope` 内保存、不盖 `UpdatedAt`），否则成员页会一直显示已被移除的人；
+  成员自己退出 / 被移除时，他自己的那一行（含已删除）仍会被拉取，本地缓存自然对齐。
+- 成员页判定「我是不是所有者」时，成员关系已知就只认成员关系（Owner 行），不再用本地账本的归属兜底：转让所有权之后，本地账本记录的
+  `UserId` 可能还停留在原所有者名下；只有成员关系未知（云端不可用且本地没有缓存）时才退回账本归属判定。
 - 账本被 Owner 删除（软删除）后，成员端通过既有账本同步感知（IsDeleted 标记随拉取传播），
   不做额外推送通知。
 

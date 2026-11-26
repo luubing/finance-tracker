@@ -21,22 +21,17 @@ namespace FinanceTracker.Tests.Services;
 public sealed class ImportTimeZoneTests : IAsyncLifetime
 {
     private SqliteTestDatabase _db = null!;
+    private Guid _ledgerId;
 
-    public async Task InitializeAsync() => _db = await SqliteTestDatabase.CreateAsync();
+    public async Task InitializeAsync()
+    {
+        _db = await SqliteTestDatabase.CreateAsync();
+
+        // 导入必须指定账本：这些用例关心的是时区，统一导入到默认账本
+        _ledgerId = (await _db.GetDefaultLedgerAsync()).Id;
+    }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();
-
-    private sealed class StubCsvParser : ICsvParserService
-    {
-        public List<ImportedBill> Bills { get; init; } = new();
-
-        public Task<List<ImportedBill>> ParseWeChatCsvAsync(string csvContent) => Task.FromResult(Bills);
-
-        public Task<CsvParseResult> ParseWeChatCsvWithStatsAsync(string csvContent) =>
-            Task.FromResult(new CsvParseResult { Bills = Bills });
-
-        public Task<List<ImportedBill>> ParseAlipayCsvAsync(string csvContent) => Task.FromResult(Bills);
-    }
 
     private ImportController CreateController(DateTime csvWallTime)
     {
@@ -59,7 +54,8 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
             parser,
             new BillService(_db.Context, NullLogger<BillService>.Instance),
             new CategoryService(_db.Context, NullLogger<CategoryService>.Instance),
-            new PaymentChannelService(_db.Context, NullLogger<PaymentChannelService>.Instance))
+            new PaymentChannelService(_db.Context, NullLogger<PaymentChannelService>.Instance),
+            new LedgerMemberService(_db.Context))
         {
             ControllerContext = new ControllerContext
             {
@@ -103,7 +99,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
         using (AppTimeZone.UseZone(TimeZoneInfo.Utc))
         {
             var result = await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-                .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = 480 });
+                .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = 480, LedgerId = _ledgerId });
 
             Assert.Equal(1, GetInt(result, "successCount"));
             Assert.Equal(0, GetInt(result, "failCount"));
@@ -127,7 +123,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
         using var _ = AppTimeZone.UseZone(TimeZoneInfo.Utc);
 
         var result = await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-            .ImportAlipayBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = 480 });
+            .ImportAlipayBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = 480, LedgerId = _ledgerId });
 
         Assert.Equal(1, GetInt(result, "successCount"));
         Assert.Equal(new DateTime(2026, 3, 1, 0, 30, 0), await ReadRawStoredTimeAsync());
@@ -139,7 +135,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
         using var _ = AppTimeZone.UseZone(TimeZoneInfo.Utc);
 
         await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = -300 });
+            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = -300, LedgerId = _ledgerId });
 
         Assert.Equal(new DateTime(2026, 3, 1, 13, 30, 0), await ReadRawStoredTimeAsync());
     }
@@ -151,7 +147,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
         using (AppTimeZone.UseZone(TestZones.UtcPlus8))
         {
             await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-                .ImportWeChatBill(new ImportRequest { CsvContent = "x" });
+                .ImportWeChatBill(new ImportRequest { CsvContent = "x", LedgerId = _ledgerId });
         }
 
         Assert.Equal(new DateTime(2026, 3, 1, 0, 30, 0), await ReadRawStoredTimeAsync());
@@ -164,7 +160,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
     public async Task 偏移超出全球时区范围_返回400且不入库(int offsetMinutes)
     {
         var result = await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = offsetMinutes });
+            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = offsetMinutes, LedgerId = _ledgerId });
 
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal(0L, await CountBillsAsync());
@@ -177,7 +173,7 @@ public sealed class ImportTimeZoneTests : IAsyncLifetime
     public async Task 偏移处于范围边界_被接受(int offsetMinutes)
     {
         var result = await CreateController(new DateTime(2026, 3, 1, 8, 30, 0))
-            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = offsetMinutes });
+            .ImportWeChatBill(new ImportRequest { CsvContent = "x", UtcOffsetMinutes = offsetMinutes, LedgerId = _ledgerId });
 
         Assert.Equal(1, GetInt(result, "successCount"));
     }

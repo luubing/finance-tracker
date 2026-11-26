@@ -1,340 +1,732 @@
 @page "/import"
-@using FinanceTracker.Web.Services
-@using System.Text
+@implements IDisposable
 @inject HttpService HttpService
 @inject IPopupService PopupService
 @inject ISyncService SyncService
+@inject ILedgerService LedgerService
+@inject IUserDefaultService UserDefaultService
 @inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
 @inject BillEventService BillEventService
+@inject ILogger<Import> Logger
 
-@code {
-    // 注册编码提供程序以支持 GB18030 等编码
-    static Import()
-    {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-    }
-}
+@*
+    导入账单页（二级页面模板，设计稿 07 · 逐页改动清单 /import 一行）：按步骤进行，后面的步骤在前面完成后才出现，前面的步骤随时可以改——
+      1 选择来源（微信 | 支付宝分段 + 折叠的「如何导出账单」说明）
+      2 选择文件（点整行唤起系统文件选择器；只读入文件，不自动解析；读取中 / 解析中 / 失败（可重试）都在这一步里显示）
+      3 解析预览（底部固定的主按钮「解析预览」：点了才向云端解析；支出 / 收入 / 结余汇总 + 笔数与时间范围 + 账单列表，列表只显示前若干条，汇总与导入针对全部）
+      4 导入到账本（账本必选，菜单里有「新建账本…」；预览出来后底部主按钮变成「导入 N 条账单」，没选账本时置灰）
+    底部主按钮按步骤换动作：没选文件「解析预览」（置灰）→ 选好文件「解析预览」→ 预览出来「导入 N 条账单」→ 导入完成「继续导入」。
+    导入完成后这几步换成结果：成功 / 失败笔数、失败详情、「同步到本机」一行（导入写进云端数据库，账单列表读的是本地库，所以导入后自动拉取一次）。
+    不变的部分：微信 / 支付宝的 CSV 解析与导入接口在云端；文件在客户端检测编码（GB18030 / UTF-8 / UTF-16）；上报本机时区偏移（UtcOffsetMinutes），
+    账单时间在库里一律是 UTC，界面不换算（ADR 0005）；导入前先把账本同步一次（失败不拦截）；只列自己的账本。
+    换来源时，已读入的文件保留（选错来源不必重新选文件），但原来的预览作废——回到「已选文件」，再点「解析预览」按新来源解析。
+    导入失败时预览与账本选择都保留，改了直接再试。
+    观察属性（E2E）：import-page、import-content（data-stage = idle｜reading｜ready｜parsing｜failed｜preview｜importing｜done，data-source = wechat｜alipay）、
+      import-source（分段，segment 的 data-value）、import-guide-toggle（aria-expanded）/ import-guide / import-guide-path、
+      import-file-row（data-has-file、data-file-name）/ import-file（文件输入）、import-parsing（读取中 / 解析中，data-phase = reading｜parsing）、import-error（role=alert）/ import-error-text / import-retry、
+      import-preview（data-count / data-skipped）/ import-summary（KPI：import-expense / import-income / import-balance）/ import-caption / import-skipped / import-rows / import-row（data-income）/ import-row-amount / import-row-time / import-more、
+      import-ledger-row（data-value / data-missing）/ import-ledger-menu / import-failure（导入失败提示）/ import-failure-text、
+      import-submit（底部主按钮，固定在底部：import-foot；data-action = parse｜import｜again，文字随步骤换）、
+      import-result（data-total / data-success / data-failed）/ import-result-head / import-result-group / import-result-ledger / import-result-total / import-result-success / import-result-failed / import-errors / import-error-item、
+      import-sync-group / import-sync（data-state = syncing｜synced｜failed｜not-logged-in）。
+      各步骤的分组容器：import-source-step / import-guide-group / import-file-group / import-ledger-group。
+*@
 
-<PStackPageBar Title="导入账单"
-               CenterTitle
-               Flat
-               Color="primary" />
+<SecondaryPage Title="@ImportPresentation.Title" TestId="import-page">
+    <ChildContent>
+        <div class="ft-import"
+             data-testid="import-content"
+             data-stage="@StageValue"
+             data-source="@ImportPresentation.SourceValue(_source)"
+             aria-busy="@(Busy ? "true" : null)">
+            @if (_stage == ImportStage.Done && _result is not null)
+            {
+                <div class="ft-import__result"
+                     data-testid="import-result"
+                     data-total="@_result.TotalCount"
+                     data-success="@_result.SuccessCount"
+                     data-failed="@_result.FailCount">
+                    <EmptyState Icon="@(_result.SuccessCount > 0 ? "mdi-check-circle-outline" : "mdi-alert-circle-outline")"
+                                Title="@ImportPresentation.ResultTitle(_result)"
+                                Text="@ImportPresentation.ResultSummary(_result, _resultLedgerName)"
+                                TestId="import-result-head" />
+                </div>
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <MRow>
-        <MCol Cols="12">
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-import</MIcon>
-                    导入账单
-                </MCardTitle>
-
-                <MCardText>
-                    <MRow>
-                        <!-- 微信账单导入 -->
-                        <MCol Cols="12" Md="6">
-                            <MCard Outlined>
-                                <MCardTitle>
-                                    <MIcon Class="mr-2" Color="success">mdi-wechat</MIcon>
-                                    微信账单导入
-                                </MCardTitle>
-                                <MCardText>
-                                    <div class="text-body-2 mb-4">
-                                        支持微信导出的 CSV 格式账单文件。
-                                        <br />
-                                        导出路径：微信 → 我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单
-                                    </div>
-
-                                    <MFileInput @bind-Value="_wechatFile"
-                                                Label="选择微信账单文件"
-                                                Accept=".csv"
-                                                Outlined
-                                                Dense
-                                                ShowSize />
-
-                                    <MButton Color="success"
-                                             Block
-                                             OnClick="() => PreviewFile(_wechatFile, ImportPlatform.WeChat)"
-                                             Loading="_parsing"
-                                             Disabled="_parsing || _wechatFile == null">
-                                        <MIcon Class="mr-2">mdi-text-box-search</MIcon>
-                                        解析预览
-                                    </MButton>
-                                </MCardText>
-                            </MCard>
-                        </MCol>
-
-                        <!-- 支付宝账单导入 -->
-                        <MCol Cols="12" Md="6">
-                            <MCard Outlined>
-                                <MCardTitle>
-                                    <MIcon Class="mr-2" Color="primary">mdi-alpha-a-circle</MIcon>
-                                    支付宝账单导入
-                                </MCardTitle>
-                                <MCardText>
-                                    <div class="text-body-2 mb-4">
-                                        支持支付宝导出的 CSV 格式账单文件。
-                                        <br />
-                                        导出路径：支付宝 → 我的 → 账单 → 右上角 ··· → 开具交易流水证明
-                                    </div>
-
-                                    <MFileInput @bind-Value="_alipayFile"
-                                                Label="选择支付宝账单文件"
-                                                Accept=".csv"
-                                                Outlined
-                                                Dense
-                                                ShowSize />
-
-                                    <MButton Color="primary"
-                                             Block
-                                             OnClick="() => PreviewFile(_alipayFile, ImportPlatform.Alipay)"
-                                             Loading="_parsing"
-                                             Disabled="_parsing || _alipayFile == null">
-                                        <MIcon Class="mr-2">mdi-text-box-search</MIcon>
-                                        解析预览
-                                    </MButton>
-                                </MCardText>
-                            </MCard>
-                        </MCol>
-                    </MRow>
-
-                    <!-- 预览结果（Issue 13：导入前先解析预览，用户确认后再导入） -->
-                    @if (_previewBills.Any())
+                <GroupedList TestId="import-result-group">
+                    @if (!string.IsNullOrEmpty(_resultLedgerName))
                     {
-                        <MDivider Class="my-4" />
-
-                        <div class="text-h6 mb-2">
-                            解析出 @_previewBills.Count 条账单（@_previewPlatformName），请确认后导入
-                        </div>
-
-                        <div style="max-height: 360px; overflow-y: auto;">
-                            @foreach (var bill in _previewBills)
-                            {
-                                <MCard Outlined Class="mb-2">
-                                    <MCardText Class="py-2">
-                                        <MRow>
-                                            <MCol Cols="4" Sm="3">
-                                                <span class="text-caption text--secondary">时间</span>
-                                                <div class="text-body-2">@bill.TransactionTime.ToString("yyyy-MM-dd HH:mm")</div>
-                                            </MCol>
-                                            <MCol Cols="8" Sm="4">
-                                                <span class="text-caption text--secondary">描述/商户</span>
-                                                <div class="text-body-2">@bill.Description @(string.IsNullOrEmpty(bill.MerchantName) ? "" : $"({bill.MerchantName})")</div>
-                                            </MCol>
-                                            <MCol Cols="4" Sm="2">
-                                                <span class="text-caption text--secondary">金额</span>
-                                                <div class="text-body-2 @(bill.IsIncome ? "success--text" : "error--text")">
-                                                    @(bill.IsIncome ? "+" : "-")¥@bill.Amount.ToString("F2")
-                                                </div>
-                                            </MCol>
-                                            <MCol Cols="8" Sm="3" Class="text-right">
-                                                <span class="text-caption text--secondary">渠道</span>
-                                                <div class="text-body-2">@bill.PaymentChannel</div>
-                                            </MCol>
-                                        </MRow>
-                                    </MCardText>
-                                </MCard>
-                            }
-                        </div>
-
-                        <MRow Class="mt-4">
-                            <MCol Cols="12" Sm="6">
-                                <MButton Color="primary"
-                                         Block
-                                         Large
-                                         OnClick="ConfirmImport"
-                                         Loading="_importing"
-                                         Disabled="_importing || !_previewBills.Any()">
-                                    <MIcon Class="mr-2">mdi-check</MIcon>
-                                    确认导入 @_previewBills.Count 条
-                                </MButton>
-                            </MCol>
-                            <MCol Cols="12" Sm="6">
-                                <MButton Color="secondary"
-                                         Block
-                                         Large
-                                         Outlined
-                                         OnClick="CancelPreview"
-                                         Disabled="_importing">
-                                    <MIcon Class="mr-2">mdi-close</MIcon>
-                                    取消
-                                </MButton>
-                            </MCol>
-                        </MRow>
+                        <ListCell Icon="mdi-book-open-variant" Tone="purple" Title="账本" Value="@_resultLedgerName" TestId="import-result-ledger" />
                     }
-
-                    <!-- 导入结果 -->
-                    @if (_importResult != null)
+                    <ListCell Icon="mdi-file-document-multiple-outline" Tone="blue" Title="总计" Value="@ImportPresentation.CountValue(_result.TotalCount)" TestId="import-result-total" />
+                    <ListCell Icon="mdi-check-circle-outline" Tone="green" Title="成功" Value="@ImportPresentation.CountValue(_result.SuccessCount)" TestId="import-result-success" />
+                    @if (_result.FailCount > 0)
                     {
-                        <MRow Class="mt-4 pb-4">
-                            <MCol Cols="12">
-                                <MCard Color="@(_importResult.FailCount > 0 ? "warning" : "success")" Dark>
-                                    <MCardText>
-                                        <div class="text-h6 mb-2">导入完成</div>
-                                        <div>总计: @_importResult.TotalCount 条</div>
-                                        <div>成功: @_importResult.SuccessCount 条</div>
-                                        @if (_importResult.FailCount > 0)
-                                        {
-                                            <div>失败: @_importResult.FailCount 条</div>
-                                            @if (_importResult.Errors?.Any() == true)
-                                            {
-                                                <div class="mt-2">
-                                                    <div class="text-subtitle-2">错误详情：</div>
-                                                    @foreach (var error in _importResult.Errors)
-                                                    {
-                                                        <div class="text-caption">• @error</div>
-                                                    }
-                                                </div>
-                                            }
-                                        }
-                                    </MCardText>
-                                </MCard>
-                            </MCol>
-                        </MRow>
+                        <ListCell Icon="mdi-alert-circle-outline" Tone="pink" Title="失败" Value="@ImportPresentation.CountValue(_result.FailCount)" TestId="import-result-failed" />
                     }
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-</MContainer>
+                </GroupedList>
 
-@code {
-    private IBrowserFile? _wechatFile;
-    private IBrowserFile? _alipayFile;
-    private bool _parsing;
-    private bool _importing;
-    private ImportResult? _importResult;
-
-    // 预览状态（Issue 13：导入前先解析预览，确认后再入库）
-    private List<ImportedBillPreview> _previewBills = new();
-    private string _previewPlatformName = string.Empty;
-    private string? _pendingCsvContent;
-    private string _pendingEndpoint = string.Empty;
-
-    private enum ImportPlatform
-    {
-        WeChat,
-        Alipay
-    }
-
-    // ===== 第一步：解析预览 =====
-    private async Task PreviewFile(IBrowserFile? file, ImportPlatform platform)
-    {
-        if (file == null) return;
-
-        _parsing = true;
-        _importResult = null;
-        _previewBills = new List<ImportedBillPreview>();
-
-        try
-        {
-            var endpoint = platform == ImportPlatform.WeChat ? "api/import/wechat/preview" : "api/import/alipay/preview";
-
-            // 读取文件内容（自动检测编码：微信/支付宝账单通常是 GB18030）
-            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-            var csvContent = DecodeCsvContent(bytes);
-
-            // 调用预览 API（仅解析，不入库）
-            var request = new { CsvContent = csvContent };
-            var result = await HttpService.PostAsync<PreviewResult>(endpoint, request);
-
-            if (result == null)
-            {
-                await PopupService.EnqueueSnackbarAsync("预览失败：服务器返回空结果", AlertTypes.Error);
-                return;
-            }
-
-            if (result.Bills.Count == 0)
-            {
-                await PopupService.EnqueueSnackbarAsync("未解析出任何账单，请确认文件为对应平台导出的 CSV 账单", AlertTypes.Warning);
-                return;
-            }
-
-            // 暂存 CSV 内容与导入端点，用户确认后提交
-            _pendingCsvContent = csvContent;
-            _pendingEndpoint = platform == ImportPlatform.WeChat ? "api/import/wechat" : "api/import/alipay";
-            _previewPlatformName = platform == ImportPlatform.WeChat ? "微信" : "支付宝";
-            _previewBills = result.Bills;
-
-            var message = $"解析完成，共 {result.Bills.Count} 条账单";
-            if (result.SkippedCount > 0)
-            {
-                message += $"，已跳过 {result.SkippedCount} 条中性交易/无效交易";
-            }
-
-            await PopupService.EnqueueSnackbarAsync($"{message}，请确认后导入", AlertTypes.Info);
-        }
-        catch (Exception ex)
-        {
-            _pendingCsvContent = null;
-            _pendingEndpoint = string.Empty;
-            await PopupService.EnqueueSnackbarAsync($"解析失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
-        {
-            _parsing = false;
-        }
-    }
-
-    // ===== 第二步：确认导入 =====
-    private async Task ConfirmImport()
-    {
-        if (string.IsNullOrEmpty(_pendingCsvContent) || string.IsNullOrEmpty(_pendingEndpoint)) return;
-
-        _importing = true;
-
-        try
-        {
-            // CSV 里的交易时间是不带时区的用户本地时间：上报本机时区偏移，
-            // 让服务器按用户所在时区（而不是服务器时区）换算为 UTC 入库
-            var request = new { CsvContent = _pendingCsvContent, UtcOffsetMinutes = AppTimeZone.GetUtcOffsetMinutes() };
-            var result = await HttpService.PostAsync<ImportResult>(_pendingEndpoint, request);
-
-            if (result != null)
-            {
-                _importResult = result;
-                await PopupService.EnqueueSnackbarAsync($"{_previewPlatformName}账单导入完成", AlertTypes.Success);
-
-                // 导入写入的是云端数据库，而账单列表/统计页读取的是本地数据库；
-                // 导入成功后立即从云端拉取，否则本地列表看不到刚导入的账单
-                if (result.SuccessCount > 0)
+                @if (_result.Errors is { Count: > 0 })
                 {
-                    await PullImportedBillsAsync();
+                    <GroupedList Header="@ImportPresentation.ErrorsHeader"
+                                 Footer="@ImportPresentation.ErrorsFooter(_result)"
+                                 TestId="import-errors">
+                        @foreach (var error in _result.Errors)
+                        {
+                            <ListCell Title="@error" Class="ft-import__error-item" TestId="import-error-item" />
+                        }
+                    </GroupedList>
+                }
+
+                @if (_syncState != ImportSyncState.None)
+                {
+                    <GroupedList TestId="import-sync-group">
+                        <ListCell Icon="@(_syncState == ImportSyncState.Syncing ? "mdi-sync" : "mdi-cloud-sync-outline")"
+                                  Tone="@(_syncState == ImportSyncState.Synced ? "green" : _syncState == ImportSyncState.Syncing ? "teal" : "orange")"
+                                  Class="@(_syncState == ImportSyncState.Syncing ? "ft-import__sync--busy" : null)"
+                                  Title="@ImportPresentation.SyncRowTitle"
+                                  Subtitle="@_syncMessage"
+                                  Value="@ImportPresentation.SyncValue(_syncState)"
+                                  TestId="import-sync"
+                                  data-state="@SyncStateValue" />
+                    </GroupedList>
                 }
             }
             else
             {
-                await PopupService.EnqueueSnackbarAsync("导入失败：服务器返回空结果", AlertTypes.Error);
+                @* 第 1 步：来源 *@
+                <section class="ft-group ft-import__source" data-testid="import-source-step" aria-label="@ImportPresentation.SourceStepTitle">
+                    <h2 class="ft-group__header">@ImportPresentation.SourceStepTitle</h2>
+                    <SegmentedControl Options="SourceOptions"
+                                      Value="@ImportPresentation.SourceValue(_source)"
+                                      ValueChanged="OnSourceChanged"
+                                      AriaLabel="@ImportPresentation.SourceAriaLabel"
+                                      TestId="import-source" />
+                </section>
+
+                <GroupedList TestId="import-guide-group">
+                    <ListCell Icon="mdi-help-circle-outline"
+                              Tone="blue"
+                              Title="@ImportPresentation.GuideTitle(_source)"
+                              Class="@(_guideOpen ? "ft-import__guide-toggle ft-import__guide-toggle--open" : "ft-import__guide-toggle")"
+                              Chevron
+                              TestId="import-guide-toggle"
+                              aria-expanded="@(_guideOpen ? "true" : "false")"
+                              aria-controls="import-guide"
+                              OnClick="ToggleGuide" />
+                    @if (_guideOpen)
+                    {
+                        <div class="ft-import__guide" id="import-guide" data-testid="import-guide" data-source="@ImportPresentation.SourceValue(_source)">
+                            <div class="ft-import__guide-label">@ImportPresentation.ExportPathLabel</div>
+                            <div class="ft-import__guide-path" data-testid="import-guide-path">@ImportPresentation.ExportPath(_source)</div>
+                            <div class="ft-import__guide-hint">@ImportPresentation.FormatHint(_source)</div>
+                        </div>
+                    }
+                </GroupedList>
+
+                @* 第 2 步：文件（看到的是文件名与大小，真正的输入是盖在整行上的透明文件输入——点按即唤起系统文件选择器） *@
+                <GroupedList Header="@ImportPresentation.FileStepTitle"
+                             Footer="@ImportPresentation.FileFooter(_source)"
+                             Class="ft-addbill__rows"
+                             TestId="import-file-group">
+                    <ListCell Icon="mdi-file-delimited-outline"
+                              Tone="@(_fileName is null ? "blue" : "green")"
+                              Title="@(_fileName ?? ImportPresentation.FileRowEmptyTitle)"
+                              Subtitle="@(_fileName is null ? ImportPresentation.FileRowEmptySubtitle(_source) : ImportPresentation.FileSizeText(_fileSize))"
+                              Value="@(_fileName is null ? ImportPresentation.FileRowChooseValue : ImportPresentation.FileRowReplaceValue)"
+                              Class="ft-addbill__field ft-import__file-row"
+                              Chevron
+                              TestId="import-file-row"
+                              data-has-file="@(_fileName is null ? "false" : "true")"
+                              data-file-name="@_fileName">
+                        <Trailing>
+                            <InputFile @key="_inputKey"
+                                       class="ft-addbill__picker"
+                                       accept=".csv"
+                                       aria-label="@ImportPresentation.FileInputAriaLabel"
+                                       data-testid="import-file"
+                                       disabled="@Busy"
+                                       OnChange="OnFileChosenAsync" />
+                        </Trailing>
+                    </ListCell>
+                    @if (_stage is ImportStage.Reading or ImportStage.Parsing)
+                    {
+                        <div class="ft-import__status" role="status" data-testid="import-parsing" data-phase="@(_stage == ImportStage.Reading ? "reading" : "parsing")">
+                            <i class="mdi mdi-loading ft-spin" aria-hidden="true"></i>
+                            <span>@(_stage == ImportStage.Reading ? ImportPresentation.ReadingText : ImportPresentation.ParsingText)</span>
+                        </div>
+                    }
+                    else if (_stage == ImportStage.Failed)
+                    {
+                        <div class="ft-import__error" role="alert" data-testid="import-error">
+                            <i class="mdi mdi-alert-circle-outline" aria-hidden="true"></i>
+                            <span class="ft-import__error-text" data-testid="import-error-text">@_error</span>
+                            @if (_csv is not null)
+                            {
+                                <GlassButton Kind="ButtonKind.Soft" TestId="import-retry" OnClick="ParseClickedAsync">@ImportPresentation.RetryLabel</GlassButton>
+                            }
+                        </div>
+                    }
+                </GroupedList>
+
+                @if (HasPreview)
+                {
+                    @* 第 3 步：预览 *@
+                    <section class="ft-group ft-import__preview"
+                             data-testid="import-preview"
+                             data-count="@_summary.Count"
+                             data-skipped="@_preview!.SkippedCount">
+                        <h2 class="ft-group__header">@ImportPresentation.PreviewStepTitle</h2>
+                        <KpiCard Items="KpiItems" TestId="import-summary" Class="ft-import__kpi" />
+                        <div class="ft-import__caption" data-testid="import-caption">@ImportPresentation.SummaryCaption(_summary)</div>
+                        @if (ImportPresentation.SkippedText(_preview.SkippedCount) is { } skipped)
+                        {
+                            <div class="ft-import__caption" data-testid="import-skipped">@skipped</div>
+                        }
+                        <div class="ft-group__body ft-import__rows" data-testid="import-rows">
+                            @foreach (var bill in _visibleRows)
+                            {
+                                <ListCell Title="@ImportPresentation.RowTitle(bill)"
+                                          Subtitle="@ImportPresentation.RowSubtitle(bill)"
+                                          Class="ft-import__row"
+                                          TestId="import-row"
+                                          data-income="@(bill.IsIncome ? "true" : "false")">
+                                    <Leading>
+                                        <span class="ft-tile ft-tile--soft @(bill.IsIncome ? "ft-tile--green" : "ft-tile--pink")" aria-hidden="true"><i class="mdi @(bill.IsIncome ? "mdi-arrow-bottom-left" : "mdi-arrow-top-right")"></i></span>
+                                    </Leading>
+                                    <Trailing>
+                                        <span class="ft-billrow__side">
+                                            <span class="ft-billrow__amount @(bill.IsIncome ? "ft-billrow__amount--income" : null)" data-testid="import-row-amount">@ImportPresentation.RowAmount(bill)</span>
+                                            <span class="ft-billrow__time" data-testid="import-row-time">@ImportPresentation.RowTime(bill)</span>
+                                        </span>
+                                    </Trailing>
+                                </ListCell>
+                            }
+                        </div>
+                        @if (ImportPresentation.OverflowText(_preview.Bills.Count) is { } overflow)
+                        {
+                            <div class="ft-group__footer" data-testid="import-more">@overflow</div>
+                        }
+                    </section>
+
+                    @* 第 4 步：账本（必选） *@
+                    <GroupedList Header="@ImportPresentation.LedgerStepTitle"
+                                 Footer="@ImportPresentation.LedgerFooter"
+                                 Class="ft-addbill__rows"
+                                 TestId="import-ledger-group">
+                        <div class="ft-addbill__anchor" @ref="_ledgerAnchor">
+                            <ListCell Icon="mdi-book-open-variant"
+                                      Tone="purple"
+                                      Title="@ImportPresentation.LedgerRowTitle"
+                                      Value="@LedgerValue"
+                                      Class="@(LedgerMissing ? "ft-addbill__field ft-addbill__field--missing" : "ft-addbill__field")"
+                                      Chevron
+                                      Disabled="Busy"
+                                      TestId="import-ledger-row"
+                                      AriaLabel="@($"{ImportPresentation.LedgerRowTitle}，{LedgerValue}")"
+                                      aria-haspopup="menu"
+                                      aria-expanded="@(_ledgerMenuOpen ? "true" : "false")"
+                                      data-value="@(_ledgerId?.ToString())"
+                                      data-missing="@(LedgerMissing ? "true" : "false")"
+                                      OnClick="OpenLedgerMenuAsync" />
+                        </div>
+                    </GroupedList>
+
+                    @if (_importError is not null)
+                    {
+                        <div class="ft-import__error ft-import__error--card" role="alert" data-testid="import-failure">
+                            <i class="mdi mdi-alert-circle-outline" aria-hidden="true"></i>
+                            <span class="ft-import__error-text" data-testid="import-failure-text">@_importError</span>
+                        </div>
+                    }
+                }
+            }
+        </div>
+
+        @* 主按钮固定在页面底部，按步骤换动作：解析预览 → 导入 N 条账单 → 继续导入 *@
+        <div class="ft-pagefoot" data-testid="import-foot">
+            <GlassButton Kind="ButtonKind.Brand"
+                         Large
+                         Block
+                         Icon="@PrimaryIcon"
+                         Busy="@(_stage is ImportStage.Parsing or ImportStage.Importing)"
+                         Disabled="@(!PrimaryEnabled)"
+                         TestId="import-submit"
+                         data-action="@PrimaryAction"
+                         OnClick="SubmitAsync">@ImportPresentation.SubmitLabel(_stage, PreviewCount)</GlassButton>
+        </div>
+    </ChildContent>
+</SecondaryPage>
+
+<LedgerMenu @bind-Visible="_ledgerMenuOpen"
+            Anchor="_ledgerAnchor"
+            Ledgers="_ledgers"
+            SelectedId="_ledgerId"
+            OnSelect="OnLedgerSelected"
+            OnCreate="OpenLedgerSheet"
+            TestId="import-ledger-menu" />
+
+<LedgerFormSheet @bind-Visible="_ledgerSheetOpen"
+                 UserId="_userId"
+                 OnCreated="OnLedgerCreated" />
+
+@code {
+    private static readonly IReadOnlyList<SegmentOption> SourceOptions =
+        ImportPresentation.Sources.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
+
+    private Guid _userId;
+    private bool _disposed;
+
+    // 步骤状态
+    private ImportSource _source = ImportSource.WeChat;
+    private ImportStage _stage = ImportStage.Idle;
+    private bool _guideOpen;
+
+    // 文件输入的 @key：每读完一次文件换一个新的输入，这样同一个文件再选一次也会触发 change（旧输入还留着上一次的值）
+    private int _inputKey;
+
+    // 文件与预览。_csv 是解码后的文本，预览与导入都提交它（和旧页面一样，导入不再重新读文件）
+    private string? _fileName;
+    private long _fileSize;
+    private string? _csv;
+    private ImportPreviewResult? _preview;
+    private ImportSummary _summary = new(0, 0m, 0m, null, null);
+    private IReadOnlyList<ImportPreviewBill> _visibleRows = [];
+    private string? _error;
+
+    // 账本（只列自己的账本）与菜单
+    private List<LedgerModel> _ledgers = new();
+    private Guid? _ledgerId;
+    private bool _ledgersReady;
+
+    // 账本这一轮读取已经结束（成功或失败）：结束之前账本一行显示「加载中…」，不能先闪一下「加载失败」或红色的「选择账本」
+    private bool _optionsLoaded;
+    private bool _ledgerMenuOpen;
+    private bool _ledgerSheetOpen;
+    private ElementReference _ledgerAnchor;
+    private string? _importError;
+
+    // 结果
+    private ImportBillsResult? _result;
+    private string? _resultLedgerName;
+    private ImportSyncState _syncState;
+    private string? _syncMessage;
+
+    private bool Busy => _stage is ImportStage.Reading or ImportStage.Parsing or ImportStage.Importing;
+
+    private bool HasPreview => _stage is ImportStage.Preview or ImportStage.Importing && _preview is not null;
+
+    private int PreviewCount => _preview?.Bills.Count ?? 0;
+
+    private bool CanSubmit => ImportPresentation.CanSubmit(_stage, PreviewCount, _ledgerId);
+
+    private bool CanParse => ImportPresentation.CanParse(_stage, _csv is not null);
+
+    /// <summary>底部主按钮能不能点：能解析（文件已读入）/ 能导入（有预览且已选账本）/ 导入完成后的「继续导入」</summary>
+    private bool PrimaryEnabled => _stage == ImportStage.Done || CanParse || CanSubmit;
+
+    /// <summary>底部主按钮当前的动作（E2E 观察 data-action）：解析预览 / 导入 / 继续导入</summary>
+    private string PrimaryAction => _stage switch
+    {
+        ImportStage.Done => "again",
+        ImportStage.Preview or ImportStage.Importing => "import",
+        _ => "parse",
+    };
+
+    private string PrimaryIcon => PrimaryAction switch
+    {
+        "again" => "mdi-restart",
+        "import" => "mdi-import",
+        _ => "mdi-text-box-search-outline",
+    };
+
+    private bool LedgerMissing => _optionsLoaded && _ledgersReady && _ledgerId is null;
+
+    private string LedgerValue => ImportPresentation.LedgerValue(
+        _optionsLoaded,
+        _ledgersReady,
+        _ledgers.FirstOrDefault(l => l.Id == _ledgerId)?.Name);
+
+    private string StageValue => _stage switch
+    {
+        ImportStage.Reading => "reading",
+        ImportStage.Ready => "ready",
+        ImportStage.Parsing => "parsing",
+        ImportStage.Failed => "failed",
+        ImportStage.Preview => "preview",
+        ImportStage.Importing => "importing",
+        ImportStage.Done => "done",
+        _ => "idle",
+    };
+
+    private string SyncStateValue => _syncState switch
+    {
+        ImportSyncState.Syncing => "syncing",
+        ImportSyncState.Synced => "synced",
+        ImportSyncState.Failed => "failed",
+        ImportSyncState.NotLoggedIn => "not-logged-in",
+        _ => "none",
+    };
+
+    private IReadOnlyList<KpiItem> KpiItems =>
+    [
+        new KpiItem(ImportPresentation.ExpenseLabel, _summary.Expense, "expense", "import-expense"),
+        new KpiItem(ImportPresentation.IncomeLabel, _summary.Income, "income", "import-income"),
+        new KpiItem(ImportPresentation.BalanceLabel, _summary.Income - _summary.Expense, "balance", "import-balance"),
+    ];
+
+    public void Dispose() => _disposed = true;
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与预算页、分类页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        await LoadLedgersAsync();
+        StateHasChanged();
+    }
+
+    // ------------------------------------------------------------------ 账本
+
+    /// <summary>
+    /// 读自己的账本（经过 PageDataGate：常驻 Tab 页与它共用一个 DbContext）。账本只在加载成功后才算就绪：
+    /// 加载失败时不能提示「你还没有账本」，那会误导用户——账本行显示「加载失败，点按重试」。
+    /// </summary>
+    private async Task LoadLedgersAsync()
+    {
+        try
+        {
+            await DataGate.RunAsync(async () =>
+            {
+                (_ledgers, _ledgerId) = await LedgerModel.LoadOwnAsync(LedgerService, UserDefaultService, _userId, _ledgerId);
+            });
+
+            _ledgersReady = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载导入页的账本失败");
+            await PopupService.EnqueueSnackbarAsync(ImportPresentation.LedgersFailedMessage(ex.GetUserMessage()), AlertTypes.Warning);
+        }
+        finally
+        {
+            _optionsLoaded = true;
+        }
+    }
+
+    private async Task OpenLedgerMenuAsync()
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        // 账本没加载出来：这一下先重读（成功了再弹菜单），而不是弹一个空菜单
+        if (!_ledgersReady)
+        {
+            await LoadLedgersAsync();
+            if (!_ledgersReady)
+            {
+                return;
+            }
+        }
+
+        _ledgerMenuOpen = true;
+    }
+
+    private void OnLedgerSelected(Guid ledgerId) => _ledgerId = ledgerId;
+
+    private void OpenLedgerSheet() => _ledgerSheetOpen = true;
+
+    /// <summary>菜单里「新建账本…」保存后：放进账本列表并选中（用户就是为了往里导入才新建的）</summary>
+    private Task OnLedgerCreated(Ledger created)
+    {
+        if (_ledgers.All(l => l.Id != created.Id))
+        {
+            _ledgers.Add(LedgerModel.FromEntity(created));
+        }
+
+        _ledgerId = created.Id;
+        _ledgersReady = true;
+        return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------ 来源与文件
+
+    private void ToggleGuide() => _guideOpen = !_guideOpen;
+
+    /// <summary>
+    /// 换来源：已读入的文件保留（选错来源不必重新选文件），但原来的预览 / 失败提示作废（那是按旧来源得出的），
+    /// 回到「已选文件」阶段——要不要按新来源解析，由用户再点「解析预览」决定，页面不自动向云端解析。读取 / 解析 / 导入进行中不响应。
+    /// </summary>
+    private void OnSourceChanged(string value)
+    {
+        if (Busy || !ImportPresentation.TryParseSource(value, out var source) || source == _source)
+        {
+            return;
+        }
+
+        _source = source;
+
+        if (_csv is not null)
+        {
+            _preview = null;
+            _error = null;
+            _importError = null;
+            _stage = ImportStage.Ready;
+        }
+    }
+
+    /// <summary>选了文件：读出内容、检测编码，然后停在「已选文件」，等用户点「解析预览」（不自动向云端解析）。读取期间文件名先显示出来</summary>
+    private async Task OnFileChosenAsync(InputFileChangeEventArgs e)
+    {
+        if (Busy || e.FileCount == 0)
+        {
+            return;
+        }
+
+        var file = e.File;
+        _fileName = file.Name;
+        _fileSize = file.Size;
+        _csv = null;
+        _preview = null;
+        _error = null;
+        _importError = null;
+
+        if (file.Size > ImportPresentation.MaxFileBytes)
+        {
+            _inputKey++;
+            Fail(ImportPresentation.FileTooLargeMessage(file.Size));
+            return;
+        }
+
+        _stage = ImportStage.Reading;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(maxAllowedSize: ImportPresentation.MaxFileBytes);
+            using var memory = new MemoryStream();
+            await stream.CopyToAsync(memory);
+
+            // 自动检测编码：微信 / 支付宝账单通常是 GB18030
+            _csv = CsvFileDecoder.Decode(memory.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取账单文件失败");
+            _inputKey++;
+            if (!_disposed)
+            {
+                Fail(ImportPresentation.ReadFailedMessage(ex.GetUserMessage()));
+            }
+
+            return;
+        }
+
+        // 内容已经读进内存：换一个新的文件输入，同一个文件之后还能再选；停在「已选文件」，由用户点「解析预览」
+        _inputKey++;
+        _stage = ImportStage.Ready;
+    }
+
+    /// <summary>
+    /// 「解析预览」（底部主按钮）与失败提示条里的「重试」：只有文件已读入、且不在读取 / 解析 / 导入的路上才解析——
+    /// 连点两下不会发出两次解析请求（第二下到达时阶段已经是「解析中」）。
+    /// </summary>
+    private Task ParseClickedAsync() => CanParse ? ParseAsync() : Task.CompletedTask;
+
+    /// <summary>
+    /// 向云端解析预览（仅解析，不入库）。云端连不上 / 文件格式不对 / 一条账单都没解析出来，都停在第 2 步给出提示，页面仍可操作：
+    /// 可以重试、换文件、换来源。只由 <see cref="ParseClickedAsync"/> 调用（它负责挡住读取 / 解析 / 导入的时候）。
+    /// </summary>
+    private async Task ParseAsync()
+    {
+        if (_csv is null)
+        {
+            return;
+        }
+
+        _stage = ImportStage.Parsing;
+        _preview = null;
+        _error = null;
+        _importError = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await HttpService.PostAsync<ImportPreviewResult>(ImportPresentation.PreviewEndpoint(_source), new { CsvContent = _csv });
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (result is null)
+            {
+                Fail(ImportPresentation.EmptyResponseMessage("解析"));
+            }
+            else if (result.Bills.Count == 0)
+            {
+                Fail(ImportPresentation.EmptyParseMessage(_source, result.SkippedCount));
+            }
+            else
+            {
+                _preview = result;
+                _summary = ImportPresentation.Summarize(result.Bills);
+                _visibleRows = ImportPresentation.VisibleRows(result.Bills);
+                _stage = ImportStage.Preview;
             }
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导入失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
-        {
-            // 导入完成后清空预览状态
-            _importing = false;
-            _previewBills = new List<ImportedBillPreview>();
-            _pendingCsvContent = null;
-            _pendingEndpoint = string.Empty;
+            Logger.LogWarning(ex, "解析{Source}账单失败", ImportPresentation.SourceName(_source));
+            if (!_disposed)
+            {
+                Fail(ImportPresentation.DescribeFailure("解析", ex).Message);
+            }
         }
     }
 
-    private void CancelPreview()
+    private void Fail(string message)
     {
-        _previewBills = new List<ImportedBillPreview>();
-        _pendingCsvContent = null;
-        _pendingEndpoint = string.Empty;
-        _previewPlatformName = string.Empty;
+        _error = message;
+        _stage = ImportStage.Failed;
+    }
+
+    // ------------------------------------------------------------------ 导入
+
+    /// <summary>底部主按钮：按当前步骤做对应的事——导入完成后「继续导入」、预览出来后「导入」、其余（已选文件 / 解析失败）「解析预览」</summary>
+    private Task SubmitAsync() => _stage switch
+    {
+        ImportStage.Done => ResetAsync(),
+        ImportStage.Preview or ImportStage.Importing => ImportAsync(),
+        _ => ParseClickedAsync(),
+    };
+
+    /// <summary>导入完成后「继续导入」：回到第 1 步（来源与账本沿用，文件与预览清空）</summary>
+    private Task ResetAsync()
+    {
+        _stage = ImportStage.Idle;
+        _fileName = null;
+        _fileSize = 0;
+        _csv = null;
+        _preview = null;
+        _error = null;
+        _importError = null;
+        _result = null;
+        _resultLedgerName = null;
+        _syncState = ImportSyncState.None;
+        _syncMessage = null;
+        _inputKey++;
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// 导入成功后从云端拉取账单到本地库，并通知列表/统计页刷新。
-    /// 失败不影响导入结果，用户可稍后在"我的"页点击"立即同步"补拉。
+    /// 导入：账本必选（界面与云端接口各拦一道）→ 先尽力把账本同步到云端 → 上报本机时区偏移并导入 → 结果 + Toast → 自动拉取一次。
+    /// 失败时留在预览阶段（预览与账本选择都保留）；没被云端明确拒绝的失败会提示「云端可能已经收下了部分账单」，避免用户盲目重试造成重复导入。
+    /// </summary>
+    private async Task ImportAsync()
+    {
+        if (_stage != ImportStage.Preview || _preview is null || _csv is null)
+        {
+            return;
+        }
+
+        // 账本必选：导入的每一笔账单都要归属一个账本
+        if (_ledgerId is not { } ledgerId)
+        {
+            await PopupService.EnqueueSnackbarAsync(ImportPresentation.LedgerRequiredMessage, AlertTypes.Warning);
+            return;
+        }
+
+        var source = _source;
+        _stage = ImportStage.Importing;
+        _importError = null;
+        StateHasChanged();
+
+        try
+        {
+            // 导入写入的是云端数据库：所选账本若是刚在本机创建、还没同步上去，云端会找不到它。
+            // 先尽力把账本同步一次（失败不拦截：账本已在云端时导入照常，确实缺失时服务器会明确报错）
+            await TrySyncLedgersAsync();
+
+            // CSV 里的交易时间是不带时区的用户本地时间：上报本机时区偏移，
+            // 让服务器按用户所在时区（而不是服务器时区）换算为 UTC 入库
+            var request = new
+            {
+                CsvContent = _csv,
+                UtcOffsetMinutes = AppTimeZone.GetUtcOffsetMinutes(),
+                LedgerId = ledgerId,
+            };
+            var result = await HttpService.PostAsync<ImportBillsResult>(ImportPresentation.ImportEndpoint(source), request);
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (result is null)
+            {
+                await FailImportAsync(new ImportFailure(ImportPresentation.EmptyResponseMessage("导入"), false));
+                return;
+            }
+
+            _result = result;
+            _resultLedgerName = _ledgers.FirstOrDefault(l => l.Id == ledgerId)?.Name;
+            _syncState = result.SuccessCount > 0 ? ImportSyncState.Syncing : ImportSyncState.None;
+            _stage = ImportStage.Done;
+            StateHasChanged();
+
+            var (message, isWarning) = ImportPresentation.DoneToast(source, result);
+            await PopupService.EnqueueSnackbarAsync(message, isWarning ? AlertTypes.Warning : AlertTypes.Success);
+
+            // 导入写入的是云端数据库，而账单列表 / 统计页读取的是本地数据库；
+            // 导入成功后立即从云端拉取，否则本地列表看不到刚导入的账单
+            if (result.SuccessCount > 0)
+            {
+                await PullImportedBillsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "导入{Source}账单失败", ImportPresentation.SourceName(source));
+            if (!_disposed)
+            {
+                await FailImportAsync(ImportPresentation.DescribeFailure("导入", ex));
+            }
+        }
+    }
+
+    private async Task FailImportAsync(ImportFailure failure)
+    {
+        _importError = ImportPresentation.ImportFailureMessage(failure);
+        _stage = ImportStage.Preview;
+        await PopupService.EnqueueSnackbarAsync(failure.Message, failure.Rejected ? AlertTypes.Warning : AlertTypes.Error);
+    }
+
+    /// <summary>导入前尽力同步一次账本（双向），保证云端认得所选账本</summary>
+    private async Task TrySyncLedgersAsync()
+    {
+        try
+        {
+            var userId = await AuthStateService.GetUserIdAsync();
+            if (userId.HasValue)
+            {
+                await SyncService.SyncLedgersAsync(userId.Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "导入前同步账本失败，仍尝试导入");
+        }
+    }
+
+    /// <summary>
+    /// 导入成功后从云端拉取账单到本地库，并通知列表 / 统计页刷新。
+    /// 失败不影响导入结果，结果里的「同步到本机」一行会说明，用户可稍后在「我的」页点击「立即同步」补拉。
     /// </summary>
     private async Task PullImportedBillsAsync()
     {
@@ -343,95 +735,34 @@
             var userId = await AuthStateService.GetUserIdAsync();
             if (!userId.HasValue)
             {
-                await PopupService.EnqueueSnackbarAsync("导入成功，但当前未登录，请登录后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+                _syncState = ImportSyncState.NotLoggedIn;
+                _syncMessage = ImportPresentation.SyncNotLoggedInMessage;
+                await PopupService.EnqueueSnackbarAsync(_syncMessage, AlertTypes.Warning);
                 return;
             }
 
             var syncResult = await SyncService.SyncBillsAsync(userId.Value);
-
             if (syncResult.Success)
             {
-                await PopupService.EnqueueSnackbarAsync("已从云端拉取到本地，账单列表即可查看", AlertTypes.Info);
+                _syncState = ImportSyncState.Synced;
+                _syncMessage = ImportPresentation.SyncSucceededMessage;
             }
             else
             {
-                await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{syncResult.ErrorMessage}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+                _syncState = ImportSyncState.Failed;
+                _syncMessage = ImportPresentation.SyncFailedMessage(syncResult.ErrorMessage ?? "未知原因");
+                await PopupService.EnqueueSnackbarAsync(_syncMessage, AlertTypes.Warning);
             }
 
-            // 通知首页/统计页刷新数据
+            // 通知首页 / 统计页刷新数据
             BillEventService.NotifyBillChanged();
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导入成功，但拉取到本地失败：{ex.GetUserMessage()}；可稍后在\"我的\"页点击\"立即同步\"", AlertTypes.Warning);
+            Logger.LogWarning(ex, "导入后拉取云端账单失败");
+            _syncState = ImportSyncState.Failed;
+            _syncMessage = ImportPresentation.SyncFailedMessage(ex.GetUserMessage());
+            await PopupService.EnqueueSnackbarAsync(_syncMessage, AlertTypes.Warning);
         }
-    }
-
-    /// <summary>
-    /// 检测编码并解码 CSV 内容
-    /// 微信/支付宝账单通常使用 GB18030 编码
-    /// </summary>
-    private static string DecodeCsvContent(byte[] bytes)
-    {
-        // 检测 BOM
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-
-        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
-
-        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
-            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
-
-        // 尝试 UTF-8（无 BOM）
-        try
-        {
-            var utf8Text = Encoding.UTF8.GetString(bytes);
-            // 检查是否包含有效的中文字符（UTF-8 解码成功且包含常见中文标点）
-            if (utf8Text.Contains("交易时间") || utf8Text.Contains("交易类型"))
-                return utf8Text;
-        }
-        catch
-        {
-            // UTF-8 解码失败，继续尝试其他编码
-        }
-
-        // 默认使用 GB18030（微信/支付宝账单标准编码）
-        try
-        {
-            var gb18030 = Encoding.GetEncoding("gb18030");
-            return gb18030.GetString(bytes);
-        }
-        catch
-        {
-            // 最后回退到系统默认编码
-            return Encoding.UTF8.GetString(bytes);
-        }
-    }
-
-    private class ImportedBillPreview
-    {
-        public DateTime TransactionTime { get; set; }
-        public decimal Amount { get; set; }
-        public bool IsIncome { get; set; }
-        public string Description { get; set; } = string.Empty;
-        public string MerchantName { get; set; } = string.Empty;
-        public string PaymentChannel { get; set; } = string.Empty;
-        public string TransactionId { get; set; } = string.Empty;
-    }
-
-    private class PreviewResult
-    {
-        public int TotalCount { get; set; }
-        public int SkippedCount { get; set; }
-        public List<ImportedBillPreview> Bills { get; set; } = new();
-    }
-
-    private class ImportResult
-    {
-        public int TotalCount { get; set; }
-        public int SuccessCount { get; set; }
-        public int FailCount { get; set; }
-        public List<string>? Errors { get; set; }
     }
 }

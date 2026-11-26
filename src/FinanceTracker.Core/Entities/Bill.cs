@@ -38,7 +38,9 @@ public class Bill : BaseEntity
     public Guid PaymentChannelId { get; set; }
 
     /// <summary>
-    /// 账本ID（null 表示未归属账本，兼容历史账单）
+    /// 账本ID。新建/编辑账单时必填（由 BillService 与各录入入口校验）；
+    /// 字段本身仍可空，仅为兼容"账本必填"之前创建的历史账单与同步数据：
+    /// null 表示历史上未归属账本，统计中归入"未归属账本"，可在编辑账单或"批量归属账本"中补上
     /// </summary>
     public Guid? LedgerId { get; set; }
 

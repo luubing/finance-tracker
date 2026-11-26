@@ -1,0 +1,61 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    选项标签（设计稿 13 · 筛选 Sheet 里的时间 / 账本 / 分类 / 支付渠道）：圆角胶囊，选中时品牌色浅底 + 品牌色描边 + 品牌色文字。
+    - 选中 / 取消选中都由调用方决定（再点已选中的标签通常是取消选择）；组件只用 aria-pressed 表达「按下」状态，不含业务逻辑。
+    - Tone 与 Icon 同时给：前面是一块实心配色小图标块（分类）；只给 Icon：前面是一个普通小图标（账本 / 支付渠道 / 自定义日期）。
+    - 命中区域 44（按钮本体 min-height = --ft-hit），视觉高度 36（--ft-chip-height，伪元素画在按钮中间）。
+    - 观察属性（E2E）：data-testid（TestId）、data-selected，以及调用方透传的 data-*。
+*@
+<button type="button"
+        class="@CssClass"
+        aria-pressed="@(Selected ? "true" : "false")"
+        data-selected="@(Selected ? "true" : "false")"
+        data-testid="@TestId"
+        disabled="@Disabled"
+        @onclick="OnClick"
+        @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Icon) && !string.IsNullOrEmpty(Tone))
+    {
+        <span class="ft-tile ft-tile--@Tone ft-chip__tile" aria-hidden="true"><i class="mdi @Icon"></i></span>
+    }
+    else if (!string.IsNullOrEmpty(Icon))
+    {
+        <i class="mdi @Icon ft-chip__icon" aria-hidden="true"></i>
+    }
+    <span class="ft-chip__label">@Label</span>
+</button>
+
+@code {
+    /// <summary>文字</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>已选中</summary>
+    [Parameter] public bool Selected { get; set; }
+
+    /// <summary>MDI 图标类名；为空则只有文字</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>图标块配色（purple / teal / pink / orange / blue / green / red / gray）；给了就把图标画在实心色块里，否则是普通小图标</summary>
+    [Parameter] public string? Tone { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>附加样式类（布局微调用）</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string CssClass => string.Join(' ', new[]
+    {
+        "ft-chip",
+        Selected ? "ft-chip--on" : null,
+        Class,
+    }.Where(c => !string.IsNullOrEmpty(c)));
+}

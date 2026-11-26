@@ -1,0 +1,83 @@
+@namespace FinanceTracker.Web.Components.Ui
+@implements IDisposable
+@inject IJSRuntime JS
+
+@*
+    ECharts 图表（MECharts 的包装）：等图表库就绪再初始化，统计各视图与自定义报表里的图表都经它渲染。
+    ECharts 来自 CDN，由启动脚本（wwwroot/js/boot.js）在页面 load 之后才注入，不挡首屏；
+    所以应用刚启动、脚本还在下载时，用户就可能进到带图表的页面——这时直接渲染 MECharts 会在 echarts.init 上抛 ReferenceError，
+    Blazor 当成未处理异常，整个界面废掉（探针验证过：统计 Tab 出不来，连 Tab 栏都消失）。
+    这里先等 FtBoot.chartsReady()：脚本到了才渲染图表；等待期间是与图表同高的骨架块（放在 ChartPanel 里卡片高度不跳）；
+    脚本加载失败（离线 / CDN 不可达）给一句说明，图表之外的页面照常可用。
+    - 观察属性（E2E）：等待中 data-testid="chart-pending"；加载失败 data-testid="chart-unavailable"；就绪后渲染的就是 MECharts 本身。
+*@
+
+@switch (_state)
+{
+    case ScriptState.Ready:
+        <MECharts Option="@Option" Height="@Height" />
+        break;
+    case ScriptState.Unavailable:
+        <div class="ft-panel__empty" data-testid="chart-unavailable">
+            <i class="mdi mdi-chart-line-variant" aria-hidden="true"></i>
+            <p>@UnavailableText</p>
+        </div>
+        break;
+    default:
+        <div class="ft-skeleton" style="height: @(Height)px" data-testid="chart-pending" aria-hidden="true"></div>
+        break;
+}
+
+@code {
+    /// <summary>ECharts 配置对象（与 MECharts 的 Option 一致）</summary>
+    [Parameter] public object? Option { get; set; }
+
+    /// <summary>图表高度（px）</summary>
+    [Parameter] public int Height { get; set; } = 220;
+
+    /// <summary>图表库加载失败时的说明文字</summary>
+    [Parameter] public string UnavailableText { get; set; } = "图表组件未能加载（需要联网），联网后重新打开应用即可";
+
+    private ScriptState _state = ScriptState.Pending;
+    private bool _disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        bool ready;
+        try
+        {
+            ready = await JS.InvokeAsync<bool>("FtBoot.chartsReady");
+        }
+        catch (JSException)
+        {
+            // 宿主页没有启动脚本（图表库是同步引入的）：按原来的方式直接渲染
+            ready = true;
+        }
+        catch (JSDisconnectedException)
+        {
+            return;
+        }
+
+        if (_disposed)
+        {
+            return;
+        }
+
+        _state = ready ? ScriptState.Ready : ScriptState.Unavailable;
+        StateHasChanged();
+    }
+
+    public void Dispose() => _disposed = true;
+
+    private enum ScriptState
+    {
+        Pending,
+        Ready,
+        Unavailable
+    }
+}

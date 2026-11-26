@@ -35,6 +35,8 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+# 上面的 [Ll]ogs/ 会把「错误日志」页的组件目录一并忽略（LogFilterSheet / LogDetailSheet 是源码，必须入库）
+!src/FinanceTracker.Web/Components/Logs/
 
 ## NuGet
 *.nupkg
@@ -133,3 +135,12 @@ design_time.db
 ## .scratch 下的一次性调试脚本（issue 文档仍受跟踪）
 .scratch/*.sh
 .scratch/*.py
+
+## E2E 调试产物（截图 / 页面快照）
+tests/e2e/screenshots/
+tests/e2e/artifacts/
+tests/e2e/__pycache__/
+
+## iOS UI 重构逐屏截图与设计稿并排对照（.scratch/ios-ui-refactor/impl/design_capture.py 的输出，随时可重新生成）
+.scratch/ios-ui-refactor/impl/shots/
+.scratch/ios-ui-refactor/impl/__pycache__/

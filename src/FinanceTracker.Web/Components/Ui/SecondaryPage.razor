@@ -1,0 +1,39 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    二级页面模板（设计稿 05）：玻璃导航栏（返回 + 内联标题 + 右侧操作）挂在页面栈顶栏里，下面是页面内容。
+    二级页面在页面栈里以全屏对话框呈现，Tab 栏自动隐藏；页面栈自带的返回手势（左边缘右滑）与返回动效照常工作。
+
+    实现要点：
+    - PStackPageBar 的 BarContent 会整体替换页面栈默认的顶栏内容（紫色标题栏），我们放进 GlassNavBar；
+      顶栏背景 = 页面背景色 + 底部渐隐（见 ui.css 的 .ft-subbar），内容从导航栏下面滚过时不会和按钮 / 标题糊在一起。
+    - 顶栏高度 = 44 + 状态栏安全区，沉浸式下内容让出状态栏（--ft-safe-top 由 immersive.js 维护）。
+    - 状态栏图标：页面背景是不透明浅色，immersive.js 会自动取深色图标，页面无需声明。
+    - 本组件只提供外壳；业务内容通过 ChildContent，右上角操作通过 Actions。
+*@
+<PStackPageBar Class="ft-subbar" Flat Height="44">
+    <BarContent Context="back">
+        <GlassNavBar Title="@Title" OnBack="@back.GoBack" Actions="@Actions" />
+    </BarContent>
+</PStackPageBar>
+
+<div class="ft-subpage @Class" data-testid="@TestId">
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>导航栏标题</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>右上角操作（GlassButton）</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>页面内容</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>页面根节点附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子：页面根节点的 data-testid</summary>
+    [Parameter] public string? TestId { get; set; } = "secondary-page";
+}

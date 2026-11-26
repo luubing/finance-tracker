@@ -1,0 +1,46 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    KPI 单卡（设计稿 screens 03-stats ③）：一张白色圆角卡，里面并排三栏（支出 / 收入 / 结余），栏间细分隔线；
+    每栏上面是「彩色小圆点 + 小字标题」，下面是加粗的金额（统一中性色，颜色只出现在小圆点上）。
+    统计 Tab 的月度、趋势、年度三个视图共用同一张卡（栏的内容由调用方给）。
+    - 加载中：金额处显示骨架条，标题照常显示（布局不跳）。
+    - 金额太长（≥ 12 个字符，例如 ¥1,234,567.89）自动缩小字号，不挤出栏。
+    - 观察属性（E2E）：根 data-testid（TestId）；每栏 {item.TestId}-cell；金额 data-testid = item.TestId、data-amount（AmountDisplay 提供）。
+*@
+<div class="ft-kpi @Class" data-testid="@TestId" aria-busy="@(Loading ? "true" : null)">
+    @foreach (var item in Items)
+    {
+        <div class="ft-kpi__cell" data-testid="@(item.TestId + "-cell")">
+            <p class="ft-kpi__label"><span class="ft-dot ft-dot--@item.Tone" aria-hidden="true"></span>@item.Label</p>
+            @if (Loading)
+            {
+                <span class="ft-skeleton ft-skeleton--summary" aria-hidden="true"></span>
+            }
+            else
+            {
+                <AmountDisplay Amount="item.Amount"
+                               Size="AmountSize.Md"
+                               Class="@AmountClass(item)"
+                               TestId="@item.TestId" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>各栏（通常三栏）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<KpiItem> Items { get; set; } = [];
+
+    /// <summary>加载中（金额处显示骨架条）</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子：整张卡</summary>
+    [Parameter] public string? TestId { get; set; } = "kpi-card";
+
+    private static string AmountClass(KpiItem item) =>
+        StatisticsPresentation.IsLongAmount(item.Amount) ? "ft-kpi__amount ft-amount--long" : "ft-kpi__amount";
+}

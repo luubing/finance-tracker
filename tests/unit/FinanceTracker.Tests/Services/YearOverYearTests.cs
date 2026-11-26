@@ -44,12 +44,16 @@ public sealed class YearOverYearTests : IAsyncLifetime
         return new StatisticsService(_db.Context, new FixedTimeProvider(utcNow));
     }
 
-    private Task<Bill> AddBillAsync(
+    /// <param name="ledgerId">账单所属账本；账本必填，不指定时记在默认账本里</param>
+    private async Task<Bill> AddBillAsync(
         DateTime wallTime,
         decimal amount = 10m,
         BillType type = BillType.Expense,
-        Guid? ledgerId = null) =>
-        _billService.CreateBillAsync(new Bill
+        Guid? ledgerId = null)
+    {
+        ledgerId ??= (await _db.GetDefaultLedgerAsync()).Id;
+
+        return await _billService.CreateBillAsync(new Bill
         {
             UserId = _db.User.Id,
             Amount = amount,
@@ -60,6 +64,7 @@ public sealed class YearOverYearTests : IAsyncLifetime
             TransactionTime = DateTime.SpecifyKind(wallTime, DateTimeKind.Unspecified),
             Source = BillSource.Manual
         });
+    }
 
     // ───────────────────────── P11：变化率 ─────────────────────────
 
@@ -304,7 +309,7 @@ public sealed class YearOverYearTests : IAsyncLifetime
         await _db.Context.SaveChangesAsync();
 
         await AddBillAsync(new DateTime(2026, 6, 1, 12, 0, 0), amount: 100m, ledgerId: ledger.Id);
-        await AddBillAsync(new DateTime(2026, 6, 2, 12, 0, 0), amount: 7m);                          // 未归属账本
+        await AddBillAsync(new DateTime(2026, 6, 2, 12, 0, 0), amount: 7m);                          // 默认账本（不是"旅行账本"）
         await AddBillAsync(new DateTime(2025, 6, 1, 12, 0, 0), amount: 50m, ledgerId: ledger.Id);
         await AddBillAsync(new DateTime(2025, 6, 2, 12, 0, 0), amount: 3m);
 

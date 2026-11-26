@@ -95,6 +95,44 @@ public class StatisticsController : BaseApiController
     }
 
     /// <summary>
+    /// 获取账本统计数据（某月按账本汇总，用于"全部账本"视图）
+    /// </summary>
+    /// <param name="year">年份</param>
+    /// <param name="month">月份</param>
+    /// <param name="type">账单类型</param>
+    /// <returns>账本统计数据；ledgerId 为 null 的一项表示未归属账本的历史账单</returns>
+    [HttpGet("ledger")]
+    public async Task<IActionResult> GetLedgerStatistics(
+        [FromQuery] int year,
+        [FromQuery] int month,
+        [FromQuery] BillType type)
+    {
+        var userId = GetUserId();
+
+        if (year < 2000 || year > 2100)
+        {
+            return BadRequest(new { message = "年份不正确" });
+        }
+
+        if (month < 1 || month > 12)
+        {
+            return BadRequest(new { message = "月份不正确" });
+        }
+
+        var statistics = await _statisticsService.GetLedgerStatisticsAsync(userId, year, month, type);
+
+        return Ok(statistics.Select(s => new
+        {
+            ledgerId = s.LedgerId,
+            ledgerName = s.LedgerName,
+            ledgerIcon = s.LedgerIcon,
+            amount = s.Amount,
+            percentage = s.Percentage,
+            count = s.Count
+        }));
+    }
+
+    /// <summary>
     /// 获取趋势数据
     /// </summary>
     /// <param name="startDate">开始时刻（应用时区，含）</param>

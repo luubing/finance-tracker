@@ -1,0 +1,241 @@
+@using FinanceTracker.Web.Services
+@using FinanceTracker.Web.Shell
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@inject PageStackNavController NavController
+@inject AuthenticationService AuthState
+@inject IHapticFeedbackService Haptics
+@inject AddBillSheetService BillSheet
+@inject IJSRuntime JS
+
+@*
+    悬浮玻璃 Tab 栏（首页 / 账单 / 统计 / 我的）+ 右侧独立的「记一笔」圆钮。
+    - 只在四个 Tab 根页面且已登录时显示；二级页面、登录页（AuthLayout 里根本没有它）隐藏。隐藏时元素仍在 DOM，回到根页面再滑回。
+    - 滑块动效（弹簧位移 + 水平拉伸 + 按下抬起）、按下反馈与滚动收缩由 wwwroot/js/tabBar.js 驱动：
+      点按时脚本在客户端立刻开始动画，不等 Blazor Server 往返；本组件每次渲染后用 sync(index) 告知真实的激活序号。
+      脚本写的状态（data-collapsed / data-pressed / data-pressing / 高光的 data-state 与内联 translate、scale）不在这里渲染，重绘不会冲掉。
+    - 文档化的观察属性（E2E 使用，见 tests/e2e/README.md）：
+        data-testid="tab-bar"          整个 Tab 栏容器
+        data-active-tab="home|bills|statistics|profile"   当前激活的 Tab（停在二级页面时保持其所属 Tab）
+        data-testid="tab-bar-thumb"    选中项的玻璃高光（data-state=idle|moving；bounding box 含拉伸）
+        data-testid="tab-bar-capsule"  收缩成胶囊后显示当前页的按钮
+        data-testid="tab-bar-add"      「记一笔」圆钮
+        data-collapsed / data-pressed  （脚本维护）Tab 栏是否收缩 / 是否正按住某个 Tab
+    - 触感：点按 Tab 时调用 IHapticFeedbackService（iOS 轻触 / Android 时钟刻度；Web.Server 空实现）。
+*@
+<div class="ft-tabwrap @(Visible ? null : "ft-tabwrap--hidden")"
+     @ref="_wrap"
+     data-testid="tab-bar"
+     data-active-tab="@_activeKey"
+     inert="@(!Visible)">
+    <nav class="ft-tabbar ft-glass" role="tablist" aria-label="主导航" style="--ft-tab-x: @ActiveIndex">
+        <span class="ft-tabbar__thumb" data-testid="tab-bar-thumb" aria-hidden="true"></span>
+        @foreach (var tab in TabNavigation.Tabs)
+        {
+            var active = tab.Key == _activeKey;
+            <button type="button"
+                    role="tab"
+                    class="ft-tab @(active ? "ft-tab--on" : null)"
+                    aria-selected="@(active ? "true" : "false")"
+                    data-tab="@tab.Key"
+                    @onclick="() => OnTabClickAsync(tab)">
+                <span class="ft-tab__glyph" aria-hidden="true">
+                    <i class="@($"mdi mdi-{tab.OutlineIcon} ft-tab__o")"></i>
+                    <i class="@($"mdi mdi-{tab.FilledIcon} ft-tab__f")"></i>
+                </span>
+                <span class="ft-tab__label">@tab.Title</span>
+            </button>
+        }
+    </nav>
+    @* 收缩态的「当前页胶囊」：展开时 inert（不可聚焦 / 不可点），收缩后由脚本解除；放在 tablist 之外，避免在 role="tablist" 里放按钮 *@
+    <button type="button"
+            class="ft-capsule"
+            data-testid="tab-bar-capsule"
+            aria-label="@($"展开导航，当前：{ActiveTab.Title}")"
+            inert>
+        <i class="@($"mdi mdi-{ActiveTab.FilledIcon}")" aria-hidden="true"></i>
+        <span>@ActiveTab.Title</span>
+    </button>
+    <button type="button" class="ft-fab" aria-label="记一笔" data-testid="tab-bar-add" @onclick="OnAddClick">
+        <i class="mdi mdi-plus" aria-hidden="true"></i>
+    </button>
+</div>
+
+@code {
+    private const string ModulePath = "./_content/FinanceTracker.Web/js/tabBar.js";
+
+    private ElementReference _wrap;
+    private string _path = "/";
+    private string _activeKey = TabNavigation.Tabs[0].Key;
+    private bool _authed;
+
+    private Task<IJSObjectReference>? _moduleTask;
+    private Task<IJSObjectReference?>? _controllerTask;
+    private int _syncedIndex = -1;
+
+    private bool Visible => _authed && TabNavigation.IsTabRoot(_path);
+
+    private int ActiveIndex => Math.Max(0, TabNavigation.IndexOf(_activeKey));
+
+    private TabDefinition ActiveTab => TabNavigation.Tabs[ActiveIndex];
+
+    protected override void OnInitialized()
+    {
+        ApplyLocation(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+        AuthState.AuthStateChanged += OnAuthStateChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 登录状态存在 localStorage，预渲染阶段读不到：先不显示，电路接管后再按真实登录状态显示，
+        // 同时避免「未登录先闪一下 Tab 栏再被重定向到登录页」
+        if (firstRender)
+        {
+            await RefreshAuthAsync();
+        }
+
+        await SyncSliderAsync();
+    }
+
+    private void ApplyLocation(string uri)
+    {
+        _path = TabNavigation.NormalizePath(uri);
+
+        var root = TabNavigation.ResolveRoot(_path);
+        if (root != null)
+        {
+            _activeKey = root.Key;
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        ApplyLocation(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnAuthStateChanged()
+    {
+        _ = InvokeAsync(RefreshAuthAsync);
+    }
+
+    private async Task RefreshAuthAsync()
+    {
+        var authed = (await AuthState.GetUserIdAsync()).HasValue;
+        if (authed != _authed)
+        {
+            _authed = authed;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnTabClickAsync(TabDefinition tab)
+    {
+        // 点按确认：松手选中时的轻触反馈（Web.Server 为空实现）
+        Haptics.SelectionChanged();
+
+        var plan = TabNavigation.PlanTap(tab, _activeKey, _path);
+
+        switch (plan.Kind)
+        {
+            case TabTapKind.SwitchTab:
+                // 切换 Tab 用 NavigateTo（页面栈据此切到常驻的 Tab 页面）；绝不能把 Tab 根页面 Push 进栈
+                Navigation.NavigateTo(tab.RootPath);
+                break;
+
+            case TabTapKind.PopToRoot:
+                NavController.GoBackToTab(tab.RootPath);
+                break;
+
+            case TabTapKind.ScrollToTop:
+                await ScrollActiveRootToTopAsync();
+                break;
+        }
+    }
+
+    /// <summary>「记一笔」圆钮：升起记一笔 Sheet（布局级覆盖层，不是页面栈里的一页）</summary>
+    private void OnAddClick()
+    {
+        BillSheet.Open();
+    }
+
+    private Task<IJSObjectReference> GetModuleAsync()
+    {
+        return _moduleTask ??= JS.InvokeAsync<IJSObjectReference>("import", ModulePath).AsTask();
+    }
+
+    private async Task ScrollActiveRootToTopAsync()
+    {
+        try
+        {
+            var module = await GetModuleAsync();
+            await module.InvokeVoidAsync("scrollActiveRootToTop");
+        }
+        catch (Exception ex) when (IsJsTeardown(ex))
+        {
+            // 电路已断开 / 组件已销毁：回到顶部只是体验增强，忽略
+        }
+    }
+
+    /// <summary>
+    /// 让脚本接管滑块动效（首次）并告知真实的激活序号（每次渲染后）。
+    /// 序号没变就什么也不发，避免每次渲染都做一次 JS 往返；脚本侧收到与它自己乐观目标一致的确认时同样什么也不做。
+    /// </summary>
+    private async Task SyncSliderAsync()
+    {
+        if (!_authed)
+        {
+            return;
+        }
+
+        var index = ActiveIndex;
+        try
+        {
+            _controllerTask ??= AttachControllerAsync(index);
+            var controller = await _controllerTask;
+            if (controller != null && _syncedIndex != index)
+            {
+                _syncedIndex = index;
+                await controller.InvokeVoidAsync("sync", index);
+            }
+        }
+        catch (Exception ex) when (IsJsTeardown(ex) || ex is JSException)
+        {
+            // 电路已断开 / 组件已销毁，或脚本加载失败：滑块动效只是体验增强，静态高光（CSS）照常工作，不能因此中断页面
+        }
+    }
+
+    private async Task<IJSObjectReference?> AttachControllerAsync(int index)
+    {
+        var module = await GetModuleAsync();
+        _syncedIndex = index;
+        return await module.InvokeAsync<IJSObjectReference>("attachTabBar", _wrap, index);
+    }
+
+    private static bool IsJsTeardown(Exception ex) =>
+        ex is JSDisconnectedException or TaskCanceledException or ObjectDisposedException or OperationCanceledException;
+
+    public async ValueTask DisposeAsync()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        AuthState.AuthStateChanged -= OnAuthStateChanged;
+
+        try
+        {
+            if (_controllerTask is { IsCompletedSuccessfully: true } controllerTask && controllerTask.Result is { } controller)
+            {
+                await controller.InvokeVoidAsync("dispose");
+                await controller.DisposeAsync();
+            }
+
+            if (_moduleTask is { IsCompletedSuccessfully: true } moduleTask)
+            {
+                await moduleTask.Result.DisposeAsync();
+            }
+        }
+        catch (Exception ex) when (IsJsTeardown(ex))
+        {
+        }
+    }
+}

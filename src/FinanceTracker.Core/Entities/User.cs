@@ -6,6 +6,19 @@ namespace FinanceTracker.Core.Entities;
 public class User : BaseEntity
 {
     /// <summary>
+    /// 本地用户存根的占位手机号前缀：同步拿不到真实手机号（或真实手机号已被本机另一个账号占用）时，
+    /// 存根用 <c>stub_</c> + 15 位 hex 当手机号。界面展示手机号前先用 <see cref="IsStubPhoneNumber"/> 判定，
+    /// 不能把占位值当作真实手机号显示给用户。
+    /// </summary>
+    public const string StubPhonePrefix = "stub_";
+
+    /// <summary>
+    /// 手机号是否是用户存根的占位值（不是真实手机号）
+    /// </summary>
+    public static bool IsStubPhoneNumber(string? phoneNumber) =>
+        phoneNumber != null && phoneNumber.StartsWith(StubPhonePrefix, StringComparison.Ordinal);
+
+    /// <summary>
     /// 用户ID
     /// </summary>
     public Guid Id { get; set; } = Guid.NewGuid();

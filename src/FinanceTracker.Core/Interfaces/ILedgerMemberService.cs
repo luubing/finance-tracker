@@ -85,7 +85,30 @@ public interface ILedgerMemberService
     Task EnsureCanWriteAsync(Guid ledgerId, Guid userId);
 
     /// <summary>
-    /// 获取与当前用户共享的账本列表（已生效且非 Owner 的成员关系，触发云端刷新并合并本地缓存）
+    /// 获取与当前用户共享的账本列表（已生效且非 Owner 的成员关系，触发云端刷新并合并本地缓存）。
+    /// 返回的账本已带上所有者（<see cref="Ledger.User"/>），列表页据此展示「所有者 138****0099」。
     /// </summary>
     Task<List<Ledger>> GetSharedLedgersAsync(Guid userId);
+
+    /// <summary>
+    /// 统计账本的已生效成员数（含所有者本人），只读本库 / 本地缓存、不联网：
+    /// 账本列表据此给「我的账本」标注「共享」与成员数，不必为每个账本各刷新一次成员关系。
+    /// 只统计 <paramref name="userId"/> 自己是已生效成员（含所有者）的账本；没有成员行的账本
+    /// （共享功能上线前的历史账本，尚未补建 Owner 行）不出现在结果里。
+    /// </summary>
+    /// <param name="userId">当前用户ID</param>
+    /// <param name="ledgerIds">要统计的账本ID</param>
+    /// <returns>账本ID → 已生效成员数</returns>
+    Task<Dictionary<Guid, int>> GetActiveMemberCountsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds);
+
+    /// <summary>
+    /// 在给定的账本里，<paramref name="userId"/> 是已生效的<b>只读成员</b>（Viewer）的有哪些，只读本库 / 本地缓存、不联网。
+    /// 与 <c>BillService</c> 拒绝只读成员修改 / 删除 / 改归属账单用的是同一条规则（<see cref="Services.LedgerMemberQueries.GetReadOnlyLedgerIdsAsync"/>）：
+    /// 界面据此决定要不要给出删除 / 批量归属的入口，服务层才是最终的把关点。
+    /// 所有者 / 可编辑成员、已被移除或还没接受邀请的成员、已删除的账本都不算。
+    /// </summary>
+    /// <param name="userId">当前用户ID</param>
+    /// <param name="ledgerIds">要判断的账本ID</param>
+    /// <returns>其中用户是只读成员的账本ID（没有则为空集合）</returns>
+    Task<HashSet<Guid>> GetReadOnlyLedgerIdsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds);
 }

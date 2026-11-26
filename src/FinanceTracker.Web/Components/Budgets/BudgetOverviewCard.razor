@@ -1,0 +1,74 @@
+@namespace FinanceTracker.Web.Components.Budgets
+
+@*
+    预算总览卡（设计稿 screens 09-budgets ②）：左边进度环（中心是使用百分比 + 「已使用」），
+    右边是总预算标题、额度、已用与剩余（超支时是红色的「超支 ¥…」）。
+    - 状态三档：正常（品牌色）/ 接近上限 ≥ 80%（橙）/ 超支（红）。颜色之外，环中心的小字（已使用 / 已用完 / 已超支）、
+      「剩余 / 超支」标签与读屏文案（aria-valuetext）都随状态变化，状态不只靠颜色。
+    - 右上角的「编辑」是点按卡片编辑总预算的显式入口（卡片本身不可点，免得进度环 role="progressbar" 被嵌进按钮）。
+    - 本组件只负责排版，文字与状态都在 BudgetOverviewModel 里（BudgetPagePresentation 取数后一次算好）。
+    - 观察属性（E2E）：budget-overview（data-state = normal | warning | over、data-percent、data-budget-id）、
+      budget-ring（role=progressbar，data-tone / data-percent）、budget-ring-percent、budget-ring-caption、
+      budget-total-title、budget-total-amount（data-amount）、budget-used、budget-remain-label、budget-remain、budget-total-edit。
+*@
+<div class="ft-budgetcard"
+     data-testid="budget-overview"
+     data-budget-id="@Model.BudgetId"
+     data-state="@BudgetPresentation.StateKey(Model.State)"
+     data-percent="@Model.ShownPercent">
+    <ProgressRing Percent="Model.RingPercent"
+                  Tone="ToneOf(Model.State)"
+                  AriaLabel="@Model.Title"
+                  AriaValueText="@Model.AriaValueText"
+                  Class="ft-budgetcard__ring"
+                  TestId="budget-ring">
+        <span class="ft-budgetcard__pct" data-long="@(Model.PercentText.Length > 4 ? "true" : null)" data-testid="budget-ring-percent">@Model.PercentText</span>
+        <span class="ft-budgetcard__caption" data-testid="budget-ring-caption">@Model.Caption</span>
+    </ProgressRing>
+    <div class="ft-budgetcard__info">
+        <div class="ft-budgetcard__head">
+            <span class="ft-budgetcard__title" data-testid="budget-total-title">@Model.Title</span>
+            @if (OnEdit.HasDelegate)
+            {
+                <button type="button"
+                        class="ft-budgetcard__edit"
+                        aria-label="@($"编辑{Model.Title}")"
+                        data-testid="budget-total-edit"
+                        @onclick="OnEdit">编辑</button>
+            }
+        </div>
+        <AmountDisplay Amount="Model.Amount"
+                       Size="AmountSize.Lg"
+                       Class="@AmountClass"
+                       TestId="budget-total-amount" />
+        <dl class="ft-budgetcard__lines">
+            <div class="ft-budgetcard__line">
+                <dt>已用</dt>
+                <dd data-testid="budget-used">@MoneyPresentation.Format(Model.Used)</dd>
+            </div>
+            <div class="ft-budgetcard__line ft-budgetcard__line--remain">
+                <dt data-testid="budget-remain-label">@Model.RemainLabel</dt>
+                <dd data-testid="budget-remain">@MoneyPresentation.Format(Model.RemainAmount)</dd>
+            </div>
+        </dl>
+    </div>
+</div>
+
+@code {
+    /// <summary>要显示的总览</summary>
+    [Parameter, EditorRequired] public BudgetOverviewModel Model { get; set; } = null!;
+
+    /// <summary>点「编辑」；不给就不显示这个按钮</summary>
+    [Parameter] public EventCallback OnEdit { get; set; }
+
+    private string AmountClass => StatisticsPresentation.IsLongAmount(Model.Amount)
+        ? "ft-budgetcard__amount ft-amount--long"
+        : "ft-budgetcard__amount";
+
+    private static ProgressTone ToneOf(BudgetState state) => state switch
+    {
+        BudgetState.Over => ProgressTone.Danger,
+        BudgetState.Warning => ProgressTone.Warning,
+        _ => ProgressTone.Brand,
+    };
+}

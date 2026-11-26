@@ -1,0 +1,28 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@* 空状态：图标 + 标题 + 说明 + 可选的主操作（Action 插槽，通常放一个 GlassButton）。每个列表页必须有 *@
+<div class="ft-empty" data-testid="@TestId">
+    <span class="ft-empty__icon" aria-hidden="true"><i class="mdi @Icon"></i></span>
+    <h2 class="ft-empty__title">@Title</h2>
+    @if (!string.IsNullOrEmpty(Text))
+    {
+        <p class="ft-empty__text">@Text</p>
+    }
+    @Action
+</div>
+
+@code {
+    /// <summary>MDI 图标类名</summary>
+    [Parameter] public string Icon { get; set; } = "mdi-book-outline";
+
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>说明文字</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>主操作</summary>
+    [Parameter] public RenderFragment? Action { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "empty-state";
+}

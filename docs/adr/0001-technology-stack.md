@@ -5,6 +5,7 @@
 ## 移动端
 - **框架**: .NET MAUI Blazor (跨平台 Android/iOS)
 - **UI库**: MASA Blazor (Material Design风格)
+  > 注：**风格描述被 [ADR 0007](0007-ios-visual-system.md) 取代**——视觉改为 iOS 风格（液态玻璃）；UI 库选型不变，仍是 MASA Blazor。
 - **本地数据库**: SQLite (轻量、跨平台)
 
 ## 后端

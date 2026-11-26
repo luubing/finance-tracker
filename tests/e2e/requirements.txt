@@ -1,1 +1,4 @@
 playwright>=1.49
+# 无障碍对比度复核（a11y_probes.py 的像素取样）：解码截图并逐像素算对比度
+pillow>=10
+numpy>=1.26

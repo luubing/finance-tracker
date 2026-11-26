@@ -1,0 +1,76 @@
+@namespace FinanceTracker.Web.Components.PendingBills
+
+@*
+    自动识别状态（待确认账单页顶部）：通知栏识别、短信识别两项权限的开启情况，一眼看清「为什么没有新的待确认账单」。
+    - 两项都开启：一条绿色的细状态条（「通知栏识别、短信识别均已开启」+ 右侧「设置」），不占地方；
+    - 有一项没开：分组卡片，两行权限（各自带「去开启」）——已开启的那行是绿色对勾 + 「已开启」；
+    - 权限状态还没读出来（Loaded=false）：什么都不渲染，免得先闪一下「未开启」再变成「已开启」。
+    - 只展示、不申请权限：「去开启」「设置」都以事件交给页面（页面持有权限服务，授予后负责刷新）。
+    - 观察属性（E2E）：capture-status（data-state = ready｜partial｜off）；状态条文字 capture-text、「设置」capture-settings；
+      两行权限 capture-notification / capture-sms（data-on），其「去开启」capture-notification-enable / capture-sms-enable。
+*@
+@if (Loaded)
+{
+    var status = PendingBillPresentation.CaptureStatusOf(NotificationEnabled, SmsEnabled);
+
+    if (status == CaptureStatus.Ready)
+    {
+        <div class="ft-capture" role="status" data-testid="capture-status" data-state="ready">
+            <i class="mdi mdi-check-circle-outline ft-capture__icon" aria-hidden="true"></i>
+            <span class="ft-capture__text" data-testid="capture-text">@PendingBillPresentation.CaptureReadyText</span>
+            <button type="button"
+                    class="ft-capture__link"
+                    data-testid="capture-settings"
+                    @onclick="OnSettings">@PendingBillPresentation.CaptureSettingsLabel</button>
+        </div>
+    }
+    else
+    {
+        <GroupedList Class="ft-capture-group"
+                     TestId="capture-status"
+                     data-state="@(status == CaptureStatus.Off ? "off" : "partial")">
+            <CapturePermissionRow Title="@PendingBillPresentation.NotificationTitle"
+                                  Enabled="NotificationEnabled"
+                                  Subtitle="@PendingBillPresentation.NotificationSubtitle(NotificationEnabled)"
+                                  IconOff="mdi-bell-off-outline"
+                                  Busy="NotificationBusy"
+                                  OnAction="OnEnableNotification"
+                                  TestId="capture-notification"
+                                  ActionTestId="capture-notification-enable" />
+            <CapturePermissionRow Title="@PendingBillPresentation.SmsTitle"
+                                  Enabled="SmsEnabled"
+                                  Subtitle="@PendingBillPresentation.SmsSubtitle(SmsEnabled)"
+                                  IconOff="mdi-message-alert-outline"
+                                  Busy="SmsBusy"
+                                  OnAction="OnEnableSms"
+                                  TestId="capture-sms"
+                                  ActionTestId="capture-sms-enable" />
+        </GroupedList>
+    }
+}
+
+@code {
+    /// <summary>权限状态已读出（false 时什么都不渲染）</summary>
+    [Parameter] public bool Loaded { get; set; }
+
+    /// <summary>通知使用权已授予</summary>
+    [Parameter] public bool NotificationEnabled { get; set; }
+
+    /// <summary>短信读取权限已授予</summary>
+    [Parameter] public bool SmsEnabled { get; set; }
+
+    /// <summary>正在申请通知使用权</summary>
+    [Parameter] public bool NotificationBusy { get; set; }
+
+    /// <summary>正在申请短信权限</summary>
+    [Parameter] public bool SmsBusy { get; set; }
+
+    /// <summary>点通知栏识别的「去开启」</summary>
+    [Parameter] public EventCallback OnEnableNotification { get; set; }
+
+    /// <summary>点短信识别的「去开启」</summary>
+    [Parameter] public EventCallback OnEnableSms { get; set; }
+
+    /// <summary>点两项都开启时状态条上的「设置」</summary>
+    [Parameter] public EventCallback OnSettings { get; set; }
+}

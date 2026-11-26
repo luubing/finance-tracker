@@ -20,7 +20,9 @@ public interface ICsvParserService
     Task<CsvParseResult> ParseWeChatCsvWithStatsAsync(string csvContent);
 
     /// <summary>
-    /// 解析支付宝账单 CSV
+    /// 解析支付宝账单 CSV：各列按<b>表头名称</b>定位（新旧版导出的列数与顺序不同，不能按固定位置取），
+    /// 只收「收/支」是收入 / 支出、交易状态有效（不是交易关闭 / 失败等）、金额大于 0 的行；
+    /// 「不计收支」这类资金内部转移、解析失败的行静默丢弃
     /// </summary>
     /// <param name="csvContent">CSV 内容</param>
     /// <returns>账单列表</returns>

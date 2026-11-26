@@ -1,0 +1,168 @@
+@namespace FinanceTracker.Web.Components.Bills
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@*
+    分类网格（设计稿 04 / screens 05、07）：5 列，每页两行（10 格），末尾多一个虚线圆的「新建分类」；超过两行左右翻页，下方有分页点。
+    - 选中的分类：实心渐变图标块 + 白色内描边 + 同色外环，文字加粗；未选中的是柔和图标块（浅底 + 加深的同色图标）。
+      配色沿用账单行 / 分类管理的取色（CategoryPresentation.ToneFor：预设固定、自建按 Id 稳定取色），同一个分类在各处颜色一致。
+    - 翻页是浏览器原生的横向滚动 + 吸附（scroll-snap），页码由 ui.js 在滚动时写到容器的 data-page 上，分页点的高亮靠样式据此决定——
+      不经过 Blazor，翻页没有服务端往返。选中项变化后（新建分类、语音识别、切换账单类型）本组件让容器滚到选中项所在页。
+    - 语义：role="radiogroup" + 每个分类 role="radio"（aria-checked），「新建分类」是普通按钮。
+    - 观察属性（E2E）：category-grid（data-type、data-count）、category-pager（data-page、data-pages）、
+      category-tile（data-id、data-name、data-selected）、category-new、category-dots。
+*@
+<div class="ft-catgrid-wrap"
+     data-testid="category-grid"
+     data-type="@Type.ToString().ToLowerInvariant()"
+     data-count="@Categories.Count">
+    <div class="ft-catgrid"
+         @ref="_pager"
+         data-pager
+         data-page="0"
+         data-pages="@PageCount"
+         data-testid="category-pager"
+         role="radiogroup"
+         aria-label="分类">
+        @for (var page = 0; page < PageCount; page++)
+        {
+            var pageIndex = page;
+            <div class="ft-catgrid__page" data-testid="category-page" data-index="@pageIndex">
+                @foreach (var category in PageItems(pageIndex))
+                {
+                    var current = category;
+                    var selected = current.Id == SelectedId;
+                    var tone = CategoryPresentation.ToneFor(current.Name, current.Id);
+                    <button type="button"
+                            role="radio"
+                            aria-checked="@(selected ? "true" : "false")"
+                            class="ft-cat @(selected ? "ft-cat--on" : null)"
+                            data-testid="category-tile"
+                            data-id="@current.Id"
+                            data-name="@current.Name"
+                            data-selected="@(selected ? "true" : "false")"
+                            @onclick="() => SelectAsync(current)">
+                        <span class="ft-tile @(selected ? null : "ft-tile--soft") ft-tile--@tone ft-cat__tile" aria-hidden="true">
+                            <i class="mdi @CategoryPresentation.NormalizeIcon(current.Icon)"></i>
+                        </span>
+                        <span class="ft-cat__label">@current.Name</span>
+                    </button>
+                }
+                @if (ShowCreate && CreateOnPage(pageIndex))
+                {
+                    <button type="button"
+                            class="ft-cat ft-cat--new"
+                            data-testid="category-new"
+                            @onclick="OnCreate">
+                        <span class="ft-cat__tile ft-cat__tile--new" aria-hidden="true"><i class="mdi mdi-plus"></i></span>
+                        <span class="ft-cat__label">新建分类</span>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+    @if (PageCount > 1)
+    {
+        <div class="ft-catgrid__dots" data-testid="category-dots" aria-hidden="true">
+            @for (var dot = 0; dot < PageCount; dot++)
+            {
+                <span class="ft-catgrid__dot"></span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const string ModulePath = "./_content/FinanceTracker.Web/js/ui.js";
+
+    private ElementReference _pager;
+    private IJSObjectReference? _module;
+    private string? _lastKey;
+
+    /// <summary>当前账单类型下的分类（调用方已按类型过滤、按展示顺序排好）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<CategoryOption> Categories { get; set; } = [];
+
+    /// <summary>当前选中的分类</summary>
+    [Parameter] public Guid SelectedId { get; set; }
+
+    /// <summary>当前账单类型（只用来在切换类型时让网格回到第一页，以及 E2E 观察）</summary>
+    [Parameter] public BillType Type { get; set; } = BillType.Expense;
+
+    /// <summary>选了某个分类</summary>
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+
+    /// <summary>点了「新建分类」；不给就不显示这一格</summary>
+    [Parameter] public EventCallback OnCreate { get; set; }
+
+    private bool ShowCreate => OnCreate.HasDelegate;
+
+    /// <summary>格子总数：分类 + 末尾的「新建分类」</summary>
+    private int CellCount => Categories.Count + (ShowCreate ? 1 : 0);
+
+    private int PageCount => AddBillPresentation.CategoryPageCount(CellCount);
+
+    private IEnumerable<CategoryOption> PageItems(int page) =>
+        Categories.Skip(page * AddBillPresentation.CategoryPageSize).Take(AddBillPresentation.CategoryPageSize);
+
+    /// <summary>「新建分类」落在这一页：它是分类之后的第一个格子（下标 = 分类个数），所以恰好是最后一页</summary>
+    private bool CreateOnPage(int page) => AddBillPresentation.CategoryPageOf(Categories.Count) == page;
+
+    private async Task SelectAsync(CategoryOption category)
+    {
+        if (category.Id != SelectedId)
+        {
+            await OnSelect.InvokeAsync(category.Id);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 选中项或类型变了：让网格滚到选中项所在页（新建分类排在后面、语音识别选中了另一页的分类）；
+        // 同一类型内是平滑翻页，切换类型是新的一组格子，直接回到该去的那一页
+        var index = Categories.ToList().FindIndex(c => c.Id == SelectedId);
+        if (index < 0)
+        {
+            // 选中项还不在列表里（调用方先改了选中、列表随后才刷新）：这一轮什么也不做，也不记下 key，等列表到齐的那一轮再翻。
+            // 不能按「找不到」当成第一页处理——那会把刚选中的分类翻出视口
+            return;
+        }
+
+        var key = $"{Type}|{SelectedId}";
+        if (key == _lastKey)
+        {
+            return;
+        }
+
+        var sameType = _lastKey is not null && _lastKey.StartsWith($"{Type}|", StringComparison.Ordinal);
+        _lastKey = key;
+
+        var page = AddBillPresentation.CategoryPageOf(index);
+
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            await _module.InvokeVoidAsync("scrollPagerTo", _pager, page, sameType);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException
+            or ObjectDisposedException or InvalidOperationException)
+        {
+            // 翻页只是体验增强：脚本加载失败 / 电路已断开时网格仍可手动滑动
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or TaskCanceledException or ObjectDisposedException or JSException)
+        {
+        }
+    }
+}

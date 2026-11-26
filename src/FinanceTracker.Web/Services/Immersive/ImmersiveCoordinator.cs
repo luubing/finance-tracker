@@ -1,0 +1,160 @@
+using Microsoft.JSInterop;
+
+namespace FinanceTracker.Web.Services;
+
+/// <summary>
+/// 沉浸式协调器：把「宿主原生安全区」同步给 Web 层，并把 Web 层判定的「状态栏图标风格」交回宿主原生设置。
+/// 由全局唯一的 <c>ImmersiveHost</c> 组件创建和释放；所有 JS 交互都在 <c>wwwroot/js/immersive.js</c> 中。
+/// <list type="number">
+/// <item>安全区：<see cref="ISafeAreaService"/> → JS <c>setSafeArea</c> → CSS 变量 <c>--ft-native-safe-*</c>
+/// （页面统一读 <c>--ft-safe-*</c>，原生没有提供时回落到 <c>env(safe-area-inset-*)</c>，再回落到 0）。</item>
+/// <item>状态栏：JS 对屏幕顶部像素采样得到图标风格（或读取页面声明的 <c>data-statusbar-bg</c>），
+/// 回调 <see cref="OnStatusBarIconsChanged"/> → <see cref="IStatusBarService"/>。</item>
+/// </list>
+/// </summary>
+public sealed class ImmersiveCoordinator : IAsyncDisposable
+{
+    private const string ModulePath = "./_content/FinanceTracker.Web/js/immersive.js";
+
+    private readonly IJSRuntime _js;
+    private readonly ISafeAreaService _safeArea;
+    private readonly IStatusBarService _statusBar;
+
+    /// <summary>串行化「读取最新安全区 → 推给 JS」，保证最后一次推送一定对应最新读数</summary>
+    private readonly SemaphoreSlim _pushGate = new(1, 1);
+
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<ImmersiveCoordinator>? _selfReference;
+    private SafeAreaInsets? _pushedInsets;
+    private StatusBarIconStyle? _lastStyle;
+    private bool _started;
+    private volatile bool _disposed;
+
+    public ImmersiveCoordinator(IJSRuntime js, ISafeAreaService safeArea, IStatusBarService statusBar)
+    {
+        _js = js;
+        _safeArea = safeArea;
+        _statusBar = statusBar;
+    }
+
+    /// <summary>加载 JS 模块、推送初始安全区并开始监听页面（只能在首次渲染完成后调用）</summary>
+    public async Task StartAsync()
+    {
+        if (_started || _disposed)
+        {
+            return;
+        }
+
+        _started = true;
+        try
+        {
+            _module = await _js.InvokeAsync<IJSObjectReference>("import", ModulePath);
+            _selfReference = DotNetObjectReference.Create(this);
+            _safeArea.Changed += OnSafeAreaChanged;
+            await PushSafeAreaAsync();
+            await _module.InvokeVoidAsync("start", _selfReference);
+        }
+        catch (Exception ex) when (IsInteropUnavailable(ex))
+        {
+            // 电路已断开 / 页面已卸载：沉浸式只是外观增强，直接放弃即可
+        }
+    }
+
+    /// <summary>JS 通知：状态栏图标风格变化（<c>"light"</c> 浅色图标 / <c>"dark"</c> 深色图标）</summary>
+    [JSInvokable]
+    public void OnStatusBarIconsChanged(string icons)
+    {
+        var style = icons switch
+        {
+            "light" => StatusBarIconStyle.Light,
+            "dark" => StatusBarIconStyle.Dark,
+            _ => (StatusBarIconStyle?)null,
+        };
+
+        if (style is null || style == _lastStyle || _disposed)
+        {
+            return;
+        }
+
+        _lastStyle = style;
+        _statusBar.SetIconStyle(style.Value);
+    }
+
+    /// <summary>JS 通知：视口尺寸变化（旋转 / 分屏 / 系统键盘），重新读取原生安全区</summary>
+    [JSInvokable]
+    public Task OnViewportChanged() => PushSafeAreaAsync();
+
+    private void OnSafeAreaChanged(object? sender, SafeAreaInsets insets) => _ = PushSafeAreaAsync();
+
+    private async Task PushSafeAreaAsync()
+    {
+        var module = _module;
+        if (module is null || _disposed)
+        {
+            return;
+        }
+
+        await _pushGate.WaitAsync();
+        try
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            var latest = _safeArea.Current;
+            if (latest == _pushedInsets)
+            {
+                return;
+            }
+
+            _pushedInsets = latest;
+            if (latest is { } insets)
+            {
+                await module.InvokeVoidAsync("setSafeArea", insets.Top, insets.Right, insets.Bottom, insets.Left);
+            }
+            else
+            {
+                await module.InvokeVoidAsync("clearSafeArea");
+            }
+        }
+        catch (Exception ex) when (IsInteropUnavailable(ex))
+        {
+        }
+        finally
+        {
+            _pushGate.Release();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _safeArea.Changed -= OnSafeAreaChanged;
+
+        try
+        {
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("stop");
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception ex) when (IsInteropUnavailable(ex))
+        {
+        }
+        finally
+        {
+            _selfReference?.Dispose();
+            _module = null;
+        }
+    }
+
+    private static bool IsInteropUnavailable(Exception ex) =>
+        ex is JSDisconnectedException or TaskCanceledException or ObjectDisposedException or OperationCanceledException;
+}

@@ -1,0 +1,200 @@
+@namespace FinanceTracker.Web.Components.Ledgers
+@inject ILedgerService LedgerService
+@inject PageDataGate DataGate
+@inject IPopupService PopupService
+
+@*
+    新建 / 编辑账本的底部 Sheet（从账本页抽出，首页的「还没有账本」引导复用同一个）。
+    - Editing 为空是新建，否则是编辑；名称校验、图标、排序、保存与失败提示都在这里，服务层校验不变。
+    - 编辑模式下 EditingExtras 插槽放页面自己的操作（设为默认、共享、删除）：它们依赖页面状态与回调，不属于表单本身。
+    - 观察属性（E2E，与抽出前一致）：ledger-sheet(-host)、ledger-name、ledger-sort、ledger-form-error、ledger-save。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             Title="@(Editing is null ? "新建账本" : "编辑账本")"
+             Dismissible="@(!_saving)"
+             OnClosed="HandleClosedAsync"
+             TestId="ledger-sheet">
+    <form class="ft-form" @onsubmit="SaveAsync" @onsubmit:preventDefault>
+        <div class="ft-sheet-preview">
+            <span class="ft-tile ft-tile--@LedgerPresentation.ToneFor(Editing?.Id ?? Guid.Empty)" aria-hidden="true"><i class="mdi @LedgerPresentation.NormalizeIcon(_icon)"></i></span>
+        </div>
+
+        <GroupedList>
+            <label class="ft-field">
+                <span class="ft-field__label">名称</span>
+                <input class="ft-field__input"
+                       type="text"
+                       data-testid="ledger-name"
+                       maxlength="@LedgerPresentation.NameMaxLength"
+                       placeholder="例如：日常开销"
+                       autocomplete="off"
+                       enterkeyhint="done"
+                       value="@_name"
+                       @oninput="OnNameInput" />
+            </label>
+            <label class="ft-field">
+                <span class="ft-field__label">排序</span>
+                <input class="ft-field__input ft-field__input--end"
+                       type="number"
+                       inputmode="numeric"
+                       data-testid="ledger-sort"
+                       placeholder="数字越小越靠前"
+                       autocomplete="off"
+                       value="@_sortOrder"
+                       @oninput="OnSortInput" />
+            </label>
+        </GroupedList>
+
+        <GroupedList Header="图标">
+            <IconPicker Choices="LedgerPresentation.IconChoices" @bind-Value="_icon" />
+        </GroupedList>
+
+        @if (Editing is not null)
+        {
+            @EditingExtras
+        }
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <p class="ft-form-error" role="alert" data-testid="ledger-form-error">@_error</p>
+        }
+
+        <div class="ft-sheet-actions">
+            <GlassButton Kind="ButtonKind.Brand" Large Block Type="submit" Busy="_saving" TestId="ledger-save">保存</GlassButton>
+        </div>
+    </form>
+</BottomSheet>
+
+@code {
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>当前登录用户（账本的所有者）</summary>
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    /// <summary>要编辑的账本；为空表示新建。打开 Sheet 时按它初始化表单</summary>
+    [Parameter] public LedgerFormTarget? Editing { get; set; }
+
+    /// <summary>编辑模式下表单末尾的页面自有操作（设为默认账本、共享、删除）</summary>
+    [Parameter] public RenderFragment? EditingExtras { get; set; }
+
+    /// <summary>保存成功（新建或更新）后触发，此时 Sheet 已被要求收起；页面在这里重新加载列表</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    /// <summary>
+    /// 新建成功后触发（编辑不触发），参数是新建的账本；在 <see cref="OnSaved"/> 之后。
+    /// 「记一笔」的「新建账本…」在这里把新账本加进菜单并自动选中
+    /// </summary>
+    [Parameter] public EventCallback<FinanceTracker.Core.Entities.Ledger> OnCreated { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发（页面在这里清理「正在编辑」的状态）</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private string _name = string.Empty;
+    private string _icon = LedgerPresentation.DefaultIcon;
+    private int _sortOrder;
+    private string? _error;
+    private bool _saving;
+    private bool _wasVisible;
+
+    protected override void OnParametersSet()
+    {
+        // 只在「从隐藏变为显示」的那一刻按 Editing 初始化表单；之后页面重绘（例如编辑中切换了默认账本）不能冲掉用户正在输入的内容
+        if (Visible && !_wasVisible)
+        {
+            _name = Editing?.Name ?? string.Empty;
+            _icon = Editing?.Icon ?? LedgerPresentation.DefaultIcon;
+            _sortOrder = Editing?.SortOrder ?? 0;
+            _error = null;
+            _saving = false;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void OnNameInput(ChangeEventArgs e)
+    {
+        _name = e.Value?.ToString() ?? string.Empty;
+        _error = null;
+    }
+
+    private void OnSortInput(ChangeEventArgs e)
+    {
+        _sortOrder = int.TryParse(e.Value?.ToString(), out var order) ? order : 0;
+    }
+
+    private async Task HandleClosedAsync()
+    {
+        _error = null;
+        _saving = false;
+        await OnClosed.InvokeAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving)
+        {
+            return;
+        }
+
+        _error = LedgerPresentation.ValidateName(_name);
+        if (_error is not null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var name = _name.Trim();
+            var icon = LedgerPresentation.NormalizeIcon(_icon);
+            FinanceTracker.Core.Entities.Ledger? created = null;
+
+            // 写库也排进页面数据闸门：此时别的 Tab 根页面可能正在后台重新加载，同一个 DbContext 不允许并行执行
+            if (Editing is { } editing)
+            {
+                var sortOrder = _sortOrder;
+                await DataGate.RunAsync(() => LedgerService.UpdateLedgerAsync(new FinanceTracker.Core.Entities.Ledger
+                {
+                    Id = editing.Id,
+                    UserId = UserId,
+                    Name = name,
+                    Icon = icon,
+                    SortOrder = sortOrder
+                }));
+                await PopupService.EnqueueSnackbarAsync("账本更新成功", AlertTypes.Success);
+            }
+            else
+            {
+                var sortOrder = _sortOrder;
+                created = await DataGate.RunAsync(() => LedgerService.CreateLedgerAsync(new FinanceTracker.Core.Entities.Ledger
+                {
+                    UserId = UserId,
+                    Name = name,
+                    Icon = icon,
+                    SortOrder = sortOrder
+                }));
+                await PopupService.EnqueueSnackbarAsync("账本创建成功", AlertTypes.Success);
+            }
+
+            await VisibleChanged.InvokeAsync(false);
+            await OnSaved.InvokeAsync();
+
+            if (created is not null)
+            {
+                await OnCreated.InvokeAsync(created);
+            }
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

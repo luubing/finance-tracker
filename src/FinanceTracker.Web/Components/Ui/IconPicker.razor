@@ -1,0 +1,44 @@
+@using FinanceTracker.Web.Models
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    图标选择器：一组图标按钮，点选后高亮（品牌色描边）。替代原来让用户手填 mdi-xxx 文本的输入框。
+    每个按钮是 aria-pressed 的切换按钮，读屏名称取 IconChoice.Label。
+    当前值不在候选里（历史数据手填的图标）时，不高亮任何一项，保存时原值保持不变，直到用户点选新的。
+*@
+<div class="ft-iconpick" role="group" aria-label="@AriaLabel" data-testid="@TestId">
+    @foreach (var choice in Choices)
+    {
+        var selected = string.Equals(choice.Icon, Value, StringComparison.Ordinal);
+        <button type="button"
+                class="ft-iconpick__item"
+                aria-pressed="@(selected ? "true" : "false")"
+                aria-label="@choice.Label"
+                data-icon="@choice.Icon"
+                @onclick="() => SelectAsync(choice.Icon)">
+            <i class="mdi @choice.Icon" aria-hidden="true"></i>
+        </button>
+    }
+</div>
+
+@code {
+    /// <summary>候选图标</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<IconChoice> Choices { get; set; } = Array.Empty<IconChoice>();
+
+    /// <summary>当前选中的图标类名</summary>
+    [Parameter] public string? Value { get; set; }
+
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>整组的读屏名称</summary>
+    [Parameter] public string AriaLabel { get; set; } = "选择图标";
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "icon-picker";
+
+    private async Task SelectAsync(string icon)
+    {
+        Value = icon;
+        await ValueChanged.InvokeAsync(icon);
+    }
+}

@@ -203,9 +203,15 @@ public sealed class SyncDevice : IAsyncDisposable
     public CategoryService Categories { get; }
     public LedgerMemberService Members { get; }
 
-    /// <summary>录一笔账（支出，预设分类与渠道）</summary>
-    public Task<Bill> AddBillAsync(decimal amount = 10m, Guid? ledgerId = null) =>
-        Bills.CreateBillAsync(new Bill
+    /// <summary>
+    /// 录一笔账（支出，预设分类与渠道）。账本必填：不指定账本时记在这台设备的默认账本里
+    /// （首次需要时才创建，所以只录账本、不录账单的用例看不到多出来的账本）
+    /// </summary>
+    public async Task<Bill> AddBillAsync(decimal amount = 10m, Guid? ledgerId = null)
+    {
+        ledgerId ??= (await _database.GetDefaultLedgerAsync()).Id;
+
+        return await Bills.CreateBillAsync(new Bill
         {
             UserId = UserId,
             Amount = amount,
@@ -216,6 +222,33 @@ public sealed class SyncDevice : IAsyncDisposable
             TransactionTime = new DateTime(2026, 3, 1, 12, 0, 0),
             Source = BillSource.Manual
         });
+    }
+
+    /// <summary>
+    /// 造一笔历史账单：账本必填之前创建、没有账本的账单。BillService 已不允许再创建这样的账单，
+    /// 只能绕过它直接入库——用来验证历史数据依然能被同步（同步通道对 LedgerId 为空保持兼容）
+    /// </summary>
+    public async Task<Bill> AddLegacyBillWithoutLedgerAsync(decimal amount = 10m)
+    {
+        var bill = new Bill
+        {
+            Id = Guid.NewGuid(),
+            UserId = UserId,
+            Amount = amount,
+            Type = BillType.Expense,
+            CategoryId = _database.ExpenseCategory.Id,
+            PaymentChannelId = _database.Channel.Id,
+            LedgerId = null,
+            TransactionTime = new DateTime(2026, 3, 1, 4, 0, 0, DateTimeKind.Utc),
+            Source = BillSource.Manual,
+            SyncStatus = SyncStatus.Pending
+        };
+
+        _database.Context.Bills.Add(bill);
+        await _database.Context.SaveChangesAsync();
+
+        return bill;
+    }
 
     /// <summary>建一个账本</summary>
     public Task<Ledger> AddLedgerAsync(string name = "家庭") =>

@@ -73,6 +73,47 @@ public class CategoryStatistics
 }
 
 /// <summary>
+/// 账本统计数据（某月按账本汇总的金额；"全部账本"视图下用它代替分类统计）
+/// </summary>
+public class LedgerStatistics
+{
+    /// <summary>
+    /// "未归属账本"的显示名称：账本必填之前创建、尚未补上账本的历史账单归入此项
+    /// </summary>
+    public const string UnassignedLedgerName = "未归属账本";
+
+    /// <summary>
+    /// 账本ID；null 表示历史上未归属任何账本的账单
+    /// </summary>
+    public Guid? LedgerId { get; set; }
+
+    /// <summary>
+    /// 账本名称
+    /// </summary>
+    public string LedgerName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 账本图标
+    /// </summary>
+    public string LedgerIcon { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 金额
+    /// </summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// 占比（百分比）
+    /// </summary>
+    public decimal Percentage { get; set; }
+
+    /// <summary>
+    /// 账单数量
+    /// </summary>
+    public int Count { get; set; }
+}
+
+/// <summary>
 /// 趋势数据
 /// </summary>
 public class TrendData
@@ -134,9 +175,21 @@ public class AnnualStatistics
     public List<MonthlyStatistics> MonthlyData { get; set; } = new();
 
     /// <summary>
-    /// 分类统计
+    /// 分类统计（支出与收入的分类放在一起汇总，占比是占两者合计的比例）。
+    /// REST 接口（<c>GET /api/statistics/annual</c>）返回的就是这个口径，保持兼容；
+    /// 统计页的年度视图改为用 <see cref="ExpenseCategoryStats"/> / <see cref="IncomeCategoryStats"/> 分别展示支出构成与收入构成
     /// </summary>
     public List<CategoryStatistics> CategoryStats { get; set; } = new();
+
+    /// <summary>
+    /// 支出分类统计：只含支出账单，占比是占全年总支出的比例，按金额降序
+    /// </summary>
+    public List<CategoryStatistics> ExpenseCategoryStats { get; set; } = new();
+
+    /// <summary>
+    /// 收入分类统计：只含收入账单，占比是占全年总收入的比例，按金额降序
+    /// </summary>
+    public List<CategoryStatistics> IncomeCategoryStats { get; set; } = new();
 }
 
 /// <summary>

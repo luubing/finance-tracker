@@ -1,0 +1,114 @@
+@namespace FinanceTracker.Web.Components.Ui
+@inherits OverlayBase
+
+@*
+    底部 Sheet（设计稿 05 / 06）：半屏弹出，顶部 40 圆角 + 小把手；左上角关闭、居中标题、右上角可放操作。
+    - 弹出用 CSS 动画近似弹簧（response 0.42 / damping 0.85，--ft-dur-sheet / --ft-ease-sheet）；
+      关闭先播放退出动画再卸载（OverlayBase 负责挂载 / 卸载与退出时序）。
+    - 收起方式：点遮罩、点关闭按钮、Esc、按住把手 / 标题栏向下拖拽（拖拽由 wwwroot/js/ui.js 的事件委托处理，
+      松手后脚本动画收起并「点击」遮罩，由 Blazor 完成卸载）。Dismissible=false 时以上方式都不生效（保存中）。
+    - 高度由内容决定，最高到状态栏下方；内容超出时 body 自己滚动，把手 / 标题栏 / 底部栏固定。
+    - 标题栏两侧：默认「左关闭、右放 HeaderActions」；给了 HeaderStart 时「左放 HeaderStart（例如筛选的「重置」）、右关闭」，
+      此时 HeaderActions 不渲染（右侧让给关闭按钮）——关闭按钮始终存在，iOS 的 Sheet 也是这样。
+    - Footer：固定在底部的操作区（例如筛选 Sheet 的「查看 N 笔账单」主按钮），不随内容滚动；底部安全区留白由它负责。
+    - 容器 position: fixed、z-index 高于 Tab 栏，放在页面栈里的任何位置都能盖住整屏（含 Tab 栏）。
+    - 全高（Tall）：高度固定为「状态栏下方到屏幕底」，不随内容伸缩——「记一笔」这类内容会在两种布局间切换的 Sheet 用它，底部操作区才不会上下跳。
+    - 背景缩放（ScaleBackground）：iOS 的模态 Sheet 升起时，下面的页面轻微缩小、变暗。缩放由样式里的「同级后继」选择器完成
+      （.ft-sheet-host--scale ~ .m-page-stack），所以这类 Sheet 必须渲染在页面栈之前、与页面栈同级（MainLayout 里就是这样放的）。
+    - 关闭拦截（BeforeClose + Guarded）：BeforeClose 返回 false 即拦下用户发起的关闭；Guarded 只是告诉拖拽脚本「现在关闭要确认」——
+      拖拽收起时脚本不再把 Sheet 滑出屏幕，而是弹回原位后「点击」遮罩，让 BeforeClose 弹出确认。
+    - 观察属性（E2E）：data-testid="sheet"（弹层本体）、sheet-scrim（遮罩）、sheet-close（关闭按钮）、sheet-footer（底部操作区）；
+      sheet-host 上 data-state="open|closing"。未声明的属性（data-*）原样落在弹层本体上。
+*@
+@if (Mounted)
+{
+    <div class="ft-sheet-host @(Closing ? "ft-sheet-host--closing" : null) @(ScaleBackground ? "ft-sheet-host--scale" : null)"
+         @ref="HostRef"
+         tabindex="-1"
+         data-state="@(Closing ? "closing" : "open")"
+         data-testid="@(TestId is null ? "sheet-host" : TestId + "-host")"
+         @onkeydown="OnHostKeyDownAsync">
+        <div class="ft-scrim" data-testid="sheet-scrim" @onclick="RequestCloseAsync"></div>
+        <section class="ft-sheet @(Footer is null ? null : "ft-sheet--footer") @(Tall ? "ft-sheet--tall" : null)"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="@_titleId"
+                 data-dismissible="@(Dismissible ? "true" : "false")"
+                 data-guarded="@(Guarded ? "true" : "false")"
+                 data-testid="@(TestId ?? "sheet")"
+                 @attributes="AdditionalAttributes">
+            <div class="ft-sheet__handle" data-sheet-handle aria-hidden="true">
+                <span class="ft-sheet__grabber"></span>
+            </div>
+            <header class="ft-sheet__header" data-sheet-handle>
+                <div class="ft-sheet__side">
+                    @if (HeaderStart is not null)
+                    {
+                        @HeaderStart
+                    }
+                    else
+                    {
+                        <GlassButton Round Icon="mdi-close" AriaLabel="@CloseLabel" TestId="sheet-close" OnClick="RequestCloseAsync" />
+                    }
+                </div>
+                <h2 class="ft-sheet__title" id="@_titleId" data-testid="sheet-title">@Title</h2>
+                <div class="ft-sheet__side ft-sheet__side--end">
+                    @if (HeaderStart is not null)
+                    {
+                        <GlassButton Round Icon="mdi-close" AriaLabel="@CloseLabel" TestId="sheet-close" OnClick="RequestCloseAsync" />
+                    }
+                    else
+                    {
+                        @HeaderActions
+                    }
+                </div>
+            </header>
+            <div class="ft-sheet__body">
+                @ChildContent
+            </div>
+            @if (Footer is not null)
+            {
+                <footer class="ft-sheet__footer" data-testid="sheet-footer">
+                    @Footer
+                </footer>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private readonly string _titleId = $"ft-sheet-title-{Guid.NewGuid():N}";
+
+    /// <summary>标题</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>右上角操作（通常为空；保存按钮放在内容底部更顺手）。给了 <see cref="HeaderStart"/> 时不渲染</summary>
+    [Parameter] public RenderFragment? HeaderActions { get; set; }
+
+    /// <summary>左上角操作（例如「重置」）：给了以后关闭按钮移到右上角</summary>
+    [Parameter] public RenderFragment? HeaderStart { get; set; }
+
+    /// <summary>内容</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>固定在底部的操作区（主按钮）：不随内容滚动，由它负责底部安全区留白</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    /// <summary>关闭按钮的读屏名称</summary>
+    [Parameter] public string CloseLabel { get; set; } = "关闭";
+
+    /// <summary>全高：高度固定为状态栏下方到屏幕底，不随内容伸缩</summary>
+    [Parameter] public bool Tall { get; set; }
+
+    /// <summary>升起时让下面的页面轻微缩小、变暗（只在渲染于页面栈之前、与页面栈同级时有效，见上方说明）</summary>
+    [Parameter] public bool ScaleBackground { get; set; }
+
+    /// <summary>此刻关闭需要确认（配合 <see cref="OverlayBase.BeforeClose"/>）：拖拽收起时脚本据此弹回原位而不是滑出屏幕</summary>
+    [Parameter] public bool Guarded { get; set; }
+
+    /// <summary>落在弹层本体（section）上的附加属性，例如 E2E 用的 data-ready</summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    protected override int ClosingMilliseconds => 260;
+}

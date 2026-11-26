@@ -78,6 +78,70 @@ public class StatisticsService : IStatisticsService
         return result.OrderByDescending(r => r.Amount).ToList();
     }
 
+    public async Task<List<LedgerStatistics>> GetLedgerStatisticsAsync(Guid userId, int year, int month, BillType type)
+    {
+        var monthStart = new DateTime(year, month, 1);
+
+        // 与月度/分类统计共用同一个区间查询：同样只统计当前用户自己的账单、同样的左闭右开自然月。
+        // "按账本汇总"本身就是在全部账本之上分组，所以不接受 ledgerId 过滤
+        var groups = await BillsInRange(userId, monthStart, monthStart.AddMonths(1), null)
+            .Where(b => b.Type == type)
+            .GroupBy(b => b.LedgerId)
+            .Select(g => new { LedgerId = g.Key, Amount = g.Sum(b => b.Amount), Count = g.Count() })
+            .ToListAsync();
+
+        // 账本名称单独查：IgnoreQueryFilters 保证账单引用的账本即使已被软删除（如其他设备删除后同步过来）也能显示名称，
+        // 不会像内连接那样把这些账单悄悄丢出统计，导致账本合计与月度总额对不上
+        var ledgerIds = groups.Where(g => g.LedgerId.HasValue).Select(g => g.LedgerId!.Value).ToList();
+        var ledgers = ledgerIds.Count == 0
+            ? new Dictionary<Guid, (string Name, string Icon)>()
+            : (await _context.Ledgers
+                .IgnoreQueryFilters()
+                .Where(l => ledgerIds.Contains(l.Id))
+                .Select(l => new { l.Id, l.Name, l.Icon })
+                .ToListAsync())
+                .ToDictionary(l => l.Id, l => (l.Name, l.Icon));
+
+        var totalAmount = groups.Sum(g => g.Amount);
+
+        return groups
+            .Select(g =>
+            {
+                string name;
+                string icon;
+
+                if (!g.LedgerId.HasValue)
+                {
+                    name = LedgerStatistics.UnassignedLedgerName;
+                    icon = "mdi-book-off-outline";
+                }
+                else if (ledgers.TryGetValue(g.LedgerId.Value, out var ledger))
+                {
+                    name = ledger.Name;
+                    icon = string.IsNullOrEmpty(ledger.Icon) ? "mdi-book-open-variant" : ledger.Icon;
+                }
+                else
+                {
+                    // 外键保证账本行一定存在；万一缺失也要保留这笔金额，而不是丢掉
+                    name = "未知账本";
+                    icon = "mdi-book-off-outline";
+                }
+
+                return new LedgerStatistics
+                {
+                    LedgerId = g.LedgerId,
+                    LedgerName = name,
+                    LedgerIcon = icon,
+                    Amount = g.Amount,
+                    Percentage = totalAmount > 0 ? Math.Round(g.Amount / totalAmount * 100, 2) : 0,
+                    Count = g.Count
+                };
+            })
+            .OrderByDescending(s => s.Amount)
+            .ThenBy(s => s.LedgerName, StringComparer.CurrentCulture)
+            .ToList();
+    }
+
     public async Task<List<TrendData>> GetTrendDataAsync(Guid userId, DateTime startDate, DateTime endDate, TrendDimension dimension, Guid? ledgerId = null)
     {
         // 先确定分组方式：维度不合法时在查询数据库之前就失败
@@ -155,7 +219,9 @@ public class StatisticsService : IStatisticsService
             TotalIncome = SumAmount(bills, BillType.Income),
             BillCount = bills.Count,
             MonthlyData = monthlyData,
-            CategoryStats = BuildCategoryStats(bills)
+            CategoryStats = BuildCategoryStats(bills),
+            ExpenseCategoryStats = BuildCategoryStats(bills.Where(b => b.Type == BillType.Expense)),
+            IncomeCategoryStats = BuildCategoryStats(bills.Where(b => b.Type == BillType.Income))
         };
     }
 
@@ -292,7 +358,7 @@ public class StatisticsService : IStatisticsService
 
         var currentStats = BuildCategoryStats(currentBills);
         var previousDict = BuildCategoryStats(previousBills)
-            .ToDictionary(s => s.CategoryId, s => s.Amount);
+            .ToDictionary(s => s.CategoryId);
 
         // 并集：本期有或上期有的分类都参与对比（上期金额缺省 0）
         var categoryIds = currentStats.Select(s => s.CategoryId)
@@ -305,13 +371,16 @@ public class StatisticsService : IStatisticsService
         foreach (var categoryId in categoryIds)
         {
             var current = currentDict.GetValueOrDefault(categoryId);
+            var previous = previousDict.GetValueOrDefault(categoryId);
+
+            // 名称与图标：本期没有这个分类的账单（本期归零）时取上期的，不能显示成「未知分类」
             comparison.Add(new CategoryComparisonData
             {
                 CategoryId = categoryId,
-                CategoryName = current?.CategoryName ?? "未知分类",
-                CategoryIcon = current?.CategoryIcon ?? "mdi-tag",
+                CategoryName = current?.CategoryName ?? previous?.CategoryName ?? "未知分类",
+                CategoryIcon = current?.CategoryIcon ?? previous?.CategoryIcon ?? "mdi-tag",
                 CurrentAmount = current?.Amount ?? 0,
-                PreviousAmount = previousDict.GetValueOrDefault(categoryId)
+                PreviousAmount = previous?.Amount ?? 0
             });
         }
 

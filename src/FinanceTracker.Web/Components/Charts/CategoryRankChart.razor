@@ -1,9 +1,10 @@
 @namespace FinanceTracker.Web.Components.Charts
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Design
 
 @if (_option != null)
 {
-    <MECharts Option="_option" Height="260" />
+    <EChartsView Option="_option" Height="260" />
 }
 
 @code {
@@ -60,7 +61,7 @@
             {
                 type = "value",
                 axisLabel = new { fontSize = 10, formatter = "¥{value}" },
-                splitLine = new { lineStyle = new { opacity = 0.3 } }
+                splitLine = new { lineStyle = new { color = DesignTokens.ChartGridLineColor } }
             },
             yAxis = new
             {
@@ -78,7 +79,7 @@
                     barMaxWidth = 14,
                     itemStyle = new
                     {
-                        color = "#2196F3",
+                        color = DesignTokens.BrandColor,
                         borderRadius = new[] { 0, 4, 4, 0 }
                     },
                     label = new

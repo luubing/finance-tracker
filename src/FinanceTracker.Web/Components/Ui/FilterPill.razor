@@ -1,0 +1,45 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    筛选胶囊（设计稿 screens 03-stats「全部账本 ⌄」）：白色胶囊，前面一个小图标、中间当前选择、后面一个下拉箭头。
+    点按由调用方处理（通常打开一个操作菜单 ActionSheet 选择）；文字过长时省略。
+    - 整颗胶囊就是一个按钮，高 44（命中区域）；aria-haspopup="dialog" 告诉读屏「点了会弹出选择」。
+    - 观察属性（E2E）：data-testid（TestId）、data-value（当前文字）。
+*@
+<button type="button"
+        class="ft-pill @Class"
+        aria-label="@AriaLabel"
+        aria-haspopup="dialog"
+        data-value="@Text"
+        data-testid="@TestId"
+        @onclick="OnClick"
+        @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <i class="mdi @Icon ft-pill__icon" aria-hidden="true"></i>
+    }
+    <span class="ft-pill__text">@Text</span>
+    <i class="mdi mdi-chevron-down ft-pill__chevron" aria-hidden="true"></i>
+</button>
+
+@code {
+    /// <summary>当前选择的文字</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    /// <summary>前面的 MDI 图标类名；为空则不显示</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>读屏名称；不给时读 Text</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+}

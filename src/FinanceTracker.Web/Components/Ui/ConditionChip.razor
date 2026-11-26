@@ -1,0 +1,62 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    已生效的条件标签（设计稿 02 / 06 · 条件条里「已设置条件」的那种）：品牌色浅底 + 描边的拆分胶囊，
+    点文字 = 调整（OnOpen，通常是打开筛选 Sheet），点 × = 单独移除这个条件（OnRemove）。两个按钮各自 44 高。
+    - 这是通用件：不绑定任何页面的筛选维度，读屏名称由调用方给——所以任何页面的条件条都能用。
+      账单页的 BillFilterChip 在「已设置条件」时直接渲染本组件（24 号合并，标记与样式 .ft-chip--on / --split 只有这一份），
+      自己只负责「未设置条件」的形态与按账单筛选维度拼读屏名称；错误日志页直接用本组件。
+    - 只渲染「已设置」的形态：没设置的条件不出现在条件条上。
+    - 观察属性（E2E）：根 data-testid（TestId）、data-active="true"；文字按钮 chip-open、移除按钮 chip-remove。
+*@
+<span class="ft-chip ft-chip--on ft-chip--split"
+      role="group"
+      aria-label="@GroupLabel"
+      data-testid="@TestId"
+      data-active="true"
+      @attributes="AdditionalAttributes">
+    <button type="button"
+            class="ft-chip__main"
+            aria-label="@OpenLabel"
+            aria-haspopup="@(HasPopup ? "dialog" : null)"
+            data-testid="chip-open"
+            @onclick="OnOpen">
+        <span class="ft-chip__label">@Text</span>
+    </button>
+    <button type="button"
+            class="ft-chip__remove"
+            aria-label="@RemoveLabel"
+            data-testid="chip-remove"
+            @onclick="OnRemove">
+        <i class="mdi mdi-close" aria-hidden="true"></i>
+    </button>
+</span>
+
+@code {
+    /// <summary>标签上显示的条件文案（例如「Fatal、Error」「11月1日至11月25日」）</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    /// <summary>整颗标签（group）的读屏名称：条件的维度名（例如「级别」）</summary>
+    [Parameter] public string? GroupLabel { get; set; }
+
+    /// <summary>文字按钮的读屏名称（例如「级别：Fatal、Error，点按调整」）</summary>
+    [Parameter, EditorRequired] public string OpenLabel { get; set; } = string.Empty;
+
+    /// <summary>移除按钮的读屏名称（例如「移除级别条件：Fatal、Error」）</summary>
+    [Parameter, EditorRequired] public string RemoveLabel { get; set; } = string.Empty;
+
+    /// <summary>点文字会弹出对话框（Sheet）：读屏据此提示</summary>
+    [Parameter] public bool HasPopup { get; set; } = true;
+
+    /// <summary>点文字：调整这个条件</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnOpen { get; set; }
+
+    /// <summary>点 ×：移除这个条件</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnRemove { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 系统启动画面用的主题：沿用 MAUI 生成的 Maui.SplashTheme（底色与图来自 csproj 里的 MauiSplashScreen），
+         只把状态栏图标改成白色——启动底色是紫色（冷启动设计稿：状态栏图标从第一帧起就是白色）。
+         启动画面结束后系统换成 Maui.MainTheme，之后状态栏图标由 MainActivity 与 Web 层接管。 -->
+    <style name="Ft.SplashTheme" parent="Maui.SplashTheme">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

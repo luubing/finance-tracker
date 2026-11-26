@@ -1,0 +1,191 @@
+@namespace FinanceTracker.Web.Components.Statistics
+@inherits StatisticsViewBase
+@inject IStatisticsService StatisticsService
+
+@*
+    趋势视图（设计稿 screens 03-stats；统计 Tab「趋势」分段的内容）。
+    时间范围由外壳（Pages/Statistics.razor）的时间范围胶囊持有（最近 7 天 / 30 天 / 90 天 / 12 个月）、账本由外壳的账本胶囊持有，经参数传进来；
+    时间维度（按日 / 按周 / 按月）是趋势独有的，用本视图顶部的分段控件切换——取值同样由外壳持有（@bind-Dimension），切换分段再回来不丢。
+    本视图负责取数与摆放：
+      时间维度分段 → KPI 单卡（支出 / 收入 / 结余）→ 支出趋势 / 收入趋势 / 净收支趋势三张折线图 → 趋势数据明细（四列可排序）。
+    三张折线图的横轴是连续的（第 2 轮评审后用户拍板「横轴补零」）：从窗口起点所在的日 / 周 / 月走到终点所在的日 / 周 / 月，每个桶一个点，
+    没有账单的桶补 0（StatisticsPresentation.FillTrendBuckets）；明细表仍只列有账单的桶，KPI 合计不受影响；没有任何账单时三张图仍是空状态，不画一条平线。
+    原趋势分析页的全部能力都在：时间范围、时间维度、三项汇总、三张折线图、可排序的明细表（原表格每页 10 行，这里一次显示 10 行、「显示更多」逐批展开）。
+    数据口径与以前完全一致：GetTrendDataAsync(用户, 起点, 终点, 时间维度, 账本)，终点是应用时区的「现在」，起点往前推；统计只算当前用户自己记的账单。
+    观察属性（E2E）：根 stats-trend（data-range / data-dimension / data-state = loading | ready | reloading | failed）；
+    时间维度分段 trend-dimension（data-value，每段 segment）；KPI trend-kpi 与 trend-total-expense / -income / -net（data-amount）；
+    三张图 trend-expense / trend-income / trend-net（ChartPanel：data-state、{id}-empty）；
+    明细 trend-table-panel / trend-table → 表头 trend-sort（data-column、所在 th 的 aria-sort）、行 trend-row（data-date / data-expense / data-income / data-net）、trend-more。
+*@
+<div class="ft-stats-view"
+     data-testid="stats-trend"
+     data-range="@Range"
+     data-dimension="@Dimension"
+     data-state="@StateKey"
+     aria-busy="@(IsLoading ? "true" : null)">
+    @if (LoadFailed)
+    {
+        <EmptyState Icon="mdi-alert-circle-outline"
+                    Title="统计加载失败"
+                    Text="下拉刷新，再试一次"
+                    TestId="stats-load-failed" />
+    }
+    else
+    {
+        <SegmentedControl Class="ft-stats-view__dimension"
+                          Options="DimensionOptions"
+                          Value="@Dimension"
+                          ValueChanged="OnDimensionChanged"
+                          AriaLabel="@StatisticsPresentation.TrendDimensionAriaLabel"
+                          TestId="trend-dimension" />
+
+        <KpiCard Items="_kpi" Loading="@(!HasLoaded)" TestId="trend-kpi" />
+
+        <SectionHeader Title="@StatisticsPresentation.TrendExpenseTitle" TestId="trend-expense-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_rows.Count == 0)"
+                    EmptyText="@StatisticsPresentation.TrendExpenseEmptyText"
+                    EmptyIcon="mdi-chart-line"
+                    SkeletonHeight="220"
+                    TestId="trend-expense">
+            <EChartsView Option="_expenseOption" Height="220" />
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.TrendIncomeTitle" TestId="trend-income-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_rows.Count == 0)"
+                    EmptyText="@StatisticsPresentation.TrendIncomeEmptyText"
+                    EmptyIcon="mdi-chart-line"
+                    SkeletonHeight="220"
+                    TestId="trend-income">
+            <EChartsView Option="_incomeOption" Height="220" />
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.TrendNetTitle" TestId="trend-net-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_rows.Count == 0)"
+                    EmptyText="@StatisticsPresentation.TrendNetEmptyText"
+                    EmptyIcon="mdi-chart-line"
+                    SkeletonHeight="220"
+                    TestId="trend-net">
+            <EChartsView Option="_netOption" Height="220" />
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.TrendTableTitle" TestId="trend-table-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_rows.Count == 0)"
+                    EmptyText="@StatisticsPresentation.TrendNetEmptyText"
+                    EmptyIcon="mdi-table"
+                    SkeletonHeight="240"
+                    Class="ft-panel--table"
+                    TestId="trend-table-panel">
+            <div class="ft-table-wrap">
+                <table class="ft-table" data-testid="trend-table" aria-label="@StatisticsPresentation.TrendTableTitle">
+                    <thead>
+                        <tr>
+                            @foreach (var (column, label) in StatisticsPresentation.TrendColumns)
+                            {
+                                <th scope="col" aria-sort="@StatisticsPresentation.AriaSort(_sort, column)">
+                                    <button type="button"
+                                            class="ft-table__sort @(_sort.Column == column ? "ft-table__sort--on" : null)"
+                                            data-column="@column"
+                                            data-testid="trend-sort"
+                                            @onclick="() => SortBy(column)"><span class="ft-table__sort-label">@label<i class="mdi @SortIcon(column)" aria-hidden="true"></i></span></button>
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in VisibleRows)
+                        {
+                            <tr @key="row.Date"
+                                data-testid="trend-row"
+                                data-date="@(row.Date.ToString("yyyy-MM-dd"))"
+                                data-expense="@Plain(row.Expense)"
+                                data-income="@Plain(row.Income)"
+                                data-net="@Plain(row.NetIncome)">
+                                <th scope="row">@StatisticsPresentation.TrendDateLabel(row.Date, _loadedDimension)</th>
+                                <td>@MoneyPresentation.Format(row.Expense)</td>
+                                <td>@MoneyPresentation.Format(row.Income)</td>
+                                <td>@MoneyPresentation.Format(row.NetIncome)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (Remaining > 0)
+            {
+                <button type="button" class="ft-table__more" data-testid="trend-more" @onclick="ShowMore">@StatisticsPresentation.ShowMoreText(Remaining)</button>
+            }
+        </ChartPanel>
+    }
+</div>
+
+@code {
+    private static readonly IReadOnlyList<SegmentOption> DimensionOptions =
+        StatisticsPresentation.TrendDimensions.Select(d => new SegmentOption(d.Value, d.Label)).ToList();
+
+    /// <summary>时间范围（取值见 <see cref="StatisticsPresentation.TrendRanges"/>）；由外壳的时间范围胶囊持有</summary>
+    [Parameter] public string Range { get; set; } = StatisticsPresentation.DefaultTrendRange;
+
+    /// <summary>时间维度：day | week | month；本视图顶部的分段控件修改它，值由外壳持有（@bind-Dimension）</summary>
+    [Parameter] public string Dimension { get; set; } = StatisticsPresentation.DefaultTrendDimension;
+
+    [Parameter] public EventCallback<string> DimensionChanged { get; set; }
+
+    // 加载结果（一次取齐、一起写入）
+    private IReadOnlyList<KpiItem> _kpi = BuildKpi(0m, 0m, "trend-total-expense", "trend-total-income", "trend-total-net");
+    private IReadOnlyList<TrendData> _rows = [];
+    private TrendDimension _loadedDimension = TrendDimension.Day;
+    private object? _expenseOption;
+    private object? _incomeOption;
+    private object? _netOption;
+
+    // 明细表的视图状态：排序列（null = 数据原顺序）与显示的行数
+    private (string? Column, bool Descending) _sort = (null, false);
+    private int _visibleCount = StatisticsPresentation.TrendTablePageSize;
+
+    protected override object? LoadKey =>
+        (StatisticsPresentation.NormalizeTrendRange(Range), StatisticsPresentation.NormalizeTrendDimension(Dimension));
+
+    private IEnumerable<TrendData> VisibleRows =>
+        StatisticsPresentation.SortTrend(_rows, _sort.Column, _sort.Descending).Take(_visibleCount);
+
+    private int Remaining => Math.Max(0, _rows.Count - _visibleCount);
+
+    protected override async Task LoadAsync()
+    {
+        // 参数在 await 期间可能变化：先取快照，用同一份参数取数
+        var dimension = StatisticsPresentation.ParseTrendDimension(Dimension);
+        var (start, end) = StatisticsPresentation.TrendRangeBounds(Range, AppTimeZone.ToLocal(DateTime.UtcNow));
+
+        var data = await StatisticsService.GetTrendDataAsync(UserId, start, end, dimension, LedgerId);
+
+        // 全部取到再一起写入，避免渲染到「新的汇总 + 旧的明细」
+        // 折线图的横轴补成连续的时间桶（没有账单的日 / 周 / 月补 0）；明细表与 KPI 仍用服务返回的原始数据（补的全是 0，合计不变）
+        var points = StatisticsPresentation.FillTrendBuckets(data, start, end, dimension);
+        var labels = points.Select(t => StatisticsPresentation.TrendAxisLabel(t.Date, dimension)).ToArray();
+        var expense = data.Sum(t => t.Expense);
+        var income = data.Sum(t => t.Income);
+
+        _loadedDimension = dimension;
+        _rows = data;
+        _kpi = BuildKpi(expense, income, "trend-total-expense", "trend-total-income", "trend-total-net");
+        _expenseOption = StatisticsChartOptions.Line(StatisticsPresentation.TrendExpenseTitle, labels, points.Select(t => t.Expense).ToArray(), StatisticsChartOptions.ExpenseColor);
+        _incomeOption = StatisticsChartOptions.Line(StatisticsPresentation.TrendIncomeTitle, labels, points.Select(t => t.Income).ToArray(), StatisticsChartOptions.IncomeColor);
+        _netOption = StatisticsChartOptions.Line(StatisticsPresentation.TrendNetTitle, labels, points.Select(t => t.NetIncome).ToArray(), StatisticsChartOptions.NetColor);
+        _visibleCount = StatisticsPresentation.TrendTablePageSize;
+    }
+
+    private Task OnDimensionChanged(string value) => DimensionChanged.InvokeAsync(value);
+
+    private void SortBy(string column) => _sort = StatisticsPresentation.NextTrendSort(_sort, column);
+
+    // 「显示更多」每次再展开一页（10 行），与设计 / 文档里「一次 10 行 + 逐批展开」一致
+    private void ShowMore() => _visibleCount += StatisticsPresentation.TrendTablePageSize;
+
+    private string SortIcon(string column) =>
+        _sort.Column != column ? string.Empty : _sort.Descending ? "mdi-arrow-down" : "mdi-arrow-up";
+
+    private static string Plain(decimal amount) => amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+}

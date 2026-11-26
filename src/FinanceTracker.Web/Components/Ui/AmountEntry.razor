@@ -1,0 +1,40 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    金额输入区的展示（设计稿 04 / 05 · 半屏 Sheet）：「¥」+ 金额 + 闪烁的光标。金额由自定义数字键盘（AmountKeypad）一个个键拼出来，
+    不唤起系统键盘，所以这里只展示、不是输入框；拼接规则（两位小数、位数上限、不允许多个小数点…）见 Models/AmountInput。
+    - 文字很长时逐级缩小（data-size = xl｜lg｜md），13 个字符（99,999,999.99）仍放得进一行；还没输入时数字是占位灰（data-empty）。
+    - 读屏：role="status" + aria-live="polite"，每按一个键读出「{SpokenLabel} 12.5」；符号、数字与光标是装饰（aria-hidden）。
+    - 预算表单与「确认账单」Sheet 共用，各自的读屏名称（预算金额 / 账单金额）由 SpokenLabel 给。
+    - 观察属性（E2E）：data-testid（调用方给）、data-value（键盘拼出的原始文本）、data-empty、data-size、data-shake；数字文本在 .ft-amountentry__num。
+*@
+<div class="ft-amountentry @Class"
+     data-testid="@TestId"
+     data-value="@Value"
+     data-size="@AmountInput.SizeOf(Value)"
+     data-empty="@(AmountInput.IsEmpty(Value) ? "true" : "false")"
+     data-shake="@(Shake ? "true" : null)"
+     role="status"
+     aria-live="polite"
+     aria-atomic="true">
+    <span class="ft-sr-only">@($"{SpokenLabel} {AmountInput.Spoken(Value)}")</span>
+    <span class="ft-amountentry__sym" aria-hidden="true">¥</span>
+    <span class="ft-amountentry__num" aria-hidden="true">@AmountInput.Format(Value)</span><span class="ft-amountentry__caret" aria-hidden="true"></span>
+</div>
+
+@code {
+    /// <summary>键盘拼出的金额文本（例如 "12.5"）；空串表示还没输入</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>读屏前缀：「预算金额」「账单金额」</summary>
+    [Parameter] public string SpokenLabel { get; set; } = "金额";
+
+    /// <summary>引导抖动（金额没输入就点保存）：由调用方短暂置位，样式据 data-shake 播放动画</summary>
+    [Parameter] public bool Shake { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+}

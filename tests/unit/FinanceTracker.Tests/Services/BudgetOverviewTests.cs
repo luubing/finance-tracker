@@ -60,8 +60,12 @@ public sealed class BudgetOverviewTests : IAsyncLifetime
             Amount = amount
         });
 
-    private Task AddExpenseAsync(decimal amount, Guid? ledgerId = null) =>
-        _bills.CreateBillAsync(new Bill
+    /// <param name="ledgerId">账单所属账本；账本必填，不指定时记在默认账本里</param>
+    private async Task AddExpenseAsync(decimal amount, Guid? ledgerId = null)
+    {
+        ledgerId ??= (await _db.GetDefaultLedgerAsync()).Id;
+
+        await _bills.CreateBillAsync(new Bill
         {
             UserId = _db.User.Id,
             Amount = amount,
@@ -72,6 +76,28 @@ public sealed class BudgetOverviewTests : IAsyncLifetime
             TransactionTime = new DateTime(Year, Month, 15, 12, 0, 0, DateTimeKind.Unspecified),
             Source = BillSource.Manual
         });
+    }
+
+    /// <summary>
+    /// 历史账单：账本必填之前创建的、没有账本的账单。BillService 已不允许再创建这样的账单，
+    /// 只能绕过它直接入库来模拟（保证历史数据在预算/统计里的口径不被回归破坏）
+    /// </summary>
+    private async Task AddLegacyExpenseWithoutLedgerAsync(decimal amount)
+    {
+        _db.Context.Bills.Add(new Bill
+        {
+            Id = Guid.NewGuid(),
+            UserId = _db.User.Id,
+            Amount = amount,
+            Type = BillType.Expense,
+            CategoryId = _db.ExpenseCategory.Id,
+            PaymentChannelId = _db.Channel.Id,
+            LedgerId = null,
+            TransactionTime = new DateTime(Year, Month, 15, 4, 0, 0, DateTimeKind.Utc),   // 东八区 12:00
+            Source = BillSource.Manual
+        });
+        await _db.Context.SaveChangesAsync();
+    }
 
     [Fact]
     public async Task 没有任何预算_返回空列表()
@@ -151,7 +177,7 @@ public sealed class BudgetOverviewTests : IAsyncLifetime
         await AddExpenseAsync(100m, travel.Id);
         await AddExpenseAsync(50m, travel.Id);
         await AddExpenseAsync(30m, family.Id);
-        await AddExpenseAsync(999m);                      // 未归属账本的账单不属于任何账本预算
+        await AddLegacyExpenseWithoutLedgerAsync(999m);   // 历史上未归属账本的账单不属于任何账本预算
 
         var statuses = await _budgets.GetOverviewBudgetStatusAsync(_db.User.Id, Year, Month);
 

@@ -1,100 +1,150 @@
-@using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Web.Services
+@implements IDisposable
 @inject ISyncService SyncService
-@inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
 @inject IPopupService PopupService
 @inject ILogger<SyncStatus> Logger
 
-<MCard Class="mb-4">
-    <MCardText Class="d-flex align-center">
-        <MIcon Class="mr-2" Color="@(_isSynced && !_loadFailed ? "success" : "warning")">
-            @(_isSynced && !_loadFailed ? "mdi-cloud-check" : "mdi-cloud-sync")
-        </MIcon>
-        <div>
-            <div class="text-subtitle-2">同步状态</div>
-            <div class="text-caption">
-                @if (_isSyncing)
-                {
-                    <span>正在同步...</span>
-                }
-                else if (_loadFailed)
-                {
-                    <span>状态未知（读取待同步账单失败）</span>
-                }
-                else if (_pendingCount > 0)
-                {
-                    <span>@_pendingCount 条待同步</span>
-                }
-                else
-                {
-                    <span>已同步</span>
-                }
-            </div>
-        </div>
-        <MSpacer />
-        <!-- 同步按钮始终显示，即使待同步为 0 也允许手动触发同步 -->
-        <MButton Small Color="primary"
-                 Loading="_isSyncing"
-                 OnClick="SyncNow">
-            <MIcon Small Class="mr-1">mdi-cloud-upload</MIcon>
-            立即同步
-        </MButton>
-    </MCardText>
-</MCard>
+@*
+    云端同步行（「我的」Tab 顶部，设计稿 screens 04-me）：橙色图标块 + 「云端同步」+ 状态副标题（「2 条待同步」/「已同步」/「正在同步...」/
+    「状态未知（读取待同步账单失败）」）+ 右侧「立即同步」胶囊。
+    能力沿用原「同步状态」卡片，只换了外观：
+      · 待同步数量读 ISyncService.GetOfflineCacheCountAsync（读取失败如实显示「状态未知」，不能显示成「已同步」）；
+      · 「立即同步」始终显示——待同步为 0 时也允许手动触发；点击后走 ISyncService.SyncBillsAsync，结果用 Toast 反馈
+        （同步完成 / 同步失败: 原因 / 同步完成，N条失败），整体失败时给出真实原因而不是「同步完成，0条失败」；
+      · 同步仍然只由用户点按触发——下拉刷新、进入页面都只重读数量，不会联网同步。
+    调用方（Profile）负责外层的 GroupedList（本组件只渲染单元格本身，分隔线与圆角由外层负责），
+    并在账单变更、二级页面关闭、下拉刷新时通过 @ref 调用 RefreshAsync()；同步结束后用 OnSynced 通知调用方重读其它摘要（同步可能拉取了账本 / 预算 / 账单）。
+    数量与同步都经过 ISyncService（读写同一个 DbContext）：读数量经 PageDataGate 与其它页面排队。
+    观察属性（E2E）：sync-row（data-state = loading | syncing | unknown | pending | synced，data-pending = 待同步数）、sync-now（aria-busy）。
+*@
+<ListCell Icon="@ProfilePresentation.SyncIcon(State)"
+          Tone="@ProfilePresentation.SyncTone(State)"
+          Title="@ProfilePresentation.SyncTitle"
+          Subtitle="@ProfilePresentation.SyncText(State, _pendingCount)"
+          Class="@($"ft-sync ft-sync--{ProfilePresentation.SyncStateName(State)}")"
+          TestId="sync-row"
+          data-state="@ProfilePresentation.SyncStateName(State)"
+          data-pending="@_pendingCount">
+    <Trailing>
+        @* 按钮本体 44 高保证点击热区，胶囊（视觉 34 高）画在里面；同步中禁用并标记 aria-busy，防止重复点击 *@
+        <button type="button"
+                class="ft-sync__btn"
+                disabled="@_isSyncing"
+                aria-busy="@(_isSyncing ? "true" : null)"
+                data-testid="sync-now"
+                @onclick="SyncNow">
+            <span class="ft-sync__pill">
+                <i class="mdi mdi-sync @(_isSyncing ? "ft-spin" : null)" aria-hidden="true"></i>
+                <span>@ProfilePresentation.SyncButtonText</span>
+            </span>
+        </button>
+    </Trailing>
+</ListCell>
 
 @code {
+    private bool _disposed;
     private bool _isSyncing;
-    private bool _isSynced = true;
+
+    // 数量还没读到之前显示「正在读取」，避免先闪一下「已同步」
+    private bool _isLoaded;
+
     // 读取待同步数量失败时为 true：此时 _pendingCount 不可信，不能继续显示"已同步"误导用户
     private bool _loadFailed;
     private int _pendingCount;
-    private Guid _userId;
+    private Guid _loadedUserId;
 
-    protected override async Task OnInitializedAsync()
+    /// <summary>当前登录用户（同步与待同步数量都按用户统计）</summary>
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    /// <summary>一次同步结束（无论结果）：同步可能拉取了账本 / 预算 / 账单，调用方据此重读自己的摘要</summary>
+    [Parameter] public EventCallback OnSynced { get; set; }
+
+    private SyncRowState State => ProfilePresentation.ResolveSyncState(_isSyncing, _isLoaded, _loadFailed, _pendingCount);
+
+    protected override async Task OnParametersSetAsync()
     {
-        var userId = await AuthStateService.GetUserIdAsync();
-        if (userId.HasValue)
+        if (UserId == _loadedUserId)
         {
-            _userId = userId.Value;
-            await LoadSyncStatus();
+            return;
+        }
+
+        // 换了账号：先清掉上一个用户的数量，回到「正在读取」，再读新用户的
+        _loadedUserId = UserId;
+        _isLoaded = false;
+        _loadFailed = false;
+        _pendingCount = 0;
+
+        if (UserId != Guid.Empty)
+        {
+            await LoadSyncStatusAsync();
         }
     }
 
-    private async Task LoadSyncStatus()
+    public void Dispose() => _disposed = true;
+
+    private async Task LoadSyncStatusAsync()
     {
+        var userId = UserId;
         try
         {
-            _pendingCount = await SyncService.GetOfflineCacheCountAsync(_userId);
-            _isSynced = _pendingCount == 0;
-            _loadFailed = false;
+            var count = await DataGate.RunAsync(() => SyncService.GetOfflineCacheCountAsync(userId));
+
+            // 读取期间换了账号：这个结果属于上一个用户，丢弃
+            if (userId == UserId)
+            {
+                _pendingCount = count;
+                _loadFailed = false;
+            }
         }
         catch (Exception ex)
         {
             // 状态读取失败不应打断页面，但要留下日志，并让界面如实显示"状态未知"
             Logger.LogWarning(ex, "读取待同步账单数量失败");
-            _loadFailed = true;
+            if (userId == UserId)
+            {
+                _loadFailed = true;
+            }
+        }
+        finally
+        {
+            if (userId == UserId)
+            {
+                _isLoaded = true;
+            }
         }
     }
 
     /// <summary>
-    /// 刷新同步状态显示（供父组件通过 @ref 调用）
+    /// 刷新同步状态显示（供父组件通过 @ref 调用；只重读数量，不联网同步）
     /// </summary>
     public async Task RefreshAsync()
     {
-        await LoadSyncStatus();
-        StateHasChanged();
+        if (UserId == Guid.Empty)
+        {
+            return;
+        }
+
+        await LoadSyncStatusAsync();
+
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
     }
 
     private async Task SyncNow()
     {
-        if (_isSyncing) return;
+        if (_isSyncing || UserId == Guid.Empty)
+        {
+            return;
+        }
 
         _isSyncing = true;
         StateHasChanged();
 
         try
         {
-            var result = await SyncService.SyncBillsAsync(_userId);
+            var result = await SyncService.SyncBillsAsync(UserId);
 
             if (result.Success)
             {
@@ -111,7 +161,7 @@
                 await PopupService.EnqueueSnackbarAsync($"同步完成，{result.FailedCount}条失败", AlertTypes.Warning);
             }
 
-            await LoadSyncStatus();
+            await LoadSyncStatusAsync();
         }
         catch (Exception ex)
         {
@@ -120,7 +170,16 @@
         finally
         {
             _isSyncing = false;
-            StateHasChanged();
+
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
+        }
+
+        if (!_disposed)
+        {
+            await OnSynced.InvokeAsync();
         }
     }
 }

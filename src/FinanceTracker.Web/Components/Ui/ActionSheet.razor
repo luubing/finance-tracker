@@ -1,0 +1,61 @@
+@namespace FinanceTracker.Web.Components.Ui
+@inherits OverlayBase
+
+@*
+    操作菜单 / 操作面板（设计稿 06 · 操作面板）：从底部弹出的一组玻璃操作项 + 独立成块的「取消」。
+    用于「这一行还能做什么」的选择（分享账本 / 退出登录 / 更多操作），破坏性操作用红字（ActionSheetItem Destructive）。
+    - 点遮罩、点「取消」、Esc 都会收起。
+    - 选中某项：先收起菜单，再触发该项的 OnClick（由 ActionSheetItem 通过级联参数完成）。
+    - 观察属性（E2E）：data-testid="actionsheet"、actionsheet-cancel、每项的 data-testid。
+*@
+@if (Mounted)
+{
+    <div class="ft-actionsheet-host @(Closing ? "ft-actionsheet-host--closing" : null)"
+         @ref="HostRef"
+         tabindex="-1"
+         data-state="@(Closing ? "closing" : "open")"
+         data-testid="actionsheet-host"
+         @onkeydown="OnHostKeyDownAsync">
+        <div class="ft-scrim" data-testid="actionsheet-scrim" @onclick="RequestCloseAsync"></div>
+        <div class="ft-actionsheet" role="dialog" aria-modal="true" aria-label="@(Title ?? "操作")" data-testid="@(TestId ?? "actionsheet")">
+            <div class="ft-actionsheet__group ft-glass-alert">
+                @if (!string.IsNullOrEmpty(Title) || !string.IsNullOrEmpty(Message))
+                {
+                    <div class="ft-actionsheet__head">
+                        @if (!string.IsNullOrEmpty(Title))
+                        {
+                            <p class="ft-actionsheet__title">@Title</p>
+                        }
+                        @if (!string.IsNullOrEmpty(Message))
+                        {
+                            <p class="ft-actionsheet__message">@Message</p>
+                        }
+                    </div>
+                }
+                <CascadingValue Value="this" IsFixed="true">
+                    @ChildContent
+                </CascadingValue>
+            </div>
+            <button type="button" class="ft-actionsheet__cancel" data-testid="actionsheet-cancel" @onclick="CloseAsync">@CancelText</button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>标题（可选）</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>说明（可选）</summary>
+    [Parameter] public string? Message { get; set; }
+
+    /// <summary>「取消」按钮文字</summary>
+    [Parameter] public string CancelText { get; set; } = "取消";
+
+    /// <summary>操作项（ActionSheetItem）</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override int ClosingMilliseconds => 260;
+
+    /// <summary>供 ActionSheetItem 在选中后先收起菜单</summary>
+    internal Task CloseAsync() => CloseCoreAsync();
+}

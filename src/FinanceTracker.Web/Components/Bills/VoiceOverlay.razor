@@ -1,0 +1,283 @@
+@namespace FinanceTracker.Web.Components.Bills
+@implements IDisposable
+
+@*
+    语音记账覆盖层（设计稿 04 / screens 06-add-voice）：说话期间盖满整个屏幕的毛玻璃层，由记一笔 Sheet（AddBillSheet.Voice.cs）驱动，本身不含任何识别逻辑。
+    自上而下：录音红点 + 状态（正在聆听… / 正在识别… / 识别完成，正在预填…）→ 实时转写（解析认出的金额 / 分类 / 支付渠道 / 时间用淡紫色加下划线高亮）
+    → 波形动画 → 已识别芯片（金额 / 分类 / 支付渠道 / 时间，识别到才出现）→ 「上滑取消」提示 → 大号品牌色麦克风（光圈外扩）→ 底部说明。
+    两种形态：
+    - 按住说话（Hold，MAUI 原生流式识别）：手指一直按在标题栏的麦克风上，覆盖层只是反馈，不接收点按（pointer-events: none，手势仍由原来那颗按钮收）；
+      上滑 / 滑开进入取消区后提示变成「松开手指，取消本次语音」，覆盖层泛红。
+    - 点按（浏览器 Web Speech）：没有「按住」这个动作，所以大麦克风是「说完了」按钮（点一下结束并识别），底部多一个「取消」；Esc 也是取消。
+    隐藏时不立刻卸载：保留一个淡出的时间（LeaveMs），期间内容保持最后一帧、不再响应、读屏忽略。
+    动画（红点呼吸、波形起伏、光圈外扩）在「减弱动态效果」下换成静态，见 ui.css 末尾的媒体查询。
+    观察属性（E2E）：voice-overlay（data-mode / data-phase / data-cancelling / data-leaving）、voice-title、voice-transcript（data-empty）、
+    voice-mark（data-kind）、voice-wave、voice-chips / voice-chip（data-kind）、voice-hint、voice-mic（按住形态）/ voice-finish（点按形态）、voice-cancel、voice-foot。
+*@
+@if (_rendered)
+{
+    <div class="ft-voice"
+         role="dialog"
+         aria-modal="true"
+         aria-label="语音记账"
+         aria-hidden="@(_leaving ? "true" : null)"
+         tabindex="-1"
+         @ref="_root"
+         @onkeydown="OnKeyDownAsync"
+         data-testid="voice-overlay"
+         data-mode="@(_hold ? "hold" : "tap")"
+         data-phase="@(_parsing ? "parsing" : "listening")"
+         data-cancelling="@(_cancelling ? "true" : null)"
+         data-leaving="@(_leaving ? "true" : null)">
+        <div class="ft-voice__body">
+            <div class="ft-voice__main">
+                <div class="ft-voice__status" role="status" data-testid="voice-status">
+                    <span class="ft-voice__dot" aria-hidden="true"></span>
+                    <span data-testid="voice-title">@VoicePresentation.Title(_parsing, _final)</span>
+                </div>
+
+                <div class="ft-voice__transcript" data-testid="voice-transcript" data-empty="@(_segments.Count == 0 ? "true" : "false")">
+                    @if (_segments.Count == 0)
+                    {
+                        <span class="ft-voice__placeholder">@VoicePresentation.Placeholder</span>
+                    }
+                    else
+                    {
+                        <span class="ft-voice__text">
+                            @foreach (var segment in _segments)
+                            {
+                                if (segment.Kind is { } kind)
+                                {
+                                    <mark class="ft-voice__mark" data-testid="voice-mark" data-kind="@VoicePresentation.KindKey(kind)">@segment.Text</mark>
+                                }
+                                else
+                                {
+                                    <span>@segment.Text</span>
+                                }
+                            }
+                        </span>
+                    }
+                </div>
+
+                <div class="ft-voice__wave" aria-hidden="true" data-testid="voice-wave">
+                    @for (var i = 0; i < VoicePresentation.WaveBarCount; i++)
+                    {
+                        <span class="ft-voice__bar" style="@VoicePresentation.WaveStyle(i)"></span>
+                    }
+                </div>
+
+                <div class="ft-voice__chips" data-testid="voice-chips">
+                    @foreach (var chip in _chips)
+                    {
+                        <span class="ft-voice__chip" @key="chip.Kind" data-testid="voice-chip" data-kind="@VoicePresentation.KindKey(chip.Kind)">
+                            <i class="mdi @chip.Icon" aria-hidden="true"></i>
+                            <span>@chip.Text</span>
+                        </span>
+                    }
+                </div>
+            </div>
+
+            <div class="ft-voice__bottom">
+                <div class="ft-voice__hint" data-testid="voice-hint" data-empty="@(_hint.Length == 0 ? "true" : "false")">
+                    @if (_hint.Length > 0)
+                    {
+                        if (_hold && !_cancelling)
+                        {
+                            <i class="mdi mdi-chevron-up" aria-hidden="true"></i>
+                        }
+                        <span>@_hint</span>
+                    }
+                </div>
+
+                @if (_hold)
+                {
+                    <div class="ft-voice__mic" aria-hidden="true" data-testid="voice-mic">
+                        <i class="mdi mdi-microphone"></i>
+                    </div>
+                }
+                else
+                {
+                    <button type="button"
+                            class="ft-voice__mic ft-voice__mic--button"
+                            aria-label="说完了，结束并识别"
+                            aria-disabled="@(_parsing ? "true" : null)"
+                            data-testid="voice-finish"
+                            @onclick="OnFinishClickAsync">
+                        <i class="mdi mdi-microphone" aria-hidden="true"></i>
+                    </button>
+                }
+
+                <div class="ft-voice__foot" data-testid="voice-foot">@VoicePresentation.Footer(_hold, _cancelling)</div>
+
+                @if (!_hold)
+                {
+                    <button type="button"
+                            class="ft-voice__cancel"
+                            data-testid="voice-cancel"
+                            @onclick="OnCancelClickAsync">取消</button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>覆盖层是否显示（隐藏时先淡出再卸载）</summary>
+    [Parameter]
+    public bool Visible { get; set; }
+
+    /// <summary>按住说话形态（原生流式识别）；否则是点按形态（浏览器 Web Speech）</summary>
+    [Parameter]
+    public bool Hold { get; set; }
+
+    /// <summary>已经说完、在等识别结果或正在预填：状态变「正在识别…」，不再提示手势</summary>
+    [Parameter]
+    public bool Parsing { get; set; }
+
+    /// <summary>当前转写文本是最终结果</summary>
+    [Parameter]
+    public bool Final { get; set; }
+
+    /// <summary>手指已滑进取消区（按住形态）：松手会放弃这次录音</summary>
+    [Parameter]
+    public bool Cancelling { get; set; }
+
+    /// <summary>实时转写文本</summary>
+    [Parameter]
+    public string? Transcript { get; set; }
+
+    /// <summary>解析在转写文本里认出的片段（高亮用）</summary>
+    [Parameter]
+    public IReadOnlyList<VoiceMatchSpan>? Matches { get; set; }
+
+    /// <summary>已识别的字段芯片</summary>
+    [Parameter]
+    public IReadOnlyList<VoiceChip>? Chips { get; set; }
+
+    /// <summary>点按形态：点了大麦克风（说完了，结束并识别）</summary>
+    [Parameter]
+    public EventCallback OnFinish { get; set; }
+
+    /// <summary>点按形态：点了「取消」或按了 Esc</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private ElementReference _root;
+    private CancellationTokenSource? _leaveCts;
+    private bool _disposed;
+
+    // 展示用的快照：隐藏淡出期间不跟随参数变化（父组件此时通常已经把转写清空了，不能让内容在淡出时闪成空白）
+    private bool _rendered;
+    private bool _leaving;
+    private bool _justOpened;
+    private bool _hold;
+    private bool _parsing;
+    private bool _final;
+    private bool _cancelling;
+    private string _hint = string.Empty;
+    private IReadOnlyList<VoiceSegment> _segments = [];
+    private IReadOnlyList<VoiceChip> _chips = [];
+
+    protected override void OnParametersSet()
+    {
+        if (Visible)
+        {
+            _leaveCts?.Cancel();
+            _leaving = false;
+
+            if (!_rendered)
+            {
+                _rendered = true;
+                _justOpened = true;
+            }
+
+            _hold = Hold;
+            _parsing = Parsing;
+            _final = Final;
+            _cancelling = Cancelling;
+            _hint = VoicePresentation.Hint(Hold, Cancelling, Parsing);
+            _segments = VoicePresentation.Segments(Transcript, Matches);
+            _chips = Chips ?? Array.Empty<VoiceChip>();
+        }
+        else if (_rendered && !_leaving)
+        {
+            _leaving = true;
+            _ = HideAfterLeaveAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 点按形态：焦点移进覆盖层，Esc 才收得到（按住形态手指在别处按着，不抢焦点）
+        if (_justOpened && _rendered)
+        {
+            _justOpened = false;
+
+            if (!_hold)
+            {
+                try
+                {
+                    await _root.FocusAsync(preventScroll: true);
+                }
+                catch (Exception)
+                {
+                    // 预渲染 / 电路断开时没有 JS，聚焦失败不影响使用
+                }
+            }
+        }
+    }
+
+    private async Task HideAfterLeaveAsync()
+    {
+        var cts = new CancellationTokenSource();
+        _leaveCts = cts;
+
+        try
+        {
+            await Task.Delay(VoicePresentation.LeaveMs, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // 淡出计时到点的同一刻组件被卸载（页面关闭）：Cancel 来不及拦住已经到点的延时，这里再挡一次，别在卸载后去排渲染
+        if (!_disposed && !Visible && _leaving)
+        {
+            _rendered = false;
+            _leaving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (!_hold && !_leaving && e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    private async Task OnFinishClickAsync()
+    {
+        if (!_parsing && !_leaving)
+        {
+            await OnFinish.InvokeAsync();
+        }
+    }
+
+    private async Task OnCancelClickAsync()
+    {
+        if (!_leaving)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _leaveCts?.Cancel();
+        _leaveCts?.Dispose();
+    }
+}

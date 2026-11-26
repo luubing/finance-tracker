@@ -1,0 +1,339 @@
+/* ============================================================
+   启动加载页（冷启动设计稿 docs/design/cold-start/01–03）
+
+   链路：系统启动画面（纯色 --ft-splash-bg + 一张静态 Logo 图）→ 本加载页（渐变淡入 + Logo 组）→ 首页 / 登录页。
+   整条链路是同一张画布：底色、Logo 的位置与尺寸全程不变，每一步只多长出一层内容。
+
+   标记在两个宿主页里（MAUI 的 index.html、Web.Server 的 _Layout.cshtml），放在 #app 之外——
+   Blazor 一启动就会接管 #app，加载页必须由 boot.js 在首屏就绪之后才收走。行为见 wwwroot/js/boot.js。
+
+   状态（boot.js 同时写在 <html data-ft-boot> 与 #ft-boot[data-state]，E2E 观察它）：
+     booting         等待首屏；#ft-boot[data-slow="true"] 表示已超过转圈门槛
+     handoff-login   交给登录页：Logo 组上移到登录页里 Logo 的位置，白色面板升起
+     handoff-home    交给首页：幕布收拢成 Hero（高度 = 首页 Hero 的实测高度）
+     handoff-fade    交给其它页面（深链接）/「减弱动态效果」：整体淡出
+     failed          看门狗超时：玻璃 Alert「启动失败 / 重新加载」
+     done            已收走（节点已从文档移除）
+
+   只用设计令牌：渐变 --ft-hero-gradient、Logo 方块沿用 ui.css 的 .ft-glass-dark 材质、时长 / 缓动 / 字体。
+   「减弱动态效果」下不淡入渐变、不位移、不收拢，全部换成一次 --ft-dur-reduced 的交叉淡入；
+   「降低透明度」下 Logo 方块改用实色 --ft-splash-tile（与原生启动图是同一个颜色）。
+   ============================================================ */
+
+.ft-boot {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    /* 盖住一切，包括 Toast */
+    z-index: calc(var(--ft-z-toast) + 1);
+    overflow: hidden;
+    color: #fff;
+    font-family: var(--ft-font);
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    /* 兜底的兜底：boot.js 一直没有把它收走（脚本没加载出来等），30 秒后自己让路，绝不永远盖住应用 */
+    animation: ft-boot-expire 1ms linear 30s forwards;
+}
+
+@keyframes ft-boot-expire {
+    to {
+        visibility: hidden;
+        pointer-events: none;
+    }
+}
+
+@keyframes ft-boot-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes ft-boot-rise {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes ft-boot-panel {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes ft-boot-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ---------- 幕布：纯色底（= 系统启动画面）上淡入渐变 ---------- */
+/* 渐变画在幕布自己身上而不是一张固定大小的底图：幕布收拢到 Hero 大小时，渐变形状与真实 Hero 完全一致 */
+.ft-boot__curtain {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 0;
+    background: var(--ft-splash-bg);
+}
+
+.ft-boot__curtain::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--ft-hero-gradient);
+    animation: ft-boot-fade-in var(--ft-dur-sheet) var(--ft-ease-sheet) both;
+}
+
+/* ---------- Logo 组：位置与登录页的 .ft-login__brand 一致（方块 96、圆角 30、图标 50、间距 22 / 6） ---------- */
+/* 方块的中心落在屏幕正中，与系统启动画面（图居中）是同一个点 */
+.ft-boot__brand {
+    position: absolute;
+    top: calc(50% - 48px);
+    left: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    transition: transform var(--ft-dur-sheet) var(--ft-ease-sheet), opacity var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+/* 材质来自 .ft-glass-dark（与登录页同一块玻璃）；全屏只有这 1 层 backdrop-filter */
+.ft-boot__logo {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: 96px;
+    height: 96px;
+    border-radius: 30px;
+}
+
+/* 内联 SVG，不用图标字体：字体来自 CDN，加载页恰恰要在 CDN 还没回来的时候显示 */
+.ft-boot__logo svg {
+    display: block;
+    width: 50px;
+    height: 50px;
+    fill: currentColor;
+}
+
+.ft-boot__name {
+    margin: 22px 0 0;
+    font: 800 38px/46px var(--ft-font);
+    letter-spacing: 1px;
+    animation: ft-boot-rise var(--ft-dur-fade) var(--ft-ease-out) 80ms both;
+}
+
+.ft-boot__slogan {
+    margin: 6px 0 0;
+    font: var(--ft-type-body);
+    color: rgba(255, 255, 255, .9);
+    animation: ft-boot-rise var(--ft-dur-fade) var(--ft-ease-out) 80ms both;
+}
+
+/* ---------- 转圈 + 说明：慢启动才出现（boot.js 超过门槛后置 data-slow），快启动不闪 ---------- */
+.ft-boot__foot {
+    position: absolute;
+    left: 0;
+    bottom: calc(62px + var(--ft-safe-bottom, 0px));
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    font: var(--ft-type-caption);
+    font-weight: 500;
+    color: rgba(255, 255, 255, .86);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+.ft-boot[data-state="booting"][data-slow="true"] .ft-boot__foot {
+    opacity: 1;
+}
+
+/* 12 根刻度（boot.js 生成）：整体按 12 档转动，就是 iOS 活动指示器的样子 */
+.ft-boot__spinner {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    animation: ft-boot-spin 1s steps(12) infinite;
+}
+
+.ft-boot__spinner i {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 2.2px;
+    height: 6.5px;
+    margin-left: -1.1px;
+    border-radius: 1.2px;
+    background: currentColor;
+    transform-origin: 50% 12px;
+    transform: rotate(calc(var(--i) * 30deg));
+    opacity: calc(1 - var(--i) * .075);
+}
+
+/* 只给读屏看的「记账本，正在加载」（视觉上的 Logo 组是装饰） */
+.ft-boot__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+/* ---------- 交接 · 已登录 → 首页：幕布收拢成 Hero ---------- */
+/* 幕布高度从整屏过渡到 Hero 的实测高度（boot.js 写入 --ft-boot-hero-h），圆角同步长到 Hero 的 40；
+   收拢到位的最后一小段，幕布淡出、露出下面真实的 Hero——两者此刻是同一块渐变。Logo 组在幕布收拢之前就淡出，位置不动 */
+.ft-boot[data-state="handoff-home"] .ft-boot__curtain {
+    height: var(--ft-boot-hero-h, 100%);
+    border-radius: 0 0 var(--ft-radius-hero) var(--ft-radius-hero);
+    opacity: 0;
+    transition:
+        height var(--ft-dur-sheet) var(--ft-ease-sheet),
+        border-radius var(--ft-dur-sheet) var(--ft-ease-sheet),
+        opacity var(--ft-dur-fade) var(--ft-ease-out) calc(var(--ft-dur-sheet) - 100ms);
+}
+
+.ft-boot[data-state="handoff-home"] .ft-boot__brand {
+    opacity: 0;
+}
+
+/* ---------- 交接 · 未登录 → 登录页：Logo 组滑到登录页里 Logo 的位置 ---------- */
+/* 位移由 boot.js 量好写入 --ft-boot-dx / --ft-boot-dy；幕布淡出，露出下面真实的登录页（同一块渐变），面板从底部升起 */
+.ft-boot[data-state="handoff-login"] .ft-boot__curtain {
+    opacity: 0;
+    transition: opacity var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+.ft-boot[data-state="handoff-login"] .ft-boot__brand {
+    transform: translate(var(--ft-boot-dx, 0px), var(--ft-boot-dy, 0px));
+}
+
+/* 登录页这一侧：滑行期间真实的品牌区先藏着（否则出现两个 Logo），滑行结束加载页收走时它刚好就位 */
+html[data-ft-boot="handoff-login"] .ft-login {
+    overflow: hidden;
+}
+
+html[data-ft-boot="handoff-login"] .ft-login__brand {
+    visibility: hidden;
+}
+
+html[data-ft-boot="handoff-login"] .ft-login__orb {
+    animation: ft-boot-fade-in var(--ft-dur-sheet) var(--ft-ease-sheet) both;
+}
+
+html[data-ft-boot="handoff-login"] .ft-login__panel {
+    animation: ft-boot-panel var(--ft-dur-sheet) var(--ft-ease-sheet) both;
+}
+
+html[data-ft-boot="handoff-login"] .ft-login__panel > * {
+    animation: ft-boot-fade-in var(--ft-dur-fade) var(--ft-ease-out) calc(var(--ft-dur-sheet) - var(--ft-dur-fade)) both;
+}
+
+/* ---------- 交接 · 其它：整体淡出 ---------- */
+.ft-boot[data-state="handoff-fade"] {
+    opacity: 0;
+    transition: opacity var(--ft-dur-page) var(--ft-ease-out);
+}
+
+.ft-boot[data-state^="handoff"] .ft-boot__foot {
+    opacity: 0;
+}
+
+/* ---------- 启动失败：玻璃 Alert，只有「重新加载」一个按钮 ---------- */
+/* 标记与 GlassAlert 一致（ft-alert-host / ft-alert）。与标准 Alert 的差别：没有遮罩（背景只是品牌画布，没有要隔离的内容）、
+   位置下移到 Logo 组下方（底边距屏幕底 = 手势条安全区 + 60），不遮住 Logo */
+.ft-boot[data-state="failed"] {
+    animation: none;
+}
+
+.ft-boot[data-state="failed"] .ft-boot__foot {
+    opacity: 0;
+}
+
+.ft-boot__alert {
+    place-items: end center;
+    padding-bottom: calc(60px + var(--ft-safe-bottom, 0px));
+}
+
+/* ---------- 系统设置 ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .ft-boot__curtain::before,
+    .ft-boot__name,
+    .ft-boot__slogan {
+        animation: none;
+    }
+
+    .ft-boot__spinner {
+        animation-duration: 2.4s;
+    }
+
+    .ft-boot[data-state="handoff-fade"] {
+        transition-duration: var(--ft-dur-reduced);
+    }
+}
+
+/* ---------- 材质降级（ADR 0007 §26）：加载页的方块不跟着玻璃令牌变色 ----------
+   系统启动画面里的方块是实色 --ft-splash-tile，原生那一层改不了；令牌层的降级会把深色玻璃换成另一个实色（#6A42F2），
+   放在加载页上就是一次色跳。更要紧的是根开关 data-ft-solid 由宿主在 Blazor 启动之后才写（UiRuntime），
+   加载页还在的时候就会翻转——而低端设备（宿主判定为降级的恰恰是它们）看加载页的时间最长。
+   所以这里的三条触发路径与 tokens.css 的降级块逐条对应，方块一律回到启动画面的实色、不再模糊。 */
+@media (prefers-reduced-transparency: reduce) {
+    .ft-boot__logo {
+        background: var(--ft-splash-tile);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+:root[data-ft-solid="true"] .ft-boot__logo {
+    background: var(--ft-splash-tile);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .ft-boot__logo {
+        background: var(--ft-splash-tile);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+    }
+}
+
+/* 登录交接的最后一步：降级下登录页里的真方块是令牌里的不透明深色玻璃（#6A42F2）。加载页的方块随滑行一路换成它——
+   滑行结束加载页收走、真方块露出来的那一刻才不会有一次瞬时的色跳。常态下两边本来就是同一块玻璃，这条规则没有可见效果。
+   写在三条降级覆盖之后：根开关那条的特异性与它相同，靠顺序取胜。 */
+.ft-boot[data-state="handoff-login"] .ft-boot__logo {
+    background: var(--ft-glass-dark-bg);
+    transition: background-color var(--ft-dur-sheet) var(--ft-ease-sheet);
+}

@@ -1,434 +1,531 @@
 @page "/custom-report"
-@using System.Text
-@using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Web.Components.Charts
+@implements IAsyncDisposable
 @inject IStatisticsService StatisticsService
 @inject ILedgerService LedgerService
-@inject IJSRuntime JSRuntime
 @inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
 @inject IPopupService PopupService
+@inject IJSRuntime JS
+@inject ILogger<CustomReport> Logger
 
-<PStackPageBar Title="自定义报表"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    自定义报表页（二级页面模板，设计稿 board 07 的页面清单）：统计 Tab 右上角的「自定义报表」进入；Tab 栏隐藏，返回回到统计 Tab。
+    自上而下：
+      · 快捷区间（本月 / 上月 / 近30天 / 近90天）：点一下只是把起止日期填好，不会立刻生成（与旧页面一致）；当前起止日期正好等于某个快捷区间时它亮起
+      · 报表范围分组：开始日期、结束日期（点按唤起系统的日期选择器，盖在整行上的透明 date 输入，与短信识别页同一套做法）、账本（有账本时才出现；全部账本 / 单个账本）
+      · 起止日期不合法（没选 / 结束早于开始 / 超出可选范围）：分组下面用红字说明原因，「生成报表」置灰——不等到点击以后才用 Snackbar 提示
+      · 结果（点「生成报表」后）：KPI 单卡（支出 / 收入 / 结余，与统计 Tab 同一张卡）→ 区间 · 账本 · 账单数量 → 分类支出环比（对比上一等长周期）
+        → 分类支出排行（Top 8）→ 支出构成 / 收入构成（圆环 + 图例）→ 导出 CSV、分享摘要
+      · 主按钮「生成报表」固定在页面底部（生成中禁用，防止重复生成）
+    口径不变（ADR 0005）：起止日期是应用时区的自然日、含当天，统计服务换成 UTC 的左闭右开区间查库，本页不做任何时区换算；
+    「今天」取应用时区（旧页面用 DateTime.Now，运行环境时区与应用时区不一致时会差一天）；账本筛选 null = 全部账本（含没有账本的历史账单）。
+    生成后改动参数不会改动已有结果（结果是生成那一刻的快照，说明行写明了它的区间与账本），要看新参数的结果得再点「生成报表」。
+    读库经 PageDataGate（常驻 Tab 页与本页共用一个 DbContext）。导出：文本存成文件下载（ui.js downloadText）；分享：系统分享面板，没有就复制到剪贴板（ui.js shareText）。
+    观察属性（E2E）：report-page、report-content（data-state = idle｜loading｜ready｜failed，data-quick，data-generation = 已结束的生成次数：成功 / 失败各算一次，供测试等「这一次生成结束」）、report-quick / report-quick-option（data-value、data-selected）、
+      report-start-row / report-start、report-end-row / report-end（data-value）、report-ledger-row（data-value）、report-ledger-sheet / report-ledger-all / report-ledger-option（data-ledger-id）、
+      report-error、report-generate、report-idle / report-failed / report-skeleton、
+      report-results（data-start / data-end / data-ledger / data-count）、report-kpi（-expense / -income / -balance）、report-caption、
+      report-comparison（report-comparison-row：data-name / data-current / data-previous / data-kind / data-tone，report-delta）、report-comparison-footer、
+      report-rank、report-expense-* / report-income-*（header / composition / donut / total / legend / empty）、report-actions、report-export、report-share。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <!-- 筛选条件 -->
-    <MCard Class="mb-4">
-        <MCardText>
-            <MRow Dense>
-                <MCol Cols="12" Sm="6">
-                    <MTextField @bind-Value="_startDateText"
-                                Label="开始日期（yyyy-MM-dd）"
-                                Outlined
-                                Dense
-                                HideDetails="true" />
-                </MCol>
-                <MCol Cols="12" Sm="6">
-                    <MTextField @bind-Value="_endDateText"
-                                Label="结束日期（yyyy-MM-dd）"
-                                Outlined
-                                Dense
-                                HideDetails="true" />
-                </MCol>
-                <MCol Cols="12">
-                    <MSelect @bind-Value="_selectedLedgerId"
-                             Items="_ledgers"
-                             ItemText="l => l.Name"
-                             ItemValue="l => (Guid?)l.Id"
-                             Label="账本（不选为全部账本）"
-                             Outlined
-                             Dense
-                             Clearable
-                             HideDetails="true" />
-                </MCol>
-                <MCol Cols="12" Sm="8">
-                    <MButtonGroup Value="_quickRange">
-                        <MButton Value="@("this-month")" OnClick="@(() => ApplyQuickRange("this-month"))">本月</MButton>
-                        <MButton Value="@("last-month")" OnClick="@(() => ApplyQuickRange("last-month"))">上月</MButton>
-                        <MButton Value="@("last-30")" OnClick="@(() => ApplyQuickRange("last-30"))">近30天</MButton>
-                        <MButton Value="@("last-90")" OnClick="@(() => ApplyQuickRange("last-90"))">近90天</MButton>
-                    </MButtonGroup>
-                </MCol>
-                <MCol Cols="12" Sm="4" Class="text-right">
-                    <MButton Color="primary" Disabled="_isLoading" OnClick="LoadReport">
-                        <MIcon Class="mr-2">mdi-magnify</MIcon>
-                        生成报表
-                    </MButton>
-                </MCol>
-            </MRow>
-        </MCardText>
-    </MCard>
+<SecondaryPage Title="@CustomReportPresentation.Title" TestId="report-page">
+    <ChildContent>
+        <div class="ft-report"
+             data-testid="report-content"
+             data-state="@ContentState"
+             data-quick="@(Quick ?? string.Empty)"
+             data-generation="@_generation"
+             aria-busy="@(_loading ? "true" : null)">
+            <section class="ft-report__quick" data-testid="report-quick" aria-label="@CustomReportPresentation.QuickRangeTitle">
+                <h2 class="ft-report__label">@CustomReportPresentation.QuickRangeTitle</h2>
+                <div class="ft-chips">
+                    @foreach (var (key, label) in CustomReportPresentation.QuickRanges)
+                    {
+                        <ChoiceChip @key="key"
+                                    Label="@label"
+                                    Selected="@(Quick == key)"
+                                    TestId="report-quick-option"
+                                    data-value="@key"
+                                    OnClick="() => ApplyQuick(key)" />
+                    }
+                </div>
+            </section>
 
-    @if (_isLoading)
-    {
-        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
-            <MProgressCircular Indeterminate Size="64" Color="primary" />
-        </MContainer>
-    }
-    else if (_stats == null)
-    {
-        <MCard>
-            <MCardText Class="text-center py-8">
-                <MIcon Size="64" Color="grey lighten-1">mdi-file-chart-outline</MIcon>
-                <div class="text-h6 grey--text text--lighten-1 mt-4">选择日期范围后点击"生成报表"</div>
-            </MCardText>
-        </MCard>
-    }
-    else
-    {
-        <!-- 汇总卡片 -->
-        <MRow Dense Class="mb-0">
-            <MCol Cols="4" Class="d-flex">
-                <MCard Color="error" Dark Class="flex-grow-1">
-                    <MCardText Class="text-center py-2">
-                        <div class="text-caption">总支出</div>
-                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.TotalExpense.ToString("N2")</div>
-                    </MCardText>
-                </MCard>
-            </MCol>
-            <MCol Cols="4" Class="d-flex">
-                <MCard Color="success" Dark Class="flex-grow-1">
-                    <MCardText Class="text-center py-2">
-                        <div class="text-caption">总收入</div>
-                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.TotalIncome.ToString("N2")</div>
-                    </MCardText>
-                </MCard>
-            </MCol>
-            <MCol Cols="4" Class="d-flex">
-                <MCard Color="@(_stats.NetIncome >= 0 ? "success" : "error")" Dark Class="flex-grow-1">
-                    <MCardText Class="text-center py-2">
-                        <div class="text-caption">净收支</div>
-                        <div class="text-subtitle-2 text-no-wrap">¥@_stats.NetIncome.ToString("N2")</div>
-                    </MCardText>
-                </MCard>
-            </MCol>
-        </MRow>
-        <div class="text-caption text--secondary mb-4">
-            @_stats.StartDate.ToString("yyyy-MM-dd") ~ @_stats.EndDate.ToString("yyyy-MM-dd") · 共 @_stats.BillCount 笔账单
+            <GroupedList Header="@CustomReportPresentation.RangeGroupTitle"
+                         Class="ft-addbill__rows"
+                         TestId="report-range-group">
+                @* 开始 / 结束日期：看到的是「2026年11月1日」，真正的输入是盖在整行上的透明 date——点按即唤起系统的日期选择器 *@
+                <ListCell Icon="mdi-calendar-start"
+                          Tone="blue"
+                          Title="@CustomReportPresentation.StartDateTitle"
+                          Value="@CustomReportPresentation.DateLabel(_start)"
+                          Class="@DateRowClass(_start)"
+                          Chevron
+                          TestId="report-start-row"
+                          data-value="@CustomReportPresentation.DateInputValue(_start)">
+                    <Trailing>
+                        <input type="date"
+                               class="ft-addbill__picker"
+                               aria-label="@CustomReportPresentation.StartDateTitle"
+                               data-testid="report-start"
+                               value="@CustomReportPresentation.DateInputValue(_start)"
+                               min="@CustomReportPresentation.MinInputValue"
+                               max="@CustomReportPresentation.MaxInputValue"
+                               @onchange="OnStartChanged" />
+                    </Trailing>
+                </ListCell>
+                <ListCell Icon="mdi-calendar-end"
+                          Tone="blue"
+                          Title="@CustomReportPresentation.EndDateTitle"
+                          Value="@CustomReportPresentation.DateLabel(_end)"
+                          Class="@DateRowClass(_end)"
+                          Chevron
+                          TestId="report-end-row"
+                          data-value="@CustomReportPresentation.DateInputValue(_end)">
+                    <Trailing>
+                        <input type="date"
+                               class="ft-addbill__picker"
+                               aria-label="@CustomReportPresentation.EndDateTitle"
+                               data-testid="report-end"
+                               value="@CustomReportPresentation.DateInputValue(_end)"
+                               min="@CustomReportPresentation.MinInputValue"
+                               max="@CustomReportPresentation.MaxInputValue"
+                               @onchange="OnEndChanged" />
+                    </Trailing>
+                </ListCell>
+                @if (_ledgers.Count > 0)
+                {
+                    <ListCell Icon="mdi-book-open-variant"
+                              Tone="purple"
+                              Title="@CustomReportPresentation.LedgerTitle"
+                              Value="@LedgerValue"
+                              Class="ft-addbill__field"
+                              Chevron
+                              TestId="report-ledger-row"
+                              AriaLabel="@($"{CustomReportPresentation.LedgerTitle}，{LedgerValue}")"
+                              aria-haspopup="dialog"
+                              aria-expanded="@(_ledgerSheet ? "true" : "false")"
+                              data-value="@(_ledgerId?.ToString())"
+                              OnClick="OpenLedgerSheet" />
+                }
+            </GroupedList>
+
+            @if (Validation is { } validation)
+            {
+                <p class="ft-form-error" role="alert" data-testid="report-error">@validation</p>
+            }
+
+            @if (_result is { } result)
+            {
+                <div class="ft-report__results"
+                     data-testid="report-results"
+                     data-start="@CustomReportPresentation.DateInputValue(result.Stats.StartDate)"
+                     data-end="@CustomReportPresentation.DateInputValue(result.Stats.EndDate)"
+                     data-ledger="@(result.LedgerId?.ToString())"
+                     data-count="@result.Stats.BillCount">
+                    <KpiCard Items="result.Kpi" TestId="report-kpi" />
+                    <p class="ft-report__caption" data-testid="report-caption">@result.Caption</p>
+
+                    @* 分类支出环比：对比上一等长周期，变化最大的分类排前面；支出变多是坏事（红），变少是好事（绿） *@
+                    <SectionHeader Title="@CustomReportPresentation.ComparisonTitle" TestId="report-comparison-header" />
+                    @if (result.Rows.Count == 0)
+                    {
+                        <ChartPanel Empty
+                                    EmptyText="@CustomReportPresentation.ComparisonEmptyText"
+                                    EmptyIcon="mdi-compare-horizontal"
+                                    TestId="report-comparison" />
+                    }
+                    else
+                    {
+                        <GroupedList Footer="@result.ComparisonFooter" Class="ft-report__compare" TestId="report-comparison">
+                            @foreach (var row in result.Rows)
+                            {
+                                <ListCell @key="row.CategoryId"
+                                          Icon="@row.Icon"
+                                          Tone="@row.IconTone"
+                                          Title="@row.Name"
+                                          Subtitle="@row.Subtitle"
+                                          TestId="report-comparison-row"
+                                          data-name="@row.Name"
+                                          data-current="@row.CurrentPlain"
+                                          data-previous="@row.PreviousPlain"
+                                          data-kind="@row.DeltaKind"
+                                          data-tone="@row.DeltaTone">
+                                    <Trailing>
+                                        <span class="ft-delta ft-delta--@row.DeltaTone" data-testid="report-delta"><i class="mdi @row.DeltaIcon" aria-hidden="true"></i>@row.DeltaText</span>
+                                    </Trailing>
+                                </ListCell>
+                            }
+                        </GroupedList>
+                    }
+
+                    <SectionHeader Title="@CustomReportPresentation.RankTitle" TestId="report-rank-header" />
+                    <ChartPanel Empty="@(result.Stats.ExpenseCategoryStats.Count == 0)"
+                                EmptyText="@CustomReportPresentation.RankEmptyText"
+                                SkeletonHeight="260"
+                                TestId="report-rank">
+                        <CategoryRankChart Categories="result.Stats.ExpenseCategoryStats" TopN="CustomReportPresentation.RankTopN" />
+                    </ChartPanel>
+
+                    @Composition((result, BillType.Expense))
+                    @Composition((result, BillType.Income))
+
+                    <GroupedList Header="@CustomReportPresentation.ActionsTitle" TestId="report-actions">
+                        <ListCell Icon="mdi-file-delimited-outline"
+                                  Tone="green"
+                                  Title="@CustomReportPresentation.ExportTitle"
+                                  Subtitle="@CustomReportPresentation.ExportSubtitle"
+                                  Disabled="_exporting"
+                                  TestId="report-export"
+                                  OnClick="ExportAsync" />
+                        <ListCell Icon="mdi-share-variant-outline"
+                                  Tone="blue"
+                                  Title="@CustomReportPresentation.ShareRowTitle"
+                                  Subtitle="@CustomReportPresentation.ShareSubtitle"
+                                  Disabled="_sharing"
+                                  TestId="report-share"
+                                  OnClick="ShareAsync" />
+                    </GroupedList>
+                </div>
+            }
+            else if (_loading)
+            {
+                <div class="ft-report__results" data-testid="report-skeleton" aria-hidden="true">
+                    <KpiCard Items="SkeletonKpi" Loading TestId="report-kpi-skeleton" />
+                    <ChartPanel Loading SkeletonHeight="220" Class="ft-report__skeleton" TestId="report-skeleton-panel" />
+                </div>
+            }
+            else if (_failed)
+            {
+                <EmptyState Icon="mdi-alert-circle-outline"
+                            Title="@CustomReportPresentation.FailedTitle"
+                            Text="@CustomReportPresentation.FailedText"
+                            TestId="report-failed" />
+            }
+            else
+            {
+                <div class="ft-report__idle" data-testid="report-idle">@CustomReportPresentation.IdleTitle</div>
+            }
         </div>
 
-        <!-- 分类环比对比 -->
-        <ChartCard Title="分类支出环比"
-                   Subtitle="当前周期 vs 上一等长周期"
-                   Icon="mdi-compare-horizontal"
-                   IsLoading="_isLoading"
-                   IsEmpty="!_comparisons.Any()"
-                   EmptyText="所选范围内暂无支出数据">
-            <MList Dense>
-                @foreach (var comparison in _comparisons)
-                {
-                    <MListItem Class="px-0">
-                        <MListItemIcon>
-                            <MIcon>@comparison.CategoryIcon</MIcon>
-                        </MListItemIcon>
-                        <MListItemContent>
-                            <MListItemTitle>@comparison.CategoryName</MListItemTitle>
-                            <MListItemSubtitle>
-                                ¥@comparison.CurrentAmount.ToString("N2")（上期 ¥@comparison.PreviousAmount.ToString("N2")）
-                            </MListItemSubtitle>
-                        </MListItemContent>
-                        <MListItemAction>
-                            @if (comparison.ChangeRate.HasValue)
-                            {
-                                <span class="@GetChangeClass(comparison.ChangeAmount)">
-                                    @if (comparison.ChangeAmount >= 0)
-                                    {
-                                        <MIcon Small>mdi-arrow-up</MIcon>
-                                    }
-                                    else
-                                    {
-                                        <MIcon Small>mdi-arrow-down</MIcon>
-                                    }
-                                    @Math.Abs(comparison.ChangeRate.Value)%
-                                </span>
-                            }
-                            else if (comparison.CurrentAmount > 0)
-                            {
-                                <span class="error--text text-caption">新增</span>
-                            }
-                            else
-                            {
-                                <span class="success--text text-caption">归零</span>
-                            }
-                        </MListItemAction>
-                    </MListItem>
-                }
-            </MList>
-        </ChartCard>
+        @* 主按钮固定在页面底部 *@
+        <div class="ft-pagefoot" data-testid="report-foot">
+            <GlassButton Kind="ButtonKind.Brand"
+                         Large
+                         Block
+                         Icon="mdi-chart-box-outline"
+                         Busy="_loading"
+                         Disabled="@(!_ready || Validation is not null)"
+                         TestId="report-generate"
+                         OnClick="GenerateAsync">@(_loading ? CustomReportPresentation.GeneratingLabel : CustomReportPresentation.GenerateLabel)</GlassButton>
+        </div>
+    </ChildContent>
+</SecondaryPage>
 
-        <!-- 分类排行 -->
-        <ChartCard Title="分类支出排行"
-                   Subtitle="Top 8"
-                   Icon="mdi-chart-bar-stacked"
-                   IsLoading="_isLoading"
-                   IsEmpty="!_stats.ExpenseCategoryStats.Any()">
-            <CategoryRankChart Categories="_stats.ExpenseCategoryStats" TopN="8" />
-        </ChartCard>
-
-        <!-- 支出/收入构成对比 -->
-        <ChartCard Title="支出/收入构成对比"
-                   Icon="mdi-chart-donut"
-                   IsLoading="_isLoading"
-                   IsEmpty="!_stats.ExpenseCategoryStats.Any() && !_stats.IncomeCategoryStats.Any()">
-            <ExpenseIncomeDonutChart ExpenseCategories="_stats.ExpenseCategoryStats" IncomeCategories="_stats.IncomeCategoryStats" />
-        </ChartCard>
-
-        <!-- 导出与分享 -->
-        <MRow Class="mb-4">
-            <MCol Cols="6">
-                <MButton Block Outlined Color="primary" OnClick="ExportCsv">
-                    <MIcon Class="mr-2">mdi-download</MIcon>
-                    导出 CSV
-                </MButton>
-            </MCol>
-            <MCol Cols="6">
-                <MButton Block Outlined Color="secondary" OnClick="ShareReport">
-                    <MIcon Class="mr-2">mdi-share-variant</MIcon>
-                    分享摘要
-                </MButton>
-            </MCol>
-        </MRow>
+@* 账本菜单：全部账本 + 用户的账本；选中项带对勾（与统计 Tab 的账本筛选同一套） *@
+<ActionSheet @bind-Visible="_ledgerSheet" Title="选择账本" TestId="report-ledger-sheet">
+    <ActionSheetItem Icon="@(_ledgerId is null ? "mdi-check" : null)"
+                     TestId="report-ledger-all"
+                     aria-current="@(_ledgerId is null ? "true" : null)"
+                     OnClick="() => SelectLedger(null)">@StatisticsPresentation.AllLedgersText</ActionSheetItem>
+    @foreach (var ledger in _ledgers)
+    {
+        var id = ledger.Id;
+        <ActionSheetItem @key="id"
+                         Icon="@(_ledgerId == id ? "mdi-check" : null)"
+                         TestId="report-ledger-option"
+                         data-ledger-id="@id"
+                         aria-current="@(_ledgerId == id ? "true" : null)"
+                         OnClick="() => SelectLedger(id)">@ledger.Name</ActionSheetItem>
     }
-</MContainer>
-@code {
-    private bool _isLoading;
-    private CustomStatistics? _stats;
-    private List<CategoryComparisonData> _comparisons = new();
+</ActionSheet>
 
-    private string _startDateText = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1).ToString("yyyy-MM-dd");
-    private string _endDateText = DateTime.Now.ToString("yyyy-MM-dd");
-    private string? _quickRange;
+@code {
+    private const string UiModulePath = "./_content/FinanceTracker.Web/js/ui.js";
+
+    private static readonly IReadOnlyList<KpiItem> SkeletonKpi =
+        KpiItem.Summary(0m, 0m, "report-kpi-expense", "report-kpi-income", "report-kpi-balance");
 
     private Guid _userId;
-    private Guid? _selectedLedgerId;
+
+    // 当前用户与账本列表都读完了（此前「生成报表」不可用，免得拿空用户 Id 生成一份空报表）
+    private bool _ready;
+
+    // 参数：起止日期（可以被清空，清空就是「没选」）与账本（null = 全部账本）
+    private DateTime? _start;
+    private DateTime? _end;
+    private Guid? _ledgerId;
     private List<LedgerModel> _ledgers = new();
+    private bool _ledgerSheet;
 
-    protected override async Task OnInitializedAsync()
+    // 结果：生成那一刻的快照
+    private ReportResult? _result;
+    private bool _loading;
+    private bool _failed;
+    private int _generation;
+    private bool _exporting;
+    private bool _sharing;
+    private IJSObjectReference? _ui;
+
+    /// <summary>应用时区的今天（旧页面用 DateTime.Now，会随设备时区变化）</summary>
+    private static DateTime Today => AppTimeZone.ToLocal(DateTime.UtcNow).Date;
+
+    private string? Quick => CustomReportPresentation.QuickRangeOf(_start, _end, Today);
+
+    private string? Validation => CustomReportPresentation.Validate(_start, _end);
+
+    private string LedgerValue => StatisticsPresentation.LedgerPillText(_ledgerId, _ledgers);
+
+    private string ContentState => _loading ? "loading"
+        : _result is not null ? "ready"
+        : _failed ? "failed"
+        : "idle";
+
+    protected override void OnInitialized()
     {
-        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
-
-        try
-        {
-            var ledgers = await LedgerService.GetLedgersAsync(_userId);
-            _ledgers = ledgers
-                .Select(l => new LedgerModel { Id = l.Id, Name = l.Name, Icon = l.Icon })
-                .ToList();
-        }
-        catch
-        {
-            // 账本加载失败不影响报表功能
-        }
+        (_start, _end) = CustomReportPresentation.DefaultRange(Today);
     }
 
-    /// <summary>
-    /// 应用快捷日期范围
-    /// </summary>
-    private void ApplyQuickRange(string range)
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与预算页、短信识别页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var today = DateTime.Now;
-
-        switch (range)
-        {
-            case "this-month":
-                _startDateText = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd");
-                _endDateText = today.ToString("yyyy-MM-dd");
-                break;
-            case "last-month":
-                var lastMonth = today.AddMonths(-1);
-                _startDateText = new DateTime(lastMonth.Year, lastMonth.Month, 1).ToString("yyyy-MM-dd");
-                _endDateText = new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month)).ToString("yyyy-MM-dd");
-                break;
-            case "last-30":
-                _startDateText = today.AddDays(-30).ToString("yyyy-MM-dd");
-                _endDateText = today.ToString("yyyy-MM-dd");
-                break;
-            case "last-90":
-                _startDateText = today.AddDays(-90).ToString("yyyy-MM-dd");
-                _endDateText = today.ToString("yyyy-MM-dd");
-                break;
-        }
-
-        _quickRange = range;
-    }
-
-    /// <summary>
-    /// 生成报表
-    /// </summary>
-    private async Task LoadReport()
-    {
-        if (!TryParseRange(out var startDate, out var endDate))
+        if (!firstRender)
         {
             return;
         }
 
-        _isLoading = true;
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        await LoadLedgersAsync();
+        _ready = _userId != Guid.Empty;
+        StateHasChanged();
+    }
+
+    /// <summary>账本（账本筛选的选项）：加载失败不影响报表本身（只是没有账本筛选），与统计 Tab 一致</summary>
+    private async Task LoadLedgersAsync()
+    {
+        if (_userId == Guid.Empty)
+        {
+            return;
+        }
 
         try
         {
-            _stats = await StatisticsService.GetCustomStatisticsAsync(_userId, startDate, endDate, _selectedLedgerId);
-            _comparisons = await StatisticsService.GetCategoryComparisonAsync(_userId, startDate, endDate, _selectedLedgerId);
+            var ledgers = await DataGate.RunAsync(() => LedgerService.GetLedgersAsync(_userId));
+            _ledgers = ledgers.Select(l => LedgerModel.FromEntity(l)).ToList();
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载报表失败: {ex.GetUserMessage()}", AlertTypes.Error);
+            Logger.LogWarning(ex, "加载自定义报表的账本列表失败");
+            _ledgers = new List<LedgerModel>();
+        }
+    }
+
+    // ------------------------------------------------------------------ 参数
+
+    private void ApplyQuick(string key) => (_start, _end) = CustomReportPresentation.QuickRangeBounds(key, Today);
+
+    private void OnStartChanged(ChangeEventArgs e) => _start = ParseDate(e.Value);
+
+    private void OnEndChanged(ChangeEventArgs e) => _end = ParseDate(e.Value);
+
+    /// <summary>清空（浏览器允许）或写了不合法的日期：算「没选」，由校验提示（不悄悄沿用旧值，免得行上显示的日期与输入控件里的不一致）</summary>
+    private static DateTime? ParseDate(object? value) =>
+        DateInputPresentation.TryParse(value?.ToString(), out var date) ? date : null;
+
+    /// <summary>没选日期：右值用加深的红提示「还差这一项」</summary>
+    private static string DateRowClass(DateTime? date) =>
+        date is null ? "ft-addbill__field ft-addbill__field--missing" : "ft-addbill__field";
+
+    private void OpenLedgerSheet() => _ledgerSheet = true;
+
+    private void SelectLedger(Guid? ledgerId) => _ledgerId = ledgerId;
+
+    // ------------------------------------------------------------------ 生成
+
+    private async Task GenerateAsync()
+    {
+        if (_loading || !_ready || Validation is not null || _start is not { } start || _end is not { } end)
+        {
+            return;
+        }
+
+        // 参数在 await 期间可能被改：用同一份快照取完所有数据，说明行也按它写
+        var userId = _userId;
+        var ledgerId = StatisticsPresentation.ValidLedgerId(_ledgerId, _ledgers);
+        var ledgerLabel = StatisticsPresentation.LedgerPillText(ledgerId, _ledgers);
+
+        _loading = true;
+        _failed = false;
+        StateHasChanged();
+
+        // 本地 SQLite 的异步查询常常同步完成：不让出的话「生成中」这一帧永远渲染不出来（按钮没反应、也没有骨架），
+        // 数据量大、查询稍慢时用户会觉得没点上。让出一次，渲染队列先把「生成中」画出去
+        await Task.Yield();
+
+        try
+        {
+            // 两次查询在同一把闸门里依次执行（同一个 DbContext 不能并行）
+            var data = await DataGate.RunAsync(async () => (
+                Stats: await StatisticsService.GetCustomStatisticsAsync(userId, start.Date, end.Date, ledgerId),
+                Comparisons: await StatisticsService.GetCategoryComparisonAsync(userId, start.Date, end.Date, ledgerId)));
+
+            var stats = data.Stats;
+            _result = new ReportResult(
+                stats,
+                data.Comparisons,
+                CustomReportPresentation.BuildComparisonRows(data.Comparisons),
+                KpiItem.Summary(stats.TotalExpense, stats.TotalIncome, "report-kpi-expense", "report-kpi-income", "report-kpi-balance"),
+                StatisticsPresentation.LegendOfCategories(stats.ExpenseCategoryStats),
+                StatisticsPresentation.LegendOfCategories(stats.IncomeCategoryStats),
+                ledgerId,
+                ledgerLabel,
+                ledgerId is null ? null : ledgerLabel);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "生成自定义报表失败");
+
+            // 已经有结果就保留旧结果，只提示；从来没成功过才显示「生成失败」占位
+            _failed = _result is null;
+            await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.LoadFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
         }
         finally
         {
-            _isLoading = false;
+            _loading = false;
+            _generation++;
         }
     }
 
-    /// <summary>
-    /// 解析并校验日期范围
-    /// </summary>
-    private bool TryParseRange(out DateTime startDate, out DateTime endDate)
+    // ------------------------------------------------------------------ 导出与分享
+
+    private async Task ExportAsync()
     {
-        startDate = default;
-        endDate = default;
-
-        if (!DateTime.TryParse(_startDateText, out startDate) ||
-            !DateTime.TryParse(_endDateText, out endDate))
-        {
-            PopupService.EnqueueSnackbarAsync("日期格式无效，请使用 yyyy-MM-dd", AlertTypes.Warning);
-            return false;
-        }
-
-        if (startDate > endDate)
-        {
-            PopupService.EnqueueSnackbarAsync("开始日期不能晚于结束日期", AlertTypes.Warning);
-            return false;
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// 环比变化颜色：支出增加红色（恶化）、减少绿色（改善）
-    /// </summary>
-    private string GetChangeClass(decimal changeAmount)
-    {
-        return changeAmount >= 0 ? "error--text" : "success--text";
-    }
-
-    /// <summary>
-    /// 导出支出分类统计为 CSV（BOM 头保证 Excel 中文不乱码）
-    /// </summary>
-    private async Task ExportCsv()
-    {
-        if (_stats == null)
+        if (_result is not { } result || _exporting)
         {
             return;
         }
 
+        _exporting = true;
         try
         {
-            var csv = new StringBuilder();
-            csv.AppendLine($"自定义报表 {_stats.StartDate:yyyy-MM-dd} ~ {_stats.EndDate:yyyy-MM-dd}");
-            csv.AppendLine($"总支出,{_stats.TotalExpense:N2}");
-            csv.AppendLine($"总收入,{_stats.TotalIncome:N2}");
-            csv.AppendLine($"净收支,{_stats.NetIncome:N2}");
-            csv.AppendLine($"账单数量,{_stats.BillCount}");
-            csv.AppendLine();
-            csv.AppendLine("分类,金额,笔数,占比(%)");
-            foreach (var category in _stats.ExpenseCategoryStats)
-            {
-                csv.AppendLine($"{category.CategoryName},{category.Amount:N2},{category.Count},{category.Percentage}");
-            }
-
-            var dataUri = "data:text/csv;charset=utf-8,\uFEFF" + Uri.EscapeDataString(csv.ToString());
-
-            await JSRuntime.InvokeVoidAsync("eval",
-                "(() => {" +
-                "const a = document.createElement('a');" +
-                $"a.href = '{dataUri}';" +
-                "a.download = 'custom_report.csv';" +
-                "document.body.appendChild(a);" +
-                "a.click();" +
-                "a.remove();" +
-                "})();");
-
-            await PopupService.EnqueueSnackbarAsync("报表已导出", AlertTypes.Success);
+            var csv = CustomReportPresentation.BuildCsv(result.Stats, result.LedgerName);
+            var ui = await GetUiAsync();
+            await ui.InvokeVoidAsync("downloadText", CustomReportPresentation.CsvFileName, csv, CustomReportPresentation.CsvMimeType);
+            await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.ExportedMessage, AlertTypes.Success);
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"导出失败: {ex.GetUserMessage()}", AlertTypes.Error);
+            Logger.LogWarning(ex, "导出自定义报表失败");
+            await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.ExportFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+        }
+        finally
+        {
+            _exporting = false;
         }
     }
 
-    /// <summary>
-    /// 生成报表文本摘要并分享（优先系统分享面板，回退复制到剪贴板）
-    /// </summary>
-    private async Task ShareReport()
+    private async Task ShareAsync()
     {
-        if (_stats == null)
+        if (_result is not { } result || _sharing)
         {
             return;
         }
 
-        var shareText = $"【记账报表】{_stats.StartDate:yyyy-MM-dd} ~ {_stats.EndDate:yyyy-MM-dd}\n{BuildSummary()}";
-
+        _sharing = true;
         try
         {
-            // Web Share API（Android/iOS 系统分享面板）
-            await JSRuntime.InvokeVoidAsync("navigator.share", new { title = "记账报表", text = shareText });
-            return;
-        }
-        catch (JSException)
-        {
-            // Web Share 不可用，回退到剪贴板
-        }
-        catch (Exception)
-        {
-            // 用户取消分享
-            return;
-        }
+            var text = CustomReportPresentation.BuildShareText(result.Stats, result.Comparisons, result.LedgerName);
+            var ui = await GetUiAsync();
+            var outcome = await ui.InvokeAsync<string>("shareText", CustomReportPresentation.ShareSheetTitle, text);
 
-        try
-        {
-            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", shareText);
-            await PopupService.EnqueueSnackbarAsync("报表摘要已复制到剪贴板", AlertTypes.Success);
+            // 系统分享面板里完成 / 取消都不需要再提示（面板自己有反馈）；只有「复制到剪贴板」和「完全不支持」要告诉用户
+            if (outcome == "copied")
+            {
+                await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.CopiedMessage, AlertTypes.Success);
+            }
+            else if (outcome == "unsupported")
+            {
+                await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.ShareUnsupportedMessage, AlertTypes.Warning);
+            }
         }
-        catch
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException)
         {
-            await PopupService.EnqueueSnackbarAsync("当前环境不支持分享，可截图保存", AlertTypes.Warning);
+            Logger.LogWarning(ex, "分享自定义报表失败");
+            await PopupService.EnqueueSnackbarAsync(CustomReportPresentation.ShareUnsupportedMessage, AlertTypes.Warning);
+        }
+        finally
+        {
+            _sharing = false;
         }
     }
 
-    /// <summary>
-    /// 生成报表文本摘要（总览 + 支出 Top 3 + 环比亮点）
-    /// </summary>
-    private string BuildSummary()
+    private async Task<IJSObjectReference> GetUiAsync() =>
+        _ui ??= await JS.InvokeAsync<IJSObjectReference>("import", UiModulePath);
+
+    // ------------------------------------------------------------------ 构成（支出 / 收入各一个圆环）
+
+    private RenderFragment<(ReportResult Result, BillType Type)> Composition => arg => @<text>
+        @{
+            var type = arg.Type;
+            var key = type == BillType.Income ? "income" : "expense";
+            var total = type == BillType.Income ? arg.Result.Stats.TotalIncome : arg.Result.Stats.TotalExpense;
+            var rows = arg.Result.LegendOf(type);
+        }
+        <SectionHeader Title="@StatisticsPresentation.CompositionTitle(type)" TestId="@($"report-{key}-header")" />
+        <ChartPanel TestId="@($"report-{key}-composition")">
+            <DonutChart Rows="rows" TestId="@($"report-{key}-donut")">
+                <span class="ft-donut__caption">@StatisticsPresentation.TotalLabel(type)</span>
+                <AmountDisplay Amount="total"
+                               Size="AmountSize.Lg"
+                               Class="@(StatisticsPresentation.IsLongAmount(total) ? "ft-donut__total ft-amount--long" : "ft-donut__total")"
+                               TestId="@($"report-{key}-total")" />
+            </DonutChart>
+            @if (rows.Count > 0)
+            {
+                <LegendList Rows="rows"
+                            AriaLabel="@StatisticsPresentation.LegendAriaLabel(type, false)"
+                            TestId="@($"report-{key}-legend")" />
+            }
+            else
+            {
+                <p class="ft-panel__note" data-testid="@($"report-{key}-empty")">@CustomReportPresentation.CompositionEmptyText(type)</p>
+            }
+        </ChartPanel>
+    </text>;
+
+    public async ValueTask DisposeAsync()
     {
-        var summary = $"总支出 ¥{_stats!.TotalExpense:N2}，总收入 ¥{_stats.TotalIncome:N2}，净收支 ¥{_stats.NetIncome:N2}（共 {_stats.BillCount} 笔账单）";
-
-        var top3 = _stats.ExpenseCategoryStats.Take(3).ToList();
-        if (top3.Any())
+        if (_ui is not null)
         {
-            summary += "\n支出 Top3：" + string.Join("、", top3.Select(c => $"{c.CategoryName} ¥{c.Amount:N2}"));
+            try
+            {
+                await _ui.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is JSDisconnectedException or JSException or TaskCanceledException or ObjectDisposedException)
+            {
+                // 电路已断开：模块引用随之失效，无需处理
+            }
         }
+    }
 
-        var biggestIncrease = _comparisons
-            .Where(c => c.ChangeAmount > 0)
-            .OrderByDescending(c => c.ChangeAmount)
-            .FirstOrDefault();
-        if (biggestIncrease != null)
-        {
-            var rateText = biggestIncrease.ChangeRate.HasValue ? $"，+{biggestIncrease.ChangeRate.Value:0.0}%" : "";
-            summary += $"\n环比增长最多：{biggestIncrease.CategoryName}（+¥{biggestIncrease.ChangeAmount:N2}{rateText}）";
-        }
+    /// <summary>生成那一刻的结果快照（展示用的各块数据都在生成时算好，渲染时不再计算）</summary>
+    private sealed record ReportResult(
+        CustomStatistics Stats,
+        IReadOnlyList<CategoryComparisonData> Comparisons,
+        IReadOnlyList<ComparisonRow> Rows,
+        IReadOnlyList<KpiItem> Kpi,
+        IReadOnlyList<LegendRow> ExpenseLegend,
+        IReadOnlyList<LegendRow> IncomeLegend,
+        Guid? LedgerId,
+        string LedgerLabel,
+        string? LedgerName)
+    {
+        public string Caption => CustomReportPresentation.Caption(Stats.StartDate, Stats.EndDate, LedgerLabel, Stats.BillCount);
 
-        var biggestDecrease = _comparisons
-            .Where(c => c.ChangeAmount < 0)
-            .OrderBy(c => c.ChangeAmount)
-            .FirstOrDefault();
-        if (biggestDecrease != null)
-        {
-            var rateText = biggestDecrease.ChangeRate.HasValue ? $"，-{Math.Abs(biggestDecrease.ChangeRate.Value):0.0}%" : "";
-            summary += $"\n环比减少最多：{biggestDecrease.CategoryName}（-¥{Math.Abs(biggestDecrease.ChangeAmount):N2}{rateText}）";
-        }
+        public string ComparisonFooter => CustomReportPresentation.ComparisonFooter(Stats.StartDate, Stats.EndDate);
 
-        return summary;
+        public IReadOnlyList<LegendRow> LegendOf(BillType type) => type == BillType.Income ? IncomeLegend : ExpenseLegend;
     }
 }

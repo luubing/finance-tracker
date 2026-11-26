@@ -1,0 +1,54 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    图表容器（设计稿 screens 03-stats：每一节标题下面的白色圆角卡）：统一的卡片外观 + 三种状态——
+    加载中（骨架块，卡片高度不跳）、没有数据（图标 + 说明文字）、有数据（ChildContent，通常是一张图表）。
+    统计 Tab 里的圆环、分类排行、支出日历、累计收支都放在它里面；标题由卡片上方的节标题（SectionHeader）负责，容器自己不带标题。
+    设计稿画的是不透明的白卡，不是玻璃（玻璃层预算每屏最多三层，见 ADR 0007），所以这里没有 backdrop-filter。
+    - 观察属性（E2E）：根 data-testid（TestId）、data-state = loading | empty | ready；空状态 {TestId}-empty。
+*@
+<div class="ft-panel @Class" data-testid="@TestId" data-state="@State" aria-busy="@(Loading ? "true" : null)">
+    @if (Loading)
+    {
+        <div class="ft-skeleton ft-panel__skeleton" style="height: @(SkeletonHeight)px" aria-hidden="true"></div>
+    }
+    else if (Empty)
+    {
+        <div class="ft-panel__empty" data-testid="@(TestId + "-empty")">
+            <i class="mdi @EmptyIcon" aria-hidden="true"></i>
+            <p>@EmptyText</p>
+        </div>
+    }
+    else
+    {
+        @ChildContent
+    }
+</div>
+
+@code {
+    /// <summary>加载中</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>没有数据（Loading 为 false 时才看这个）</summary>
+    [Parameter] public bool Empty { get; set; }
+
+    /// <summary>没有数据时的说明文字</summary>
+    [Parameter] public string EmptyText { get; set; } = "暂无数据";
+
+    /// <summary>没有数据时的图标（MDI）</summary>
+    [Parameter] public string EmptyIcon { get; set; } = "mdi-chart-arc";
+
+    /// <summary>加载中骨架块的高度（px），按图表的实际高度给，卡片高度前后一致</summary>
+    [Parameter] public int SkeletonHeight { get; set; } = 160;
+
+    /// <summary>图表内容</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "chart-panel";
+
+    private string State => Loading ? "loading" : Empty ? "empty" : "ready";
+}

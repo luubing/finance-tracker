@@ -36,11 +36,15 @@ public sealed class BillSaveRegressionTests : IAsyncLifetime
     private User _user => _db.User;
     private Category _expenseCategory => _db.ExpenseCategory;
     private PaymentChannel _channel => _db.Channel;
+    private Ledger _ledger = null!;
 
     public async Task InitializeAsync()
     {
         _db = await SqliteTestDatabase.CreateAsync();
         _billService = new BillService(_context, NullLogger<BillService>.Instance);
+
+        // 账本必填：这些用例关心的是别的保存规则，默认给每笔账单一个有效账本
+        _ledger = await _db.GetDefaultLedgerAsync();
     }
 
     public async Task DisposeAsync() => await _db.DisposeAsync();
@@ -56,7 +60,7 @@ public sealed class BillSaveRegressionTests : IAsyncLifetime
         Type = BillType.Expense,
         CategoryId = categoryId ?? _expenseCategory.Id,
         PaymentChannelId = channelId ?? _channel.Id,
-        LedgerId = ledgerId,
+        LedgerId = ledgerId ?? _ledger.Id,
         TransactionTime = new DateTime(2026, 11, 17, 12, 0, 0, DateTimeKind.Local),
         Note = "回归测试",
         Source = BillSource.Manual

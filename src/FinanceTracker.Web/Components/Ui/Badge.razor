@@ -1,0 +1,18 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@* 徽标（默认 / 共享 / 只读 / 已同步 ……）：圆角胶囊小标签，颜色表达含义，文字必须同时表达含义（不能只靠颜色） *@
+<span class="ft-badge ft-badge--@KindName" data-testid="@TestId" @attributes="AdditionalAttributes">@ChildContent</span>
+
+@code {
+    [Parameter] public BadgeKind Kind { get; set; } = BadgeKind.Brand;
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string KindName => Kind.ToString().ToLowerInvariant();
+}

@@ -11,6 +11,12 @@ namespace FinanceTracker.Core.Interfaces;
 public interface IPendingBillService
 {
     /// <summary>
+    /// 待确认账单最多保留的条数，防止异常场景下无限增长：列表已满时，<see cref="AddAsync"/> 会先丢弃最早捕获的一条再加入新的。
+    /// 批量加入的调用方（短信识别页）要先看剩余容量，免得一次读取把用户还没处理的待确认账单顶掉。
+    /// </summary>
+    const int MaxCount = 200;
+
+    /// <summary>
     /// 待确认账单列表变化事件（新增/移除时触发），用于页面实时刷新
     /// </summary>
     event EventHandler? PendingBillsChanged;
@@ -21,7 +27,8 @@ public interface IPendingBillService
     Task<List<PendingBill>> GetPendingBillsAsync();
 
     /// <summary>
-    /// 添加待确认账单（按来源+交易时间+金额去重，避免同一条支付重复捕获）
+    /// 添加待确认账单（按来源+交易时间(±1 分钟)+金额去重，避免同一条支付重复捕获；规则见 <c>PendingBillDeduplication</c>）。
+    /// 列表已满（<see cref="MaxCount"/>）时先丢弃最早捕获（<see cref="PendingBill.CapturedAt"/>）的一条。
     /// </summary>
     /// <returns>是否成功添加（false 表示重复，已忽略）</returns>
     Task<bool> AddAsync(PendingBill pendingBill);

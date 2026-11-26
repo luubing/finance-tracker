@@ -1,402 +1,501 @@
 @page "/profile"
-@using FinanceTracker.Core.Interfaces
+@using Masa.Blazor.Presets.PageStack.NavController
 @using FinanceTracker.Web.Components
-@using FinanceTracker.Web.Services
 @implements IDisposable
 @inject IAuthService AuthService
 @inject AuthenticationService AuthStateService
+@inject ILedgerService LedgerService
+@inject IBudgetService BudgetService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject IPendingBillService PendingBillService
+@inject ISmsService SmsService
+@inject BillEventService BillEventService
+@inject PageDataGate DataGate
 @inject PageStackNavController NavController
+@inject NavigationManager Navigation
 @inject IPopupService PopupService
-@inject IJSRuntime JSRuntime
-@inject NavigationManager NavigationManager
+@inject ILogger<Profile> Logger
 
-<PStackPageBar Title="我的"
-               CenterTitle
-               Flat
-               Color="primary">
-    <ActionContent>
-        <MButton Icon Disabled="@(_isLoading || _isRefreshing)" OnClick="RefreshData">
-            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
-        </MButton>
-    </ActionContent>
-</PStackPageBar>
+@*
+    我的 Tab（设计稿 01 · 四个 Tab 根页面 / screens 04-me）：iOS「设置」式分组列表，只保留资料与管理入口。
+      大标题「我的」（滚动后折叠为居中小标题；导航栏右侧没有按钮）
+      → 资料卡（头像 + 脱敏手机号 + 「注册于 yyyy-MM-dd」，注册日期按应用时区）
+      → 云端同步行（SyncStatus 组件：待同步条数、「立即同步」、结果提示；同步仍然只由用户点按触发）
+      → 记账管理：账本管理（「N 个」）、预算管理（「本月 N 项」）、分类管理（「N 个」）、支付渠道（「N 个」）
+      → 自动记账：待确认账单（红色计数角标）、短信识别（「已开启 / 未开启」= 短信读取权限是否已授予）、数据导入
+      → 其他：错误日志
+      → 退出登录（红色文字行，点按弹出 Alert 确认；确认后清登录状态并回登录页——登录页是独立布局，没有 Tab 栏）。
+    账单列表 / 趋势分析 / 年度报告 / 自定义报表的入口已迁出：前两者是「账单」「统计」Tab，自定义报表在统计页右上角；
+    旧地址 /trend /annual-report 仍可用（落到统计 Tab 的对应分段），/custom-report 保持独立二级页。
+    摘要值：每一项独立读取，读取失败只让这一行不显示摘要（不显示成 0 误导用户），不影响其它行与页面本身；
+    读库全部经过 PageDataGate 与其它 Tab 根页面排队（它们常驻、共用一个 DbContext），短信权限检查不碰数据库，不进闸门。
+    刷新：只有下拉手势，没有按钮形式的刷新入口（ADR 0007）——重读资料与各项摘要，并刷新同步行的待同步数量；
+    只读本页数据，不触发云端同步。资料读取失败时的空状态里另有「重试」按钮（走同一套重读）。
+    自动更新：账单变更（记一笔 / 删除 / 导入）→ 刷新待同步数量；待确认账单变化 → 刷新角标；认证状态变化 → 重读资料；
+    二级页面关闭（账本 / 预算 / 分类 / 支付渠道 / 待确认账单 / 短信识别 / 导入……都可能改了这里的摘要）→ 重读全部（记一笔 / 编辑账单已经通过 BillChanged 刷新，不重复）。
+    观察属性（E2E）：根 profile-page（滚动容器 data-scroll-root）；下拉刷新 profile-ptr；
+    资料卡 profile-card → profile-avatar / profile-phone / profile-registered；同步行 sync-row（data-state、data-pending）/ sync-now；
+    入口 profile-entry-{ledgers|budgets|categories|payment-channels|pending-bills|sms-recognition|import|log-viewer}（摘要值在 .ft-cell__value）、
+    待确认账单角标 profile-pending-count；分组 profile-group-manage / -auto / -other / -logout；
+    退出登录 profile-logout、确认框 profile-logout-alert（alert-confirm / alert-cancel）；未登录 profile-login-empty / profile-login；读取失败 profile-error-empty / profile-retry。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    @if (_isLoading)
-    {
-        <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
-            <MProgressCircular Indeterminate Size="64" Color="primary" />
-        </MContainer>
-    }
-    else if (_user == null)
-    {
-        <MCard>
-            <MCardText Class="text-center py-8">
-                <MIcon Size="64" Color="grey lighten-1">mdi-account-circle</MIcon>
-                <div class="text-h6 grey--text text--lighten-1 mt-4">请先登录</div>
-                <PPageStackLink Href="/login">
-                    <MButton Color="primary" Class="mt-4">去登录</MButton>
-                </PPageStackLink>
-            </MCardText>
-        </MCard>
-    }
-    else
-    {
-        <!-- 用户信息卡片 -->
-        <MCard Class="mb-4">
-            <MCardText Class="d-flex align-center pa-4">
-                <MAvatar Size="64" Color="primary">
-                    <MIcon Size="40" Color="white">mdi-account</MIcon>
-                </MAvatar>
-                <div class="ml-4">
-                    <div class="text-h6">@MaskPhoneNumber(_user.PhoneNumber)</div>
-                    <div class="text-caption text--secondary">注册时间: @AppTimeZone.ToLocal(_user.CreatedAt).ToString("yyyy-MM-dd")</div>
+<LargeTitlePage Title="@ProfilePresentation.Title"
+                Class="ft-profile"
+                TestId="profile-page"
+                Busy="@(_isLoading || _isRetrying)"
+                OnRefresh="PullRefreshAsync"
+                RefreshTestId="profile-ptr">
+    <ChildContent>
+        @if (_isLoading)
+        {
+            <GroupedList TestId="profile-skeleton">
+                @for (var i = 0; i < 3; i++)
+                {
+                    <div class="ft-skeleton-row" aria-hidden="true">
+                        <span class="ft-skeleton ft-skeleton--tile"></span>
+                        <span class="ft-skeleton-row__main">
+                            <span class="ft-skeleton ft-skeleton--title"></span>
+                            <span class="ft-skeleton ft-skeleton--sub"></span>
+                        </span>
+                    </div>
+                }
+            </GroupedList>
+        }
+        else if (_user is null && _loadFailed)
+        {
+            @* 资料读取失败（已登录，只是本机库读不出来）：不能说成「请先登录」，给重试 *@
+            <EmptyState Icon="mdi-account-alert-outline" Title="资料加载失败" Text="请稍后重试" TestId="profile-error-empty">
+                <Action>
+                    <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-refresh" TestId="profile-retry" OnClick="RetryAsync">重试</GlassButton>
+                </Action>
+            </EmptyState>
+        }
+        else if (_user is null)
+        {
+            <EmptyState Icon="mdi-account-circle-outline" Title="请先登录" Text="登录后可以管理账本、预算与云端同步" TestId="profile-login-empty">
+                <Action>
+                    <GlassButton Kind="ButtonKind.Brand" Large TestId="profile-login" OnClick="GoLogin">去登录</GlassButton>
+                </Action>
+            </EmptyState>
+        }
+        else
+        {
+            @* 资料卡 *@
+            <GroupedList Class="ft-profile__top" TestId="profile-card-group" aria-label="账号信息">
+                <div class="ft-profile__card" data-testid="profile-card">
+                    <span class="ft-profile__avatar" aria-hidden="true" data-testid="profile-avatar"><i class="mdi mdi-account"></i></span>
+                    @* 用 div 而不是 p：MASA 的 .m-application p { margin-bottom: 16px } 特异性高于单类样式，会把 p 的外边距撑出来 *@
+                    <div class="ft-profile__who">
+                        <div class="ft-profile__phone" data-testid="profile-phone">@ProfilePresentation.MaskedPhone(_user.PhoneNumber)</div>
+                        <div class="ft-profile__since" data-testid="profile-registered">@ProfilePresentation.RegisteredText(AppTimeZone.ToLocal(_user.CreatedAt))</div>
+                    </div>
                 </div>
-            </MCardText>
-        </MCard>
+            </GroupedList>
 
-        <!-- 同步状态 -->
-        <SyncStatus @ref="_syncStatus" />
+            @* 云端同步行：沿用「同步状态」组件的全部能力，视觉并入顶部 *@
+            <GroupedList Class="ft-profile__sync" TestId="profile-sync-group" aria-label="云端同步">
+                <SyncStatus @key="_user.Id" @ref="_syncStatus" UserId="_user.Id" OnSynced="OnSyncedAsync" />
+            </GroupedList>
 
-        <!-- 功能列表 -->
-        <MCard Class="mb-4">
-            <MList>
-                <MListItem OnClick="@(() => NavController.Push("/ledgers"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-book-multiple</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>账本管理</MListItemTitle>
-                        <MListItemSubtitle>维护账本名称，账单可归属到账本</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
+            <GroupedList TestId="profile-group-manage" aria-label="记账管理">
+                <ListCell Icon="mdi-book-multiple"
+                          Tone="purple"
+                          Title="账本管理"
+                          Value="@ProfilePresentation.CountValue(_ledgerCount)"
+                          Chevron
+                          TestId="profile-entry-ledgers"
+                          OnClick="@(() => Open("/ledgers"))" />
+                <ListCell Icon="mdi-wallet"
+                          Tone="orange"
+                          Title="预算管理"
+                          Value="@ProfilePresentation.BudgetValue(_budgetCount)"
+                          Chevron
+                          TestId="profile-entry-budgets"
+                          OnClick="@(() => Open("/budgets"))" />
+                <ListCell Icon="mdi-tag-multiple"
+                          Tone="blue"
+                          Title="分类管理"
+                          Value="@ProfilePresentation.CountValue(_categoryCount)"
+                          Chevron
+                          TestId="profile-entry-categories"
+                          OnClick="@(() => Open("/categories"))" />
+                <ListCell Icon="mdi-credit-card"
+                          Tone="green"
+                          Title="支付渠道"
+                          Value="@ProfilePresentation.CountValue(_channelCount)"
+                          Chevron
+                          TestId="profile-entry-payment-channels"
+                          OnClick="@(() => Open("/payment-channels"))" />
+            </GroupedList>
 
-                <MDivider />
+            <GroupedList TestId="profile-group-auto" aria-label="自动记账">
+                <ListCell Icon="mdi-bell-check"
+                          Tone="red"
+                          Title="待确认账单"
+                          AriaLabel="@ProfilePresentation.PendingLabel(_pendingCount ?? 0)"
+                          Chevron
+                          TestId="profile-entry-pending-bills"
+                          OnClick="@(() => Open("/pending-bills"))">
+                    <Badges>
+                        @if (_pendingCount is > 0)
+                        {
+                            @* 角标只是图形：读屏名称写在整行的 aria-label 里 *@
+                            <span class="ft-profile__count" aria-hidden="true" data-testid="profile-pending-count">@ProfilePresentation.PendingBadge(_pendingCount.Value)</span>
+                        }
+                    </Badges>
+                </ListCell>
+                <ListCell Icon="mdi-message-text"
+                          Tone="blue"
+                          Title="短信识别"
+                          Value="@ProfilePresentation.SmsValue(_smsEnabled)"
+                          Chevron
+                          TestId="profile-entry-sms-recognition"
+                          OnClick="@(() => Open("/sms-recognition"))" />
+                <ListCell Icon="mdi-import"
+                          Tone="teal"
+                          Title="数据导入"
+                          Chevron
+                          TestId="profile-entry-import"
+                          OnClick="@(() => Open("/import"))" />
+            </GroupedList>
 
-                <MListItem OnClick="@(() => NavController.Push("/budgets"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-wallet</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>预算管理</MListItemTitle>
-                        <MListItemSubtitle>设置月度预算，跟踪预算执行情况</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
+            <GroupedList TestId="profile-group-other" aria-label="其他">
+                <ListCell Icon="mdi-alert-circle-outline"
+                          Tone="gray"
+                          Title="错误日志"
+                          Chevron
+                          TestId="profile-entry-log-viewer"
+                          OnClick="@(() => Open("/log-viewer"))" />
+            </GroupedList>
 
-                <MDivider />
+            <GroupedList TestId="profile-group-logout">
+                <ListCell Title="退出登录"
+                          Destructive
+                          Class="ft-profile__logout"
+                          TestId="profile-logout"
+                          OnClick="ShowLogout" />
+            </GroupedList>
+        }
+    </ChildContent>
+</LargeTitlePage>
 
-                <MListItem OnClick="@(() => NavController.Push("/custom-report"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-file-chart-outline</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>自定义报表</MListItemTitle>
-                        <MListItemSubtitle>自定义时间范围报表，环比对比与导出分享</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/categories"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-tag-multiple</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>分类管理</MListItemTitle>
-                        <MListItemSubtitle>管理支出和收入分类</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/payment-channels"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-credit-card</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>支付渠道</MListItemTitle>
-                        <MListItemSubtitle>管理支付渠道</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/import"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-import</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>数据导入</MListItemTitle>
-                        <MListItemSubtitle>从微信、支付宝导入账单</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/sms-recognition"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-message-text</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>短信识别</MListItemTitle>
-                        <MListItemSubtitle>从短信中识别账单</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/pending-bills"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-bell-check</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>待确认账单</MListItemTitle>
-                        <MListItemSubtitle>通知栏/短信自动捕获的支付记录</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/bills"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-format-list-bulleted</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>账单列表</MListItemTitle>
-                        <MListItemSubtitle>查看所有账单</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/trend"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-chart-line</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>趋势分析</MListItemTitle>
-                        <MListItemSubtitle>支出/收入趋势变化</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/annual-report"))">
-                    <MListItemIcon>
-                        <MIcon Color="primary">mdi-calendar</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>年度报告</MListItemTitle>
-                        <MListItemSubtitle>年度总览与同比分析</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-
-                <MDivider />
-
-                <MListItem OnClick="@(() => NavController.Push("/log-viewer"))">
-                    <MListItemIcon>
-                        <MIcon Color="error">mdi-alert-circle</MIcon>
-                    </MListItemIcon>
-                    <MListItemContent>
-                        <MListItemTitle>错误日志</MListItemTitle>
-                        <MListItemSubtitle>查看应用错误日志，调试问题</MListItemSubtitle>
-                    </MListItemContent>
-                    <MListItemAction>
-                        <MIcon>mdi-chevron-right</MIcon>
-                    </MListItemAction>
-                </MListItem>
-            </MList>
-        </MCard>
-
-        <!-- 退出登录 -->
-        <MButton Block
-                 Outlined
-                 Color="error"
-                 Class="mb-4"
-                 OnClick="ShowLogoutConfirm">
-            <MIcon Class="mr-2">mdi-logout</MIcon>
-            退出登录
-        </MButton>
-    }
-</MContainer>
-
-<!-- 退出登录确认对话框 -->
-<MDialog @bind-Value="_showLogoutDialog" MaxWidth="320">
-    <MCard>
-        <MCardTitle Class="text-h6">
-            确认退出
-        </MCardTitle>
-
-        <MCardText>
-            确定要退出登录吗？
-        </MCardText>
-
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CancelLogout">取消</MButton>
-            <MButton Color="error" OnClick="ConfirmLogout">退出</MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+@* 退出登录确认：取消 / 确认两条路径；确认后清登录状态并回登录页 *@
+<GlassAlert @bind-Visible="_logoutVisible"
+            Title="@ProfilePresentation.LogoutTitle"
+            Message="@ProfilePresentation.LogoutMessage"
+            ConfirmText="@ProfilePresentation.LogoutConfirmText"
+            Destructive
+            OnConfirm="ConfirmLogoutAsync"
+            TestId="profile-logout-alert" />
 
 @code {
-    private Core.Entities.User? _user;
+    private bool _disposed;
     private bool _isLoading = true;
-    private bool _showLogoutDialog;
+    private bool _isRetrying;
 
-    // 手动刷新状态
-    private bool _isRefreshing;
+    // 已登录但资料读不出来（本机库读取失败）：与「未登录」区分开，给重试
+    private bool _loadFailed;
+    private FinanceTracker.Core.Entities.User? _user;
 
+    // 入口行右侧的摘要值：null = 还没读到 / 读取失败，该行不显示摘要
+    private int? _ledgerCount;
+    private int? _budgetCount;
+    private int? _categoryCount;
+    private int? _channelCount;
+    private int? _pendingCount;
+    private bool? _smsEnabled;
+
+    private bool _logoutVisible;
     private Components.SyncStatus? _syncStatus;
 
     protected override void OnInitialized()
     {
         AuthStateService.AuthStateChanged += OnAuthStateChanged;
+        BillEventService.BillChanged += OnBillChanged;
+        PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
+        NavController.PageClosed += OnPageClosed;
     }
 
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与 Index.razor / Bills.razor / Statistics.razor 相同）。
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await LoadUser();
+            await LoadUserAsync();
             StateHasChanged();
-        }
-    }
-
-    private async void OnAuthStateChanged()
-    {
-        try
-        {
-            await LoadUser();
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception)
-        {
-            // 电路可能已关闭，忽略刷新失败
         }
     }
 
     public void Dispose()
     {
+        _disposed = true;
         AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+        BillEventService.BillChanged -= OnBillChanged;
+        PendingBillService.PendingBillsChanged -= OnPendingBillsChanged;
+        NavController.PageClosed -= OnPageClosed;
+    }
+
+    // ------------------------------------------------------------------ 事件
+
+    private void OnAuthStateChanged() => _ = RunOnUiAsync(LoadUserAsync, "认证状态变化后刷新「我的」失败");
+
+    // 账单变更（记一笔 / 删除 / 导入）改变待同步数量；其它摘要与账单无关
+    private void OnBillChanged() => _ = RunOnUiAsync(
+        () => _syncStatus?.RefreshAsync() ?? Task.CompletedTask,
+        "账单变更后刷新待同步数量失败");
+
+    // 单独刷新角标也要与其它页面的读库排队；LoadPendingAsync 本身不进闸门（整页加载时它已经在闸门里了，信号量不可重入）
+    private void OnPendingBillsChanged(object? sender, EventArgs e) => _ = RunOnUiAsync(() => DataGate.RunAsync(LoadPendingAsync), "待确认账单变更后刷新角标失败");
+
+    private void OnPageClosed(object? sender, PageStackPageClosedEventArgs e)
+    {
+        // 二级页面关闭后重读全部摘要（账本 / 预算 / 分类 / 支付渠道 / 待确认账单 / 短信识别 / 导入都可能改了它们）。
+        // 记一笔 / 编辑账单是布局级的 Sheet，不经过页面栈；它保存时已经通过 BillChanged 刷新待同步数量
+        _ = RunOnUiAsync(
+            async () =>
+            {
+                if (_user is not null)
+                {
+                    await LoadSummariesAsync();
+
+                    if (_syncStatus is not null)
+                    {
+                        await _syncStatus.RefreshAsync();
+                    }
+                }
+            },
+            "二级页面关闭后刷新「我的」失败");
     }
 
     /// <summary>
-    /// 手动刷新“我的”页面数据（用户信息 + 同步状态）
+    /// 在渲染线程上执行并重绘；失败只记日志（电路可能已关闭），不能把异常抛到事件源
     /// </summary>
-    private async Task RefreshData()
+    private async Task RunOnUiAsync(Func<Task> work, string failureMessage)
     {
-        if (_isRefreshing)
+        if (_disposed)
         {
             return;
         }
 
-        _isRefreshing = true;
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                await work();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Message}", failureMessage);
+        }
+    }
+
+    // ------------------------------------------------------------------ 刷新
+
+    /// <summary>下拉刷新（唯一的刷新入口）：转圈由 PullToRefresh 负责，这里只重读本页数据</summary>
+    private Task PullRefreshAsync() => ReloadAsync();
+
+    /// <summary>资料读取失败空状态里的「重试」按钮：重读一遍，期间页面标记忙碌、重复点按被忽略</summary>
+    private async Task RetryAsync()
+    {
+        if (_isRetrying || _isLoading)
+        {
+            return;
+        }
+
+        _isRetrying = true;
         StateHasChanged();
 
         try
         {
-            await LoadUser();
-
-            if (_syncStatus != null)
-            {
-                await _syncStatus.RefreshAsync();
-            }
+            await ReloadAsync();
         }
         finally
         {
-            _isRefreshing = false;
-            StateHasChanged();
+            _isRetrying = false;
         }
     }
 
-    private async Task LoadUser()
+    /// <summary>
+    /// 重读资料与各项摘要，并刷新同步行的待同步数量。只读本地库，不联网、不同步
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        await LoadUserAsync();
+
+        if (_syncStatus is not null)
+        {
+            await _syncStatus.RefreshAsync();
+        }
+    }
+
+    // ------------------------------------------------------------------ 加载
+
+    private async Task LoadUserAsync()
+    {
+        Guid userId;
+        try
+        {
+            userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取登录状态失败");
+            userId = Guid.Empty;
+        }
+
+        if (userId == Guid.Empty)
+        {
+            // 未登录（退出登录后 Tab 根页面还留在页面栈里）：不显示任何资料，也不留着上一个用户的数据
+            ShowSignedOut(loadFailed: false);
+            return;
+        }
+
+        FinanceTracker.Core.Entities.User? user = null;
+        var failed = false;
+        try
+        {
+            // 与其它 Tab 根页面共用一个 DbContext：读用户也要排队
+            user = await DataGate.RunAsync(() => AuthService.GetUserByIdAsync(userId));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取用户资料失败");
+            failed = true;
+        }
+
+        if (user is null)
+        {
+            if (failed && _user?.Id == userId)
+            {
+                // 同一个用户这次刷新失败：保留已经显示的资料，如实提示
+                _isLoading = false;
+                await PopupService.EnqueueSnackbarAsync("刷新失败，请稍后重试", AlertTypes.Error);
+                return;
+            }
+
+            // 读取失败（已登录，只是读不出来）与找不到这个用户的资料（本机库被清空而登录状态还在）分开处理：前者给重试，后者按未登录
+            ShowSignedOut(loadFailed: failed);
+            return;
+        }
+
+        if (_user is not null && _user.Id != user.Id)
+        {
+            // 换了账号（退出后用别的手机号登录）：先清掉上一个用户的摘要，不让旧数据闪一下
+            ResetData();
+        }
+
+        _user = user;
+        _loadFailed = false;
+        await LoadSummariesAsync();
+        _isLoading = false;
+    }
+
+    private void ShowSignedOut(bool loadFailed)
+    {
+        ResetData();
+        _user = null;
+        _loadFailed = loadFailed;
+        _isLoading = false;
+    }
+
+    private void ResetData()
+    {
+        _ledgerCount = _budgetCount = _categoryCount = _channelCount = _pendingCount = null;
+        _smsEnabled = null;
+        _logoutVisible = false;
+        _syncStatus = null;
+    }
+
+    /// <summary>
+    /// 读取入口行右侧的摘要值。每一项独立读取、独立降级——某一项读取失败只让对应的行不显示摘要
+    /// </summary>
+    private async Task LoadSummariesAsync()
+    {
+        if (_user is null)
+        {
+            return;
+        }
+
+        var userId = _user.Id;
+        // 预算的「本月」按应用时区（与预算页、首页一致）
+        var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+        // 这几项读的是同一个 DbContext：顺序读，并经 PageDataGate 与其它 Tab 根页面排队
+        await DataGate.RunAsync(async () =>
+        {
+            _ledgerCount = await ReadCountAsync("账本个数", async () => (await LedgerService.GetLedgersAsync(userId)).Count);
+            // 与预算页默认视图一致：只数「全部账本」口径的本月预算（总预算 + 分类预算）
+            _budgetCount = await ReadCountAsync("本月预算项数", async () => (await BudgetService.GetBudgetsAsync(userId, now.Year, now.Month)).Count);
+            _categoryCount = await ReadCountAsync("分类个数", async () => (await CategoryService.GetCategoriesAsync(userId)).Count);
+            _channelCount = await ReadCountAsync("支付渠道个数", async () => (await PaymentChannelService.GetPaymentChannelsAsync(userId)).Count);
+            await LoadPendingAsync();
+        });
+
+        // 短信读取权限不碰数据库，不进闸门（Android 上要切到主线程查权限）
+        _smsEnabled = await ReadSmsEnabledAsync();
+    }
+
+    private async Task LoadPendingAsync() =>
+        _pendingCount = await ReadCountAsync("待确认账单数", async () => (await PendingBillService.GetPendingBillsAsync()).Count);
+
+    private async Task<int?> ReadCountAsync(string what, Func<Task<int>> read)
     {
         try
         {
-            var userId = await AuthStateService.GetUserIdAsync();
-
-            if (userId.HasValue)
-            {
-                _user = await AuthService.GetUserByIdAsync(userId.Value);
-            }
+            return await read();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 忽略错误
+            Logger.LogWarning(ex, "读取{What}失败", what);
+            return null;
         }
-        finally
+    }
+
+    private async Task<bool?> ReadSmsEnabledAsync()
+    {
+        try
         {
-            _isLoading = false;
+            return await SmsService.HasPermissionAsync();
         }
-    }
-
-    private string MaskPhoneNumber(string phoneNumber)
-    {
-        if (string.IsNullOrEmpty(phoneNumber) || phoneNumber.Length != 11)
+        catch (Exception ex)
         {
-            return phoneNumber;
+            Logger.LogWarning(ex, "读取短信权限状态失败");
+            return null;
         }
-
-        return $"{phoneNumber[..3]}****{phoneNumber[7..]}";
     }
 
-    private void ShowLogoutConfirm()
-    {
-        _showLogoutDialog = true;
-    }
+    /// <summary>一次同步结束：同步可能拉取了账本 / 预算 / 账单，重读摘要</summary>
+    private async Task OnSyncedAsync() => await LoadSummariesAsync();
 
-    private void CancelLogout()
-    {
-        _showLogoutDialog = false;
-    }
+    // ------------------------------------------------------------------ 交互
 
-    private async Task ConfirmLogout()
-    {
-        _showLogoutDialog = false;
+    private void Open(string uri) => NavController.Push(uri);
 
+    private void GoLogin() => Navigation.Replace("/login");
+
+    private void ShowLogout() => _logoutVisible = true;
+
+    private async Task ConfirmLogoutAsync()
+    {
         try
         {
             await AuthStateService.LogoutAsync();
             await PopupService.EnqueueSnackbarAsync("已退出登录", AlertTypes.Success);
-            NavigationManager.Replace("/login");
+            Navigation.Replace("/login");
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.Message}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync($"退出失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
     }
 }

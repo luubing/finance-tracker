@@ -26,6 +26,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- 冷启动：启动画面是紫色底，状态栏图标从第一帧起就是白色（该键只管启动那一刻；启动后由 StatusBarService 按页面背景切换） -->
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleLightContent</string>
 	<key>XSAppIconAssets</key>
 	<string>Assets.xcassets/appicon.appiconset</string>
 	<!-- 语音记账：麦克风与语音识别用途声明 -->

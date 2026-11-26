@@ -1,0 +1,106 @@
+@namespace FinanceTracker.Web.Components.Logs
+
+@*
+    错误日志的详情 Sheet（设计稿 05 · 半屏 Sheet）：点列表里的一行弹出，替代旧页面「在行下面展开」的做法。
+    内容（旧页面详情里的全部信息都在）：
+      · 头部：级别图标块 + 级别 + 完整时间（含毫秒）
+      · 消息（可换行）
+      · 来源（没有时显示「未知」）、异常类型（有才显示）
+      · 完整异常信息（只在和消息不同时显示；等宽字体，超过一屏自己滚动）
+      · 上下文信息（Serilog 的附加属性：App / Platform / DeviceModel…）
+      · 底部固定的主按钮「复制日志信息」（复制的格式见 LogViewerPresentation.CopyText，剪贴板由页面处理）
+    - Entry 由页面在打开时给，关闭（退出动画结束、OnClosed）后页面清掉：退出动画期间内容不能先消失。
+    - 观察属性（E2E）：log-detail-sheet(-host)、log-detail-level、log-detail-time、log-detail-message、log-detail-source、
+      log-detail-type、log-detail-exception、log-detail-prop（data-key）、log-copy。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             OnClosed="OnClosed"
+             Title="@LogViewerPresentation.DetailTitle"
+             TestId="log-detail-sheet">
+    <ChildContent>
+        @if (Entry is { } entry)
+        {
+            var style = LogViewerPresentation.StyleOf(entry.Level);
+
+            <div class="ft-logdetail__head">
+                <span class="ft-tile ft-tile--@style.Tone ft-logdetail__tile" aria-hidden="true"><i class="mdi @style.Icon"></i></span>
+                <div class="ft-logdetail__titles">
+                    <span class="ft-logdetail__level" data-testid="log-detail-level">@entry.Level</span>
+                    <span class="ft-logdetail__time" data-testid="log-detail-time">@LogViewerPresentation.FullTime(entry.Timestamp)</span>
+                </div>
+            </div>
+
+            <GroupedList Header="消息" TestId="log-detail-message-group">
+                <div class="ft-logdetail__text" data-testid="log-detail-message">@(string.IsNullOrEmpty(entry.Message) ? LogViewerPresentation.NoMessageText : entry.Message)</div>
+            </GroupedList>
+
+            <GroupedList Header="来源" TestId="log-detail-source-group">
+                <div class="ft-logdetail__row">
+                    <span class="ft-logdetail__label">来源</span>
+                    <span class="ft-logdetail__value" data-testid="log-detail-source">@LogViewerPresentation.SourceText(entry)</span>
+                </div>
+                @if (LogViewerPresentation.HasExceptionType(entry))
+                {
+                    <div class="ft-logdetail__row">
+                        <span class="ft-logdetail__label">异常类型</span>
+                        <span class="ft-logdetail__value" data-testid="log-detail-type">@entry.ExceptionType</span>
+                    </div>
+                }
+            </GroupedList>
+
+            @if (LogViewerPresentation.HasFullDetail(entry))
+            {
+                <GroupedList Header="完整异常信息" TestId="log-detail-exception-group">
+                    <pre class="ft-logdetail__pre" tabindex="0" aria-label="完整异常信息" data-testid="log-detail-exception">@entry.FullMessage</pre>
+                </GroupedList>
+            }
+
+            @if (entry.Properties.Count > 0)
+            {
+                <GroupedList Header="上下文信息" TestId="log-detail-context">
+                    @foreach (var property in entry.Properties)
+                    {
+                        <div class="ft-logdetail__row" data-testid="log-detail-prop" data-key="@property.Key">
+                            <span class="ft-logdetail__label">@property.Key</span>
+                            <span class="ft-logdetail__value">@property.Value</span>
+                        </div>
+                    }
+                </GroupedList>
+            }
+        }
+    </ChildContent>
+    <Footer>
+        <GlassButton Kind="ButtonKind.Brand"
+                     Large
+                     Block
+                     Icon="mdi-content-copy"
+                     Disabled="@(Entry is null)"
+                     TestId="log-copy"
+                     OnClick="CopyAsync">复制日志信息</GlassButton>
+    </Footer>
+</BottomSheet>
+
+@code {
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>要显示的日志（页面在打开时给，Sheet 完全关闭后清掉）</summary>
+    [Parameter] public LogEntry? Entry { get; set; }
+
+    /// <summary>点「复制日志信息」：由页面写剪贴板并给出提示（Sheet 保持打开）</summary>
+    [Parameter] public EventCallback<LogEntry> OnCopy { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private async Task CopyAsync()
+    {
+        if (Entry is { } entry)
+        {
+            await OnCopy.InvokeAsync(entry);
+        }
+    }
+}

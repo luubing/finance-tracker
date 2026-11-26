@@ -16,23 +16,26 @@ public class ImportController : BaseApiController
     private readonly IBillService _billService;
     private readonly ICategoryService _categoryService;
     private readonly IPaymentChannelService _paymentChannelService;
+    private readonly ILedgerMemberService _ledgerMemberService;
 
     public ImportController(
         ICsvParserService csvParserService,
         IBillService billService,
         ICategoryService categoryService,
-        IPaymentChannelService paymentChannelService)
+        IPaymentChannelService paymentChannelService,
+        ILedgerMemberService ledgerMemberService)
     {
         _csvParserService = csvParserService;
         _billService = billService;
         _categoryService = categoryService;
         _paymentChannelService = paymentChannelService;
+        _ledgerMemberService = ledgerMemberService;
     }
 
     /// <summary>
     /// 导入微信账单
     /// </summary>
-    /// <param name="request">CSV 内容</param>
+    /// <param name="request">CSV 内容与目标账本</param>
     /// <returns>导入结果</returns>
     [HttpPost("wechat")]
     public async Task<IActionResult> ImportWeChatBill([FromBody] ImportRequest request)
@@ -49,15 +52,21 @@ public class ImportController : BaseApiController
 
         var userId = GetUserId();
 
+        var ledgerError = await ValidateImportLedgerAsync(userId, request.LedgerId);
+        if (ledgerError != null)
+        {
+            return ledgerError;
+        }
+
         var importedBills = await _csvParserService.ParseWeChatCsvAsync(request.CsvContent);
 
-        return await ProcessImportedBills(userId, importedBills, "微信支付", request.UtcOffsetMinutes);
+        return await ProcessImportedBills(userId, importedBills, "微信支付", request.UtcOffsetMinutes, request.LedgerId!.Value);
     }
 
     /// <summary>
     /// 导入支付宝账单
     /// </summary>
-    /// <param name="request">CSV 内容</param>
+    /// <param name="request">CSV 内容与目标账本</param>
     /// <returns>导入结果</returns>
     [HttpPost("alipay")]
     public async Task<IActionResult> ImportAlipayBill([FromBody] ImportRequest request)
@@ -74,9 +83,15 @@ public class ImportController : BaseApiController
 
         var userId = GetUserId();
 
+        var ledgerError = await ValidateImportLedgerAsync(userId, request.LedgerId);
+        if (ledgerError != null)
+        {
+            return ledgerError;
+        }
+
         var importedBills = await _csvParserService.ParseAlipayCsvAsync(request.CsvContent);
 
-        return await ProcessImportedBills(userId, importedBills, "支付宝", request.UtcOffsetMinutes);
+        return await ProcessImportedBills(userId, importedBills, "支付宝", request.UtcOffsetMinutes, request.LedgerId!.Value);
     }
 
     /// <summary>
@@ -124,6 +139,21 @@ public class ImportController : BaseApiController
     private const string InvalidUtcOffsetMessage = "时区偏移必须在 -840 到 840 分钟之间";
 
     /// <summary>
+    /// 导入目标账本校验：账本必填；并且当前用户必须有该账本的写权限
+    /// （自有账本，或拥有 Editor 以上角色的共享账本——否则任何人都能把账单灌进别人的账本，见 ADR 0004）。
+    /// 放行返回 null。
+    /// </summary>
+    private async Task<IActionResult?> ValidateImportLedgerAsync(Guid userId, Guid? ledgerId)
+    {
+        if (ledgerId is null || ledgerId == Guid.Empty)
+        {
+            return BadRequest(new { message = "请选择要导入到的账本" });
+        }
+
+        return await CheckLedgerWritableAsync(_ledgerMemberService, ledgerId.Value, userId);
+    }
+
+    /// <summary>
     /// 客户端上报的 UTC 偏移（分钟）是否合法：未上报视为合法；全球时区范围为 UTC-12 ~ UTC+14
     /// </summary>
     private static bool IsValidUtcOffset(int? utcOffsetMinutes)
@@ -135,7 +165,8 @@ public class ImportController : BaseApiController
         Guid userId,
         List<Core.Interfaces.ImportedBill> importedBills,
         string defaultChannel,
-        int? utcOffsetMinutes)
+        int? utcOffsetMinutes,
+        Guid ledgerId)
     {
         var categories = await _categoryService.GetCategoriesAsync(userId);
         var channels = await _paymentChannelService.GetPaymentChannelsAsync(userId);
@@ -163,6 +194,7 @@ public class ImportController : BaseApiController
                     CategoryId = category?.Id ?? categories
                         .First(c => c.Name == (importedBill.IsIncome ? "其他收入" : "其他支出")).Id,
                     PaymentChannelId = channel?.Id ?? channels.First(c => c.Name == defaultChannel).Id,
+                    LedgerId = ledgerId,
                     // CSV 里的交易时间是不带时区的用户本地时间：客户端上报了偏移就按该偏移换算为 UTC；
                     // 没上报（旧版客户端）则交给 BillService 按服务器应用时区解释
                     TransactionTime = utcOffsetMinutes.HasValue
@@ -237,7 +269,7 @@ public class ImportController : BaseApiController
 }
 
 /// <summary>
-/// 导入请求体（CSV 内容）
+/// 导入请求体（CSV 内容 + 目标账本）
 /// </summary>
 public class ImportRequest
 {
@@ -245,6 +277,12 @@ public class ImportRequest
     /// CSV 文件内容
     /// </summary>
     public string CsvContent { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 导入到哪个账本（正式导入必填；仅解析不入库的预览接口忽略它）。
+    /// 类型保持可空，是为了缺省时返回"请选择要导入到的账本"，而不是被反序列化成 Guid.Empty 后报"账本不存在"
+    /// </summary>
+    public Guid? LedgerId { get; set; }
 
     /// <summary>
     /// CSV 中交易时间所属时区相对 UTC 的偏移（分钟，如东八区为 480；可选）。

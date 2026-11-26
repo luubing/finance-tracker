@@ -1,0 +1,73 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    搜索框（设计稿 02 · 账单 Tab 顶部「搜索备注、分类或金额」）：灰色填充的圆角输入框，左侧放大镜，有内容时右侧出现清除按钮。
+    - 输入框是「不受控」的：内容由用户键入、由浏览器持有，本组件不把值写回 DOM——服务端回写会盖掉用户在往返期间继续敲的字。
+      需要从外部清空时（例如空状态里的「清除筛选」、换了账号），调用方给本组件换一个 @key，整个输入框重建。
+    - 何时提交（行为在 wwwroot/js/ui.js，文档级委托）：输入停顿 350 ms 后提交；输入法组词期间不提交（拼音还没选字就查库没有意义，
+      还会让结果列表来回闪）；回车 / 软键盘的「搜索」键立即提交并收起软键盘；失焦时浏览器自己会提交；
+      清除按钮清空后立即提交，并保持焦点（软键盘不收起，可以接着输入）。「提交」就是在输入框上派发一次 change，OnSearch 随之触发。
+    - 语义：role="search" 容器 + 带 aria-label 的输入框 + 有读屏名称的清除按钮；StatusText 放进 role="status" 的视觉隐藏区域（播报结果笔数）。
+    - 清除按钮的显隐由样式决定（占位文字正显示 = 没有内容 = 不显示），不依赖脚本，也不依赖服务端状态。
+    - 观察属性（E2E）：容器 data-testid=TestId；输入框 {TestId}-input；清除按钮 {TestId}-clear；状态区 {TestId}-status。
+*@
+<div class="ft-search @Class"
+     role="search"
+     data-live-search-field
+     data-testid="@TestId"
+     @attributes="AdditionalAttributes">
+    <i class="mdi mdi-magnify ft-search__icon" aria-hidden="true"></i>
+    <input class="ft-search__input"
+           type="search"
+           inputmode="search"
+           enterkeyhint="search"
+           autocomplete="off"
+           autocapitalize="off"
+           autocorrect="off"
+           spellcheck="false"
+           maxlength="@MaxLength"
+           placeholder="@Placeholder"
+           aria-label="@AriaLabel"
+           data-live-search
+           data-testid="@(TestId + "-input")"
+           @onchange="OnChangedAsync" />
+    <button type="button"
+            class="ft-search__clear"
+            aria-label="@ClearLabel"
+            data-live-search-clear
+            data-testid="@(TestId + "-clear")">
+        <i class="mdi mdi-close-circle" aria-hidden="true"></i>
+    </button>
+    <span class="ft-sr-only" role="status" aria-live="polite" data-testid="@(TestId + "-status")">@StatusText</span>
+</div>
+
+@code {
+    /// <summary>占位文字：直接说清楚能搜什么</summary>
+    [Parameter] public string? Placeholder { get; set; }
+
+    /// <summary>输入框的读屏名称</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>清除按钮的读屏名称</summary>
+    [Parameter] public string? ClearLabel { get; set; } = "清除";
+
+    /// <summary>输入长度上限</summary>
+    [Parameter] public int MaxLength { get; set; } = 50;
+
+    /// <summary>给读屏播报的状态文字（例如「找到 12 笔账单」）；空 = 不播报</summary>
+    [Parameter] public string? StatusText { get; set; }
+
+    /// <summary>附加样式类（布局微调用）</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子的前缀</summary>
+    [Parameter] public string TestId { get; set; } = "search";
+
+    /// <summary>用户提交了搜索内容（停顿 / 回车 / 失焦 / 清除）；参数是输入框当前的完整内容（可能为空串）</summary>
+    [Parameter] public EventCallback<string?> OnSearch { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private Task OnChangedAsync(ChangeEventArgs e) => OnSearch.InvokeAsync(e.Value?.ToString());
+}

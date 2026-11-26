@@ -1,0 +1,305 @@
+@namespace FinanceTracker.Web.Components.Bills
+@using FinanceTracker.Web.Components.Categories
+@implements IAsyncDisposable
+@inject IBillService BillService
+@inject ICategoryService CategoryService
+@inject IPaymentChannelService PaymentChannelService
+@inject ILedgerService LedgerService
+@inject ILedgerMemberService LedgerMemberService
+@inject IUserDefaultService UserDefaultService
+@inject IBudgetService BudgetService
+@inject ISpeechService SpeechService
+@inject IBillVoiceParser VoiceParser
+@inject BillVoiceInputService VoiceInput
+@inject AuthenticationService AuthState
+@inject IPopupService PopupService
+@inject BillEventService BillEvents
+@inject PageDataGate DataGate
+@inject AddBillSheetService Sheet
+@inject NavigationManager Navigation
+
+@*
+    记一笔 Sheet（设计稿 04 / screens 05、07）：由 MainLayout 常驻挂载，Tab 栏的 ＋、首页 / 账单页的入口调用 AddBillSheetService.Open() 升起；
+    编辑账单是同一个 Sheet 的编辑模式（AddBillSheetService.OpenEdit(账单 Id)）：标题「编辑账单」、各字段预填、右上角留空（没有麦克风），内容最底部是红字「删除账单」。
+    它不是页面栈里的页面：页面栈只能做「右侧滑入」的页面切换，而这里需要「底部升起 + 背景缩小变暗」的模态 Sheet。
+    布局：标题栏（左关闭 / 新建时右麦克风） → 吸顶的「支出 | 收入」分段 + 金额 → 分类网格（5 列 × 2 行，可横滑翻页，末尾「新建分类」）
+    → 四行设置（账本 / 支付渠道 / 时间 / 备注） → （编辑模式）红字「删除账单」 → 固定在底部的自定义数字键盘（右侧高大的「保存」键）。
+    交互要点见 AddBillSheet.razor.cs（保存、编辑预填与删除、引导）、AddBillSheet.Voice.cs（语音预填 + 说话期间的全屏覆盖层 VoiceOverlay）与 Models/AddBillPresentation（纯规则）。
+    观察属性（E2E）：addbill-sheet（data-ready / data-type / data-mode / data-bill-id）、addbill-type、amount-display（data-value / data-size / data-empty）、
+    category-grid / category-tile / category-new、ledger-row / channel-row / time-row / note-row、addbill-time / addbill-note、
+    ledger-menu / ledger-option、channel-menu / channel-option、keypad / key-*、addbill-save、addbill-voice / addbill-voice-status、
+    addbill-delete / addbill-delete-alert（编辑模式）、voice-overlay 系列（见 VoiceOverlay.razor）。
+*@
+<BottomSheet Visible="_visible"
+             VisibleChanged="OnVisibleChangedAsync"
+             OnClosed="OnSheetClosedAsync"
+             BeforeClose="BeforeCloseAsync"
+             Title="@SheetTitle"
+             Tall
+             ScaleBackground
+             Guarded="@NeedsConfirmClose"
+             Dismissible="@(!_saving && !_deleting)"
+             TestId="addbill-sheet"
+             data-variant="addbill"
+             data-mode="@(IsEditing ? "edit" : "create")"
+             data-bill-id="@_editingId?.ToString()"
+             data-ready="@(_ready ? "true" : "false")"
+             data-type="@TypeKey">
+    <HeaderActions>
+        @if (IsEditing)
+        {
+            @* 编辑模式右上角留空：语音只用来预填新账单；「删除账单」是内容底部的红字行（破坏性操作不放在紧挨关闭钮的位置） *@
+        }
+        else if (VoiceInput.SupportsHoldToTalk)
+        {
+            @* 原生流式识别：按住录音（升起语音覆盖层）、松开结束，上滑 / 滑开进入取消区后松手取消 *@
+            <button type="button"
+                    class="@MicClass"
+                    aria-label="按住说话"
+                    data-testid="addbill-voice"
+                    data-mode="hold"
+                    data-state="@VoiceState"
+                    @onpointerdown="OnMicPointerDown"
+                    @onpointermove="OnMicPointerMove"
+                    @onpointerup="OnMicPointerUp"
+                    @onpointerleave="OnMicPointerLeave"
+                    @onpointercancel="OnMicPointerCancel"
+                    @oncontextmenu:preventDefault>
+                <i class="mdi mdi-microphone" aria-hidden="true"></i>
+            </button>
+        }
+        else
+        {
+            @* 浏览器 Web Speech：点击开始（升起语音覆盖层），自动断句或点覆盖层里的大麦克风结束；不支持时置灰，点按给出说明 *@
+            <button type="button"
+                    class="@MicClass"
+                    aria-label="@(VoiceUnsupported ? "语音记账（当前环境不支持）" : "语音记账")"
+                    aria-disabled="@(VoiceUnsupported ? "true" : null)"
+                    data-testid="addbill-voice"
+                    data-mode="tap"
+                    data-state="@VoiceState"
+                    @onclick="OnMicClickAsync">
+                <i class="mdi mdi-microphone" aria-hidden="true"></i>
+            </button>
+        }
+    </HeaderActions>
+    <ChildContent>
+        <div class="ft-addbill" data-testid="addbill-body">
+            @if (_voiceStatus is not null || _voiceMatchHint is not null)
+            {
+                <div class="ft-addbill__voice" role="status" data-testid="addbill-voice-status" data-state="@VoiceState">
+                    @if (_voiceStatus is not null)
+                    {
+                        <span class="ft-addbill__voice-text">@_voiceStatus</span>
+                    }
+                    @if (_voiceMatchHint is not null)
+                    {
+                        <span class="ft-addbill__voice-hint" data-testid="addbill-voice-hint">@_voiceMatchHint</span>
+                    }
+                </div>
+            }
+
+            @* 吸顶：分类网格与设置行滚动时，类型与金额始终可见 *@
+            <div class="ft-addbill__head">
+                <SegmentedControl Options="TypeOptions"
+                                  Value="@CategoryPresentation.SegmentOf(_type)"
+                                  ValueChanged="OnTypeChangedAsync"
+                                  AriaLabel="账单类型"
+                                  TestId="addbill-type" />
+                <div class="ft-addbill__amount"
+                     data-testid="amount-display"
+                     data-value="@_amount"
+                     data-size="@AmountInput.SizeOf(_amount)"
+                     data-type="@TypeKey"
+                     data-empty="@(AmountInput.IsEmpty(_amount) ? "true" : "false")"
+                     data-shake="@(_shakeAmount ? "true" : null)"
+                     role="status"
+                     aria-live="polite"
+                     aria-atomic="true">
+                    <span class="ft-sr-only">@($"金额 {AmountInput.Spoken(_amount)}")</span>
+                    <span class="ft-addbill__sym" aria-hidden="true">¥</span>
+                    <span class="ft-addbill__num" aria-hidden="true">@AmountInput.Format(_amount)</span><span class="ft-addbill__caret" aria-hidden="true"></span>
+                </div>
+            </div>
+
+            @if (_ready)
+            {
+                <div class="ft-addbill__cats" data-shake="@(_shakeCategory ? "true" : null)">
+                    <CategoryGrid Categories="CurrentCategories"
+                                  SelectedId="_categoryId"
+                                  Type="_type"
+                                  OnSelect="SelectCategory"
+                                  OnCreate="OpenCategorySheet" />
+                </div>
+            }
+            else
+            {
+                <div class="ft-addbill__cats ft-addbill__cats--loading" data-testid="category-loading" aria-hidden="true">
+                    @for (var i = 0; i < 10; i++)
+                    {
+                        <span class="ft-skeleton ft-addbill__sk"></span>
+                    }
+                </div>
+            }
+
+            <GroupedList Class="ft-addbill__rows" TestId="addbill-rows">
+                <div class="ft-addbill__anchor" @ref="_ledgerAnchor" data-shake="@(_shakeLedger ? "true" : null)">
+                    <ListCell Icon="mdi-book-open-variant"
+                              Tone="purple"
+                              Title="账本"
+                              Value="@LedgerValue"
+                              Class="@(LedgerMissing ? "ft-addbill__field ft-addbill__field--missing" : "ft-addbill__field")"
+                              Chevron
+                              TestId="ledger-row"
+                              AriaLabel="@($"账本，{LedgerValue}")"
+                              aria-haspopup="menu"
+                              aria-expanded="@(_ledgerMenuOpen ? "true" : "false")"
+                              data-value="@(_ledgerId?.ToString())"
+                              data-missing="@(LedgerMissing ? "true" : "false")"
+                              OnClick="OpenLedgerMenu">
+                        <Badges>
+                            @if (SelectedLedger is { IsShared: true })
+                            {
+                                <span class="ft-badge ft-badge--brand" data-testid="ledger-shared-badge">共享</span>
+                            }
+                        </Badges>
+                    </ListCell>
+                </div>
+                <div class="ft-addbill__anchor" @ref="_channelAnchor">
+                    <ListCell Icon="mdi-credit-card-outline"
+                              Tone="green"
+                              Title="支付渠道"
+                              Value="@ChannelValue"
+                              Class="ft-addbill__field"
+                              Chevron
+                              TestId="channel-row"
+                              AriaLabel="@($"支付渠道，{ChannelValue}")"
+                              aria-haspopup="menu"
+                              aria-expanded="@(_channelMenuOpen ? "true" : "false")"
+                              data-value="@(_channelId == Guid.Empty ? null : _channelId.ToString())"
+                              OnClick="OpenChannelMenu" />
+                </div>
+                @* 时间：看到的是「今天 12:08」这样的文字，真正的输入是盖在整行上的透明 datetime-local——点按即唤起系统的日期时间选择器 *@
+                <ListCell Icon="mdi-clock-outline"
+                          Tone="orange"
+                          Title="时间"
+                          Value="@TimeLabel"
+                          Class="ft-addbill__field"
+                          Chevron
+                          TestId="time-row"
+                          data-value="@AddBillPresentation.ToInputValue(_time)">
+                    <Trailing>
+                        <input type="datetime-local"
+                               class="ft-addbill__picker"
+                               aria-label="账单时间"
+                               data-testid="addbill-time"
+                               value="@AddBillPresentation.ToInputValue(_time)"
+                               @onchange="OnTimeChanged" />
+                    </Trailing>
+                </ListCell>
+                @* 备注：行内输入。聚焦时系统键盘升起、自定义数字键盘让位（ui.js 把 Sheet 标成 data-typing）；回车 / 完成键收起键盘 *@
+                <ListCell Icon="mdi-text"
+                          Tone="gray"
+                          Title="备注"
+                          Class="ft-addbill__field ft-addbill__field--input"
+                          TestId="note-row"
+                          data-typing-row>
+                    <Trailing>
+                        <input type="text"
+                               class="ft-addbill__note"
+                               placeholder="添加备注"
+                               enterkeyhint="done"
+                               autocomplete="off"
+                               aria-label="备注"
+                               data-testid="addbill-note"
+                               data-keypad-hide
+                               data-enter-blur
+                               value="@_note"
+                               @onchange="OnNoteChanged" />
+                    </Trailing>
+                </ListCell>
+            </GroupedList>
+
+            @if (CanDelete)
+            {
+                @* 编辑模式：内容最底部的红字「删除账单」（iOS 表单惯例，远离右上角的关闭钮，不会误触；点按先弹确认 Alert）。
+                   账单读出来之前、在我只读的共享账本里（服务层同样拒绝）不显示；保存 / 删除进行中置灰 *@
+                <GroupedList Class="ft-addbill__danger" TestId="addbill-danger">
+                    <ListCell Title="删除账单"
+                              Destructive
+                              Disabled="@(_saving || _deleting)"
+                              TestId="addbill-delete"
+                              OnClick="AskDelete" />
+                </GroupedList>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <AmountKeypad OnKey="OnKeyAsync"
+                      OnSave="SaveAsync"
+                      SaveEnabled="@CanSave"
+                      Busy="_saving"
+                      SaveTestId="addbill-save" />
+    </Footer>
+</BottomSheet>
+
+<LedgerMenu @bind-Visible="_ledgerMenuOpen"
+            Anchor="_ledgerAnchor"
+            Ledgers="_ledgers"
+            SelectedId="_ledgerId"
+            OnSelect="SelectLedgerAsync"
+            OnCreate="OpenLedgerSheet" />
+
+<PopoverMenu @bind-Visible="_channelMenuOpen"
+             Anchor="_channelAnchor"
+             AriaLabel="选择支付渠道"
+             TestId="channel-menu">
+    @foreach (var channel in _channels)
+    {
+        var current = channel;
+        <PopoverMenuItem Label="@current.Name"
+                         Icon="@PaymentChannelPresentation.NormalizeIcon(current.Icon)"
+                         Selected="@(current.Id == _channelId)"
+                         Value="@current.Id.ToString()"
+                         TestId="channel-option"
+                         OnClick="() => SelectChannelAsync(current.Id)" />
+    }
+</PopoverMenu>
+
+<CategoryFormSheet @bind-Visible="_categorySheetOpen"
+                   UserId="_userId"
+                   Type="_type"
+                   OnSaved="OnCategoryCreatedAsync" />
+
+<LedgerFormSheet @bind-Visible="_ledgerSheetOpen"
+                 UserId="_userId"
+                 OnCreated="OnLedgerCreatedAsync" />
+
+<GlassAlert @bind-Visible="_discardOpen"
+            Title="@AddBillPresentation.DiscardTitle(IsEditing)"
+            Message="@AddBillPresentation.DiscardMessage(IsEditing)"
+            ConfirmText="放弃"
+            CancelText="继续编辑"
+            Destructive
+            OnConfirm="DiscardAsync" />
+
+@* 编辑模式的「删除」确认：措辞与账单页左滑删除一致（软删除，随同步传播） *@
+<GlassAlert @bind-Visible="_deleteOpen"
+            Title="@BillListPresentation.DeleteTitle"
+            Message="@_deleteMessage"
+            ConfirmText="删除"
+            Destructive
+            OnConfirm="DeleteConfirmedAsync"
+            TestId="addbill-delete-alert" />
+
+@* 语音覆盖层：说话期间盖住整个屏幕（比 Sheet / 弹出菜单高，比 Alert / Toast 低）；识别逻辑与状态都在 AddBillSheet.Voice.cs *@
+<VoiceOverlay Visible="@(_voicePhase != VoicePhase.Idle)"
+              Hold="_voiceHold"
+              Parsing="@(_voicePhase == VoicePhase.Parsing)"
+              Final="_voiceFinal"
+              Cancelling="_voiceCancelling"
+              Transcript="@_voiceTranscript"
+              Matches="_voiceMatches"
+              Chips="_voiceChips"
+              OnFinish="OnVoiceFinishAsync"
+              OnCancel="OnVoiceCancelAsync" />

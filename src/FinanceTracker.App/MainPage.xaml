@@ -4,7 +4,7 @@
              xmlns:blazor="clr-namespace:Microsoft.AspNetCore.Components.WebView.Maui;assembly=Microsoft.AspNetCore.Components.WebView.Maui"
              xmlns:web="clr-namespace:FinanceTracker.Web;assembly=FinanceTracker.Web"
              x:Class="FinanceTracker.App.MainPage"
-             BackgroundColor="White" SafeAreaEdges="Container">
+             BackgroundColor="#5C2EF7" SafeAreaEdges="None">
 
     <blazor:BlazorWebView x:Name="blazorWebView" HostPage="wwwroot/index.html">
         <blazor:BlazorWebView.RootComponents>

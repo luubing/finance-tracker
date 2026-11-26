@@ -1,390 +1,401 @@
 @page "/"
-@using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Web.Services
-@using Microsoft.Extensions.Logging
+@using Masa.Blazor.Presets.PageStack.NavController
 @implements IDisposable
 @inject IAuthService AuthService
 @inject IStatisticsService StatisticsService
 @inject IBillService BillService
+@inject ILedgerService LedgerService
+@inject IBudgetService BudgetService
+@inject FinanceTracker.Core.Interfaces.IPendingBillService PendingBillService
 @inject AuthenticationService AuthStateService
 @inject BillEventService BillEventService
-@inject FinanceTracker.Core.Interfaces.IPendingBillService PendingBillService
+@inject PageDataGate DataGate
+@inject BudgetAlertService BudgetAlertService
+@inject AddBillSheetService BillSheet
 @inject PageStackNavController NavController
 @inject NavigationManager Navigation
-@inject ILogger<Index> Logger
-@inject IBudgetService BudgetService
-@inject BudgetAlertService BudgetAlertService
 @inject IPopupService PopupService
+@inject ILogger<Index> Logger
 
-<PStackPageBar Title="记账本"
-               CenterTitle
-               Flat
-               Color="primary">
-    <ActionContent>
-        <MButton Icon Disabled="@(_isLoading || _isRefreshing)" OnClick="RefreshData">
-            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
-        </MButton>
-        <MButton Icon OnClick="NavigateToAddBill">
-            <MIcon Color="white">mdi-plus</MIcon>
-        </MButton>
-    </ActionContent>
-</PStackPageBar>
+@*
+    首页（设计稿 01 · 四个 Tab 根页面 / screens 01-home）：
+      Hero（品牌渐变铺到屏幕最顶端：标题、日期星期、带角标的通知入口、「本月支出」大数字、收入 / 结余小卡）
+      → 待确认横幅（有待确认账单时才出现）→ 本月预算（总预算 + 重点分类预算，三色进度）→ 最近账单（「全部」进入账单 Tab）。
+    没有「快捷操作」宫格：Tab 栏与「记一笔」圆钮已覆盖这些入口。
+    状态栏：Hero 声明 data-statusbar-bg="dark"（浅色图标），滚出屏幕后命中的是页面背景（深色图标），由 immersive.js 判定。
+    刷新：只有下拉手势（PullToRefresh，在 Hero 里），没有按钮形式的刷新入口（ADR 0007）；
+    只重读本页数据，不触发云端同步（同步只在「我的」里手动触发）。
+    数据口径沿用既有服务：月度统计（应用时区「本月」、区间左闭右开）、账单、预算概览——本页不新增查询。
+*@
 
-@if (_isLoading)
+@if (_isLoading || _userId != Guid.Empty)
 {
-    <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
-        <MProgressCircular Indeterminate Size="64" Color="primary" />
-    </MContainer>
-}
-else if (_user != null)
-{
-    <MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-        <!-- 财务概览卡片 -->
-        <MCard Class="mb-4" Color="primary" Dark>
-            <MCardText Class="pa-4">
-                <div class="text-h6 mb-2">本月概览</div>
-                <MRow>
-                    <MCol Cols="4">
-                        <div class="text-caption">收入</div>
-                        <div class="text-body-1">¥@_monthlyIncome.ToString("N2")</div>
-                    </MCol>
-                    <MCol Cols="4">
-                        <div class="text-caption">支出</div>
-                        <div class="text-body-1">¥@_monthlyExpense.ToString("N2")</div>
-                    </MCol>
-                    <MCol Cols="4">
-                        <div class="text-caption">结余</div>
-                        <div class="text-body-1">¥@_monthlyBalance.ToString("N2")</div>
-                    </MCol>
-                </MRow>
-            </MCardText>
-        </MCard>
+    @* data-ft-ready：首屏就绪标记，启动加载页（wwwroot/js/boot.js）据此交接——读完登录状态与首页数据才声明，骨架阶段不声明 *@
+    <div class="ft-tabpage ft-home" data-scroll-root data-testid="home-page" aria-busy="@(_isLoading ? "true" : null)" data-ft-ready="@(_isLoading ? null : "home")">
+        <header class="ft-hero" data-statusbar-bg="dark" data-testid="home-hero">
+            <PullToRefresh OnRefresh="PullRefreshAsync" TestId="home-ptr" />
 
-        <!-- 本月预算执行情况 -->
-        @if (_budgetStatuses.Any())
-        {
-            <MCard Class="mb-4">
-                <MCardTitle Class="pb-0">
-                    <MIcon Class="mr-2" Color="primary">mdi-wallet</MIcon>
-                    本月预算
-                    <MSpacer />
-                    <MButton Small Text Color="primary" OnClick="NavigateToBudgets">
-                        管理
-                    </MButton>
-                </MCardTitle>
-                <MCardText>
-                    @foreach (var status in _budgetStatuses.Take(3))
-                    {
-                        <div class="mb-2">
-                            <div class="d-flex justify-space-between text-body-2">
-                                <span>
-                                    @status.CategoryIcon @status.CategoryName
-                                    @if (status.LedgerName != null)
-                                    {
-                                        <span class="text--secondary">（@status.LedgerName）</span>
-                                    }
-                                </span>
-                                <span class="@(status.RemainingAmount < 0 ? "error--text" : null)">
-                                    剩余 ¥@status.RemainingAmount.ToString("N2")
-                                </span>
-                            </div>
-                            <MProgressLinear Value="@((double)Math.Min(status.UsagePercentage, 100m))"
-                                             Color="@GetBudgetProgressColor(status.UsagePercentage)"
-                                             Height="6"
-                                             Rounded
-                                             Class="mt-1" />
-                        </div>
-                    }
-                    @if (_budgetStatuses.Count > 3)
-                    {
-                        <div class="text-caption text--secondary">
-                            共 @_budgetStatuses.Count 项预算，点击"管理"查看全部
-                        </div>
-                    }
-                </MCardText>
-            </MCard>
-        }
+            <div class="ft-hero__bar">
+                <div class="ft-hero__titles">
+                    <h1 class="ft-hero__title" data-testid="home-title">记账本</h1>
+                    <p class="ft-hero__date" data-testid="home-date">@HomePresentation.DateLine(_nowLocal)</p>
+                </div>
+                <div class="ft-hero__actions">
+                    <button type="button"
+                            class="ft-hero__btn"
+                            aria-label="@HomePresentation.BellLabel(_pending.Count)"
+                            data-testid="home-bell"
+                            @onclick="OpenPending">
+                        <i class="mdi mdi-bell-outline" aria-hidden="true"></i>
+                        @if (_pending.Count > 0)
+                        {
+                            <span class="ft-hero__badge" data-testid="home-bell-badge" aria-hidden="true">@HomePresentation.BellBadge(_pending.Count)</span>
+                        }
+                    </button>
+                </div>
+            </div>
 
-        <!-- 快捷操作 -->
-        <MCard Class="mb-4">
-            <MCardTitle Class="pb-0">
-                <MIcon Class="mr-2" Color="primary">mdi-lightning-bolt</MIcon>
-                快捷操作
-            </MCardTitle>
-            <MCardText>
-                <MRow Dense>
-                    <MCol Cols="4">
-                        <MButton Block
-                                 Outlined
-                                 Class="py-1"
-                                 Style="height: unset !important;"
-                                 Color="primary"
-                                 OnClick="NavigateToAddBill">
-                            <div class="d-flex flex-column align-center">
-                                <MIcon Size="24">mdi-plus-circle</MIcon>
-                                <span class="text-caption">记一笔</span>
-                            </div>
-                        </MButton>
-                    </MCol>
-                    <MCol Cols="4">
-                        <MButton Block
-                                 Class="py-1"
-                                 Outlined
-                                 Color="primary"
-                                 Style="height: unset !important;"
-                                 OnClick="NavigateToBills">
-                            <div class="d-flex flex-column align-center">
-                                <MIcon Size="24">mdi-format-list-bulleted</MIcon>
-                                <span class="text-caption">账单</span>
-                            </div>
-                        </MButton>
-                    </MCol>
-                    <MCol Cols="4">
-                        <MButton Block
-                                 Class="py-1"
-                                 Outlined
-                                 Color="primary"
-                                 Style="height: unset !important;"
-                                 OnClick="NavigateToPendingBills">
-                            <div class="d-flex flex-column align-center">
-                                @if (_pendingCount > 0)
-                                {
-                                    <MBadge Content="@_pendingCount.ToString()" Color="error" OffsetY="4">
-                                        <MIcon Size="24">mdi-bell-check</MIcon>
-                                    </MBadge>
-                                }
-                                else
-                                {
-                                    <MIcon Size="24">mdi-bell-check</MIcon>
-                                }
-                                <span class="text-caption">待确认</span>
-                            </div>
-                        </MButton>
-                    </MCol>
-                </MRow>
-            </MCardText>
-        </MCard>
-
-        <!-- 最近账单 -->
-        <MCard Class="mb-4">
-            <MCardTitle Class="pb-0">
-                <MIcon Class="mr-2" Color="primary">mdi-clock-outline</MIcon>
-                最近账单
-                <MSpacer />
-                <MButton Small Color="primary" OnClick="NavigateToBills">
-                    查看全部
-                </MButton>
-            </MCardTitle>
-            <MCardText>
-                @if (_isLoadingBills)
+            <div class="ft-hero__metric">
+                <p class="ft-hero__label">本月支出</p>
+                @if (_isLoading)
                 {
-                    <div class="text-center py-4">
-                        <MProgressCircular Indeterminate Size="32" Color="primary" />
-                    </div>
-                }
-                else if (!_recentBills.Any())
-                {
-                    <div class="text-center text--secondary py-4">
-                        <MIcon Size="48" Color="grey lighten-1">mdi-receipt</MIcon>
-                        <div class="mt-2">暂无账单</div>
-                        <MButton Small Color="primary" Class="mt-2" OnClick="NavigateToAddBill">
-                            记一笔
-                        </MButton>
-                    </div>
+                    <span class="ft-skeleton ft-skeleton--hero-amount" aria-hidden="true"></span>
                 }
                 else
                 {
-                    <MList>
-                        @foreach (var bill in _recentBills)
-                        {
-                            <MListItem Class="px-0">
-                                <MListItemIcon Class="mr-2">
-                                    <MIcon Size="36" Color="@(bill.Type == "Expense" ? "error" : "success")">
-                                        @bill.CategoryIcon
-                                    </MIcon>
-                                </MListItemIcon>
-                                <MListItemContent>
-                                    <MListItemTitle>
-                                        @bill.CategoryName
-                                        @if (!string.IsNullOrEmpty(bill.Note))
-                                        {
-                                            <span class="text--secondary ml-2">- @bill.Note</span>
-                                        }
-                                    </MListItemTitle>
-                                    <MListItemSubtitle>
-                                        @bill.PaymentChannelName
-                                        <span class="ml-2">@bill.TransactionTime.ToString("MM-dd HH:mm")</span>
-                                    </MListItemSubtitle>
-                                </MListItemContent>
-                                <MListItemAction>
-                                    <span class="@(bill.Type == "Expense" ? "error--text" : "success--text") text-subtitle-1">
-                                        @(bill.Type == "Expense" ? "-" : "+")¥@bill.Amount.ToString("N2")
-                                    </span>
-                                </MListItemAction>
-                            </MListItem>
-                        }
-                    </MList>
+                    <AmountDisplay Amount="_monthlyExpense" Size="AmountSize.Xl" FitWidth="true" TestId="home-expense" />
                 }
-            </MCardText>
-        </MCard>
-    </MContainer>
+            </div>
+
+            <div class="ft-hero__cards">
+                <div class="ft-herocard" data-testid="home-income-card">
+                    <p class="ft-herocard__label"><i class="mdi mdi-arrow-down-circle-outline" aria-hidden="true"></i><span>收入</span></p>
+                    @if (_isLoading)
+                    {
+                        <span class="ft-skeleton ft-skeleton--hero-card" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <AmountDisplay Amount="_monthlyIncome" Size="AmountSize.Lg" FitWidth="true" TestId="home-income" />
+                    }
+                </div>
+                <div class="ft-herocard" data-testid="home-balance-card">
+                    <p class="ft-herocard__label"><i class="mdi mdi-scale-balance" aria-hidden="true"></i><span>结余</span></p>
+                    @if (_isLoading)
+                    {
+                        <span class="ft-skeleton ft-skeleton--hero-card" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <AmountDisplay Amount="_monthlyBalance" Size="AmountSize.Lg" FitWidth="true" TestId="home-balance" />
+                    }
+                </div>
+            </div>
+        </header>
+
+        <div class="ft-tabpage__body">
+            @if (_isLoading)
+            {
+                <GroupedList Class="ft-home__banner" TestId="home-skeleton">
+                    @for (var i = 0; i < 3; i++)
+                    {
+                        <div class="ft-skeleton-row" aria-hidden="true">
+                            <span class="ft-skeleton ft-skeleton--tile"></span>
+                            <span class="ft-skeleton-row__main">
+                                <span class="ft-skeleton ft-skeleton--title"></span>
+                                <span class="ft-skeleton ft-skeleton--sub"></span>
+                            </span>
+                        </div>
+                    }
+                </GroupedList>
+            }
+            else
+            {
+                @* 待确认横幅：有待确认账单时才出现，没有时不占位 *@
+                @if (_pending.Count > 0)
+                {
+                    <GroupedList Class="ft-home__banner" TestId="home-banner-group">
+                        <ListCell Icon="mdi-bell-check"
+                                  Tone="red"
+                                  Title="@HomePresentation.BannerTitle(_pending.Count)"
+                                  Subtitle="@HomePresentation.BannerSubtitle(_pending)"
+                                  Chevron
+                                  TestId="home-pending-banner"
+                                  OnClick="OpenPending" />
+                    </GroupedList>
+                }
+
+                @if (_guide == HomeGuide.CreateLedger)
+                {
+                    @* 新用户：没有账本也没有账单——账单必须记在某个账本里，先引导新建账本 *@
+                    <EmptyState Icon="mdi-book-outline" Title="还没有账本" Text="账单必须记在某个账本里，先新建一个吧" TestId="home-empty-ledger">
+                        <Action>
+                            <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-plus" TestId="home-create-ledger" OnClick="OpenCreateLedger">新建账本</GlassButton>
+                        </Action>
+                    </EmptyState>
+                }
+                else
+                {
+                    @if (_guide == HomeGuide.CreateLedgerHint)
+                    {
+                        @* 只有历史无账本的账单、没有账本：不挡住已有数据，只在上方给一行提示 *@
+                        <GroupedList Class="ft-home__banner" TestId="home-ledger-hint-group">
+                            <ListCell Icon="mdi-book-outline"
+                                      Tone="orange"
+                                      Title="还没有账本"
+                                      Subtitle="新记账单需要先建一个账本"
+                                      Chevron
+                                      TestId="home-ledger-hint"
+                                      OnClick="OpenCreateLedger" />
+                        </GroupedList>
+                    }
+
+                    @* 本月预算：总预算 + 重点分类预算；没有预算时给出创建引导 *@
+                    <SectionHeader Title="本月预算"
+                                   ActionText="管理"
+                                   ActionAriaLabel="管理预算"
+                                   OnAction="OpenBudgets"
+                                   TestId="home-budget-header"
+                                   ActionTestId="home-budget-manage" />
+                    @if (_budgetRows.Count > 0)
+                    {
+                        <GroupedList Footer="@_budgetFooter" TestId="home-budget-group">
+                            @foreach (var row in _budgetRows)
+                            {
+                                <BudgetRow Model="row" />
+                            }
+                        </GroupedList>
+                    }
+                    else
+                    {
+                        <GroupedList TestId="home-budget-group">
+                            <ListCell Icon="mdi-wallet"
+                                      Tone="purple"
+                                      Title="设置本月预算"
+                                      Subtitle="设定额度，快超支时提醒你"
+                                      Chevron
+                                      TestId="home-budget-guide"
+                                      OnClick="OpenBudgets" />
+                        </GroupedList>
+                    }
+
+                    @* 最近账单：「全部」切换到账单 Tab；点按账单行进入编辑页；有账本没账单时引导记第一笔 *@
+                    <SectionHeader Title="最近账单"
+                                   ActionText="全部"
+                                   ActionAriaLabel="查看全部账单"
+                                   OnAction="OpenAllBills"
+                                   TestId="home-recent-header"
+                                   ActionTestId="home-recent-all" />
+                    @if (_recentBills.Count > 0)
+                    {
+                        <GroupedList TestId="home-recent-group">
+                            @foreach (var row in _recentBills)
+                            {
+                                <BillRow Model="row" OnClick="OpenBill" />
+                            }
+                        </GroupedList>
+                    }
+                    else
+                    {
+                        <GroupedList TestId="home-recent-group">
+                            <EmptyState Icon="mdi-receipt" Title="还没有账单" Text="记下第一笔，这里会显示最近的账单" TestId="home-empty-bills">
+                                <Action>
+                                    <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-plus" TestId="home-first-bill" OnClick="OpenAddBill">记第一笔</GlassButton>
+                                </Action>
+                            </EmptyState>
+                        </GroupedList>
+                    }
+                }
+            }
+        </div>
+    </div>
+
+    @* 新建账本（与账本页共用同一个 Sheet）：保存后重新加载，引导状态随之从「新建账本」变为「记第一笔」 *@
+    <LedgerFormSheet @bind-Visible="_ledgerSheetVisible" UserId="_userId" OnSaved="ReloadAsync" />
 }
 
 @code {
-    private Core.Entities.User? _user;
+    private Guid _userId;
     private bool _isLoading = true;
+    private bool _disposed;
 
-    // 月度统计数据
+    // 应用时区的「现在」：Hero 的日期星期、账单行的「昨天」判断都用它（每次加载时更新）
+    private DateTime _nowLocal = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+    // 月度统计（应用时区的本月）
     private decimal _monthlyIncome;
     private decimal _monthlyExpense;
     private decimal _monthlyBalance;
 
-    // 最近账单
-    private List<BillModel> _recentBills = new();
-    private bool _isLoadingBills;
+    // 最近账单与引导所需的两个事实：用户自己有几个账本（-1 = 还没取到，不显示引导）、有没有任何账单
+    private IReadOnlyList<BillRowModel> _recentBills = [];
+    private int _ledgerCount = -1;
+    private HomeGuide _guide = HomeGuide.None;
 
-    // 待确认账单数量（通知栏/短信自动捕获，角标展示）
-    private int _pendingCount;
-
-    // 预算执行情况（本月）
+    // 预算：全部 / 展示的重点项 / 脚注；超支提示每个预算只弹一次
     private List<BudgetStatus> _budgetStatuses = new();
+    private IReadOnlyList<BudgetRowModel> _budgetRows = [];
+    private string? _budgetFooter;
+    private readonly HashSet<Guid> _alertedBudgetIds = new();
 
-    // 手动刷新状态
-    private bool _isRefreshing;
+    // 待确认账单（通知栏 / 短信自动捕获）：角标、横幅都读它
+    private IReadOnlyList<PendingBill> _pending = [];
+
+    // 新建账本 Sheet
+    private bool _ledgerSheetVisible;
 
     protected override void OnInitialized()
     {
         AuthStateService.AuthStateChanged += OnAuthStateChanged;
         BillEventService.BillChanged += OnBillChanged;
         PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
+        NavController.PageClosed += OnPageClosed;
     }
 
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后。
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await LoadUser();
+            await LoadUserAsync();
             StateHasChanged();
-        }
-    }
-
-    private async void OnAuthStateChanged()
-    {
-        try
-        {
-            await LoadUser();
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "认证状态变化后刷新用户信息失败");
-        }
-    }
-
-    private async void OnBillChanged()
-    {
-        try
-        {
-            if (_user != null)
-            {
-                await LoadBusinessDataAsync();
-                await InvokeAsync(StateHasChanged);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "账单变更后刷新首页数据失败");
         }
     }
 
     public void Dispose()
     {
+        _disposed = true;
         AuthStateService.AuthStateChanged -= OnAuthStateChanged;
         BillEventService.BillChanged -= OnBillChanged;
         PendingBillService.PendingBillsChanged -= OnPendingBillsChanged;
+        NavController.PageClosed -= OnPageClosed;
     }
 
-    private async void OnPendingBillsChanged(object? sender, EventArgs e)
+    // ------------------------------------------------------------------ 事件
+
+    private void OnAuthStateChanged() => _ = RunOnUiAsync(LoadUserAsync, "认证状态变化后刷新用户信息失败");
+
+    private void OnBillChanged() => _ = RunOnUiAsync(
+        async () =>
+        {
+            if (_userId != Guid.Empty)
+            {
+                await LoadBusinessDataAsync();
+            }
+        },
+        "账单变更后刷新首页数据失败");
+
+    // 单独刷新角标也要与其它页面的读库排队；LoadPendingAsync 本身不进闸门（整页加载时它已经在闸门里了，信号量不可重入）
+    private void OnPendingBillsChanged(object? sender, EventArgs e) => _ = RunOnUiAsync(() => DataGate.RunAsync(LoadPendingAsync), "待确认账单变更后刷新角标失败");
+
+    private void OnPageClosed(object? sender, PageStackPageClosedEventArgs e)
     {
-        try
-        {
-            _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception)
-        {
-            // 电路可能已关闭，忽略刷新失败
-        }
+        // 二级页面关闭后重新加载（预算、账本、待确认账单、导入……都可能改了首页展示的数据）。
+        // 记一笔 / 编辑账单是布局级的 Sheet，不经过页面栈；它保存时已经通过 BillChanged 刷新
+        _ = RunOnUiAsync(
+            async () =>
+            {
+                if (_userId != Guid.Empty)
+                {
+                    await LoadBusinessDataAsync();
+                }
+            },
+            "二级页面关闭后刷新首页数据失败");
     }
 
     /// <summary>
-    /// 手动刷新首页数据（月度统计 + 最近账单 + 待确认账单数量）
+    /// 在渲染线程上执行并重绘；失败只记日志（电路可能已关闭），不能把异常抛到事件源
     /// </summary>
-    private async Task RefreshData()
+    private async Task RunOnUiAsync(Func<Task> work, string failureMessage)
     {
-        if (_isRefreshing)
+        if (_disposed)
         {
             return;
         }
 
-        _isRefreshing = true;
-        StateHasChanged();
-
         try
         {
-            if (_user == null)
+            await InvokeAsync(async () =>
             {
-                await LoadUser();
-            }
+                if (_disposed)
+                {
+                    return;
+                }
 
-            if (_user != null)
+                await work();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Message}", failureMessage);
+        }
+    }
+
+    // ------------------------------------------------------------------ 刷新
+
+    /// <summary>下拉刷新（唯一的刷新入口）：转圈由 PullToRefresh 负责，这里只重新加载本页数据</summary>
+    private async Task PullRefreshAsync() => await ReloadAsync();
+
+    /// <summary>
+    /// 重新加载本页数据（月度统计 + 最近账单 + 预算 + 账本数 + 待确认账单）。只读本地库，不联网、不同步
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            if (_userId == Guid.Empty)
+            {
+                await LoadUserAsync();
+            }
+            else
             {
                 await LoadBusinessDataAsync();
-
-                _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
             }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "手动刷新首页数据失败");
-        }
-        finally
-        {
-            _isRefreshing = false;
-            StateHasChanged();
+            Logger.LogWarning(ex, "刷新首页数据失败");
         }
     }
 
-    private async Task LoadUser()
+    // ------------------------------------------------------------------ 加载
+
+    private async Task LoadUserAsync()
     {
         try
         {
             var userId = await AuthStateService.GetUserIdAsync();
 
-            if (userId.HasValue)
-            {
-                _user = await AuthService.GetUserByIdAsync(userId.Value);
-            }
+            // 读用户也是读库（与「我的」页一致，经 PageDataGate 与其它 Tab 根页面排队）；只包这一次读取，后面的 LoadBusinessDataAsync 自己进闸门，不能嵌套
+            var user = userId.HasValue ? await DataGate.RunAsync(() => AuthService.GetUserByIdAsync(userId.Value)) : null;
 
             // 未登录则重定向到登录页
-            if (_user == null)
+            if (user is null)
             {
+                _userId = Guid.Empty;
                 Navigation.Replace("/login");
                 return;
             }
 
-            // 加载业务数据
-            await LoadBusinessDataAsync();
+            if (user.Id != _userId)
+            {
+                // 换了账号（退出后用别的手机号登录）：先清掉上一个用户的数据并回到骨架，不让旧数据闪一下
+                ResetData();
+                _userId = user.Id;
+                _isLoading = true;
+                await InvokeAsync(StateHasChanged);
+            }
 
-            // 加载待确认账单数量（角标）
-            _pendingCount = (await PendingBillService.GetPendingBillsAsync()).Count;
+            await LoadBusinessDataAsync();
         }
         catch (UnauthorizedAccessException ex)
         {
             // 仅「认证失败」才需要重新登录（与 401 语义一致）
             Logger.LogWarning(ex, "登录状态失效，将重定向到登录页面");
+            _userId = Guid.Empty;
             Navigation.Replace("/login");
-            return;
         }
         catch (Exception ex)
         {
@@ -399,35 +410,42 @@ else if (_user != null)
         }
     }
 
-    // 首页三块数据（月度统计、最近账单、预算进度）读的是同一个 DbContext：
-    // MAUI Blazor Hybrid 里 Scoped 等同于应用级单例，Blazor Server 里则是同一条电路。
-    // EF Core 不允许同一个上下文并行执行查询（"A second operation was started on this context"），
-    // 而三个 Load* 方法各自吞掉异常，并发冲突只会悄悄记成 Warning、让首页某一块偶发空白。
-    // 所以必须顺序执行；闸门则避免"下拉刷新"与"账单变更事件"这两条入口同时重入。
-    private readonly SemaphoreSlim _loadGate = new(1, 1);
-
-    private async Task LoadBusinessDataAsync()
+    private void ResetData()
     {
-        await _loadGate.WaitAsync();
-        try
-        {
-            await LoadMonthlyStatistics();
-            await LoadRecentBills();
-            await LoadBudgetStatus();
-        }
-        finally
-        {
-            _loadGate.Release();
-        }
+        _monthlyIncome = _monthlyExpense = _monthlyBalance = 0;
+        _recentBills = [];
+        _ledgerCount = -1;
+        _guide = HomeGuide.None;
+        _budgetStatuses = new List<BudgetStatus>();
+        _budgetRows = [];
+        _budgetFooter = null;
+        _alertedBudgetIds.Clear();
+        _pending = [];
     }
 
-    private async Task LoadMonthlyStatistics()
+    // 首页几块数据读的是同一个 DbContext：MAUI Blazor Hybrid 里 Scoped 等同于应用级单例，Blazor Server 里是同一条电路。
+    // EF Core 不允许同一个上下文并行执行查询（"A second operation was started on this context"），
+    // 所以首页自己的几块要顺序读；而 Tab 根页面常驻、一次账单变更会让首页 / 账单页 / 统计页同时重新加载，
+    // 所以整个加载还要经过 PageDataGate 与其它页面排队（同时也避免「下拉刷新」「账单变更事件」「二级页面关闭」几条入口重入）。
+    private Task LoadBusinessDataAsync() => DataGate.RunAsync(async () =>
+    {
+        _nowLocal = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+        await LoadMonthlyStatisticsAsync();
+        var hasBills = await LoadRecentBillsAsync();
+        await LoadBudgetStatusAsync();
+        await LoadLedgerCountAsync();
+        await LoadPendingAsync();
+
+        _guide = _ledgerCount < 0 ? HomeGuide.None : HomePresentation.ResolveGuide(_ledgerCount, hasBills);
+    });
+
+    private async Task LoadMonthlyStatisticsAsync()
     {
         try
         {
-            var now = DateTime.Now;
-            var statistics = await StatisticsService.GetMonthlyStatisticsAsync(
-                _user!.Id, now.Year, now.Month);
+            // 「本月」按应用时区；统计服务内部区间左闭右开，口径与统计页一致
+            var statistics = await StatisticsService.GetMonthlyStatisticsAsync(_userId, _nowLocal.Year, _nowLocal.Month);
 
             _monthlyIncome = statistics.TotalIncome;
             _monthlyExpense = statistics.TotalExpense;
@@ -439,81 +457,52 @@ else if (_user != null)
         }
     }
 
-    private async Task LoadRecentBills()
+    /// <returns>是否有任何账单（取不到时按「有」处理，不误显示空状态引导）</returns>
+    private async Task<bool> LoadRecentBillsAsync()
     {
-        _isLoadingBills = true;
         try
         {
-            var bills = await BillService.GetBillsAsync(
-                _user!.Id,
-                page: 1,
-                pageSize: 5);
+            var bills = await BillService.GetBillsAsync(_userId, page: 1, pageSize: HomePresentation.RecentBillCount);
 
-            _recentBills = bills.Select(b => new BillModel
-            {
-                Id = b.Id,
-                Amount = b.Amount,
-                Type = b.Type.ToString(),
-                CategoryName = b.Category?.Name ?? "未知分类",
-                CategoryIcon = b.Category?.Icon ?? "mdi-tag",
-                PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
-                PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
-                // 库里是 UTC：首页最近账单展示应用时区的墙上时间
-                TransactionTime = AppTimeZone.ToLocal(b.TransactionTime),
-                Note = b.Note
-            }).ToList();
+            // 库里是 UTC：账单行展示应用时区的墙上时间；历史无账本的账单标注「未归属账本」
+            _recentBills = bills.Select(b => BillPresentation.ToRow(b, _nowLocal, includeDate: true)).ToList();
+            return bills.Count > 0;
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "加载最近账单失败");
-        }
-        finally
-        {
-            _isLoadingBills = false;
+            return true;
         }
     }
 
-    private void NavigateToAddBill()
-    {
-        NavController.Push("/add-bill");
-    }
-
-    private void NavigateToBills()
-    {
-        NavController.Push("/bills");
-    }
-
-    private void NavigateToPendingBills()
-    {
-        NavController.Push("/pending-bills");
-    }
-
-    private void NavigateToStatistics()
-    {
-        NavController.Push("/statistics");
-    }
-
-    private void NavigateToBudgets()
-    {
-        NavController.Push("/budgets");
-    }
-
-    private async Task LoadBudgetStatus()
+    private async Task LoadBudgetStatusAsync()
     {
         try
         {
-            var now = DateTime.Now;
-            // 概览口径：有"全部账本"预算就展示它们；只设了账本级预算时回退展示账本级预算（P14）
-            _budgetStatuses = await BudgetService.GetOverviewBudgetStatusAsync(_user!.Id, now.Year, now.Month);
+            // 概览口径：有「全部账本」预算就展示它们；只设了账本级预算时回退展示账本级预算
+            var statuses = await BudgetService.GetOverviewBudgetStatusAsync(_userId, _nowLocal.Year, _nowLocal.Month);
+            var highlights = HomePresentation.PickBudgetHighlights(statuses);
+
+            _budgetStatuses = statuses;
+            _budgetRows = highlights.Select(BudgetPresentation.ToRow).ToList();
+            _budgetFooter = HomePresentation.BudgetFooter(statuses.Count, highlights.Count);
 
             // 超支时发送本地通知（每日最多一次）
-            await BudgetAlertService.NotifyIfExceededAsync(_budgetStatuses, now.Year, now.Month);
+            await BudgetAlertService.NotifyIfExceededAsync(statuses, _nowLocal.Year, _nowLocal.Month);
 
-            // 应用内超支提示
-            var exceeded = _budgetStatuses.Where(s => s.UsagePercentage >= 100).ToList();
-            if (exceeded.Any())
+            // 应用内超支提示：同一个预算只提示一次（下拉刷新、账单变更都会重新加载，不能每次都弹）
+            var newlyExceeded = new List<BudgetStatus>();
+            foreach (var status in statuses)
             {
-                var names = string.Join("、", exceeded.Select(s => s.DisplayName));
+                if (status.UsagePercentage >= BudgetPresentation.OverPercent && _alertedBudgetIds.Add(status.BudgetId))
+                {
+                    newlyExceeded.Add(status);
+                }
+            }
+
+            if (newlyExceeded.Count > 0)
+            {
+                var names = string.Join("、", newlyExceeded.Select(s => s.DisplayName));
                 await PopupService.EnqueueSnackbarAsync($"预算超支提醒：{names} 本月预算已超支", AlertTypes.Error);
             }
         }
@@ -523,29 +512,44 @@ else if (_user != null)
         }
     }
 
-    /// <summary>
-    /// 预算进度条颜色：≥100% 红色超支，≥80% 黄色预警，其余主题色
-    /// </summary>
-    private string GetBudgetProgressColor(decimal usagePercentage)
+    private async Task LoadLedgerCountAsync()
     {
-        return usagePercentage switch
+        try
         {
-            >= 100 => "error",
-            >= 80 => "warning",
-            _ => "primary"
-        };
+            // 只数用户自己的账本（引导的是「先创建账本」）；只加入了共享账本的用户也会看到引导——已知局限，见 ticket 07 实现说明
+            _ledgerCount = (await LedgerService.GetLedgersAsync(_userId)).Count;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载账本数量失败");
+        }
     }
 
-    private class BillModel
+    private async Task LoadPendingAsync()
     {
-        public Guid Id { get; set; }
-        public decimal Amount { get; set; }
-        public string Type { get; set; } = string.Empty;
-        public string CategoryName { get; set; } = string.Empty;
-        public string CategoryIcon { get; set; } = string.Empty;
-        public string PaymentChannelName { get; set; } = string.Empty;
-        public string PaymentChannelIcon { get; set; } = string.Empty;
-        public DateTime TransactionTime { get; set; }
-        public string? Note { get; set; }
+        try
+        {
+            _pending = await PendingBillService.GetPendingBillsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载待确认账单失败");
+        }
     }
+
+    // ------------------------------------------------------------------ 导航
+
+    private void OpenAddBill() => BillSheet.Open();
+
+    // 点最近账单 = 编辑那一笔：与账单 Tab 共用「记一笔」Sheet 的编辑模式
+    private void OpenBill(Guid billId) => BillSheet.OpenEdit(billId);
+
+    private void OpenPending() => NavController.Push("/pending-bills");
+
+    private void OpenBudgets() => NavController.Push("/budgets");
+
+    // 账单是 Tab 根页面：切换到「账单」Tab，不能把 Tab 根页面压栈成二级页面
+    private void OpenAllBills() => Navigation.NavigateTo("/bills");
+
+    private void OpenCreateLedger() => _ledgerSheetVisible = true;
 }

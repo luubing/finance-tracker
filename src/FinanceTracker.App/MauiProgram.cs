@@ -3,6 +3,7 @@ using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
 using FinanceTracker.Infrastructure.Services;
+using FinanceTracker.Web.Design;
 using FinanceTracker.Web.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -42,22 +43,13 @@ public static class MauiProgram
         // 配置 Blazor WebView
         builder.Services.AddMauiBlazorWebView();
 
-        // 配置 MASA Blazor
-        builder.Services.AddMasaBlazor(options =>
-        {
-            // 配置全局选项
-            options.Defaults = new Dictionary<string, IDictionary<string, object?>?>()
-            {
-                { nameof(PStackPageBar), new Dictionary<string, object?>()
-                    {
-                        { nameof(PStackPageBar.Height), 44 }
-                    }
-                }
-            };
-        }).AddMobileComponents();
+        // 配置 MASA Blazor（全局默认值与主题色统一在 UseFinanceTrackerDesign，Web.Server 宿主调用同一个方法；主题 primary 与设计令牌品牌色同步）
+        builder.Services.AddMasaBlazor(options => options.UseFinanceTrackerDesign()).AddMobileComponents();
 
         // 配置 Serilog 日志（仅记录错误级别）
-        var logPath = Path.Combine(FileSystem.AppDataDirectory, "Logs", "app-.log");
+        // 日志目录同时交给「错误日志」页的 LogViewerService 读（见下方注册）：写与读必须是同一个目录
+        var logDirectory = Path.Combine(FileSystem.AppDataDirectory, "Logs");
+        var logPath = Path.Combine(logDirectory, "app-.log");
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Error()  // 仅记录 Error 及以上级别（Error、Fatal）
             .Enrich.WithProperty("App", "FinanceTracker")
@@ -150,15 +142,57 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISpeechService, NoOpSpeechService>();
 #endif
 
+        // 沉浸式：安全区测量与状态栏图标风格（Android / iOS 原生实现，其他平台空实现）
+        // Android 的安全区服务需要在 MainActivity 创建后绑定窗口（见 MainActivity.OnCreate），因此同时以具体类型注册
+#if ANDROID
+        builder.Services.AddSingleton<FinanceTracker.App.Platforms.Android.Services.SafeAreaService>();
+        builder.Services.AddSingleton<ISafeAreaService>(sp =>
+            sp.GetRequiredService<FinanceTracker.App.Platforms.Android.Services.SafeAreaService>());
+        builder.Services.AddSingleton<IStatusBarService, FinanceTracker.App.Platforms.Android.Services.StatusBarService>();
+#elif IOS
+        builder.Services.AddSingleton<ISafeAreaService, FinanceTracker.App.Platforms.iOS.Services.SafeAreaService>();
+        builder.Services.AddSingleton<IStatusBarService, FinanceTracker.App.Platforms.iOS.Services.StatusBarService>();
+#else
+        builder.Services.AddSingleton<ISafeAreaService, NoOpSafeAreaService>();
+        builder.Services.AddSingleton<IStatusBarService, NoOpStatusBarService>();
+#endif
+
+        // 渲染档位：是否把毛玻璃降级为不透明实色（Android 低端设备判定 / iOS 系统「降低透明度」），其他平台空实现；
+        // UiRuntime 读它写 <html data-ft-solid>（见 IRenderingProfileService）
+#if ANDROID
+        builder.Services.AddSingleton<IRenderingProfileService, FinanceTracker.App.Platforms.Android.Services.RenderingProfileService>();
+#elif IOS
+        builder.Services.AddSingleton<IRenderingProfileService, FinanceTracker.App.Platforms.iOS.Services.RenderingProfileService>();
+#else
+        builder.Services.AddSingleton<IRenderingProfileService, NoOpRenderingProfileService>();
+#endif
+
+        // 触感反馈：点按 Tab 等选中操作的轻触反馈（iOS 轻触 / Android 时钟刻度），其他平台空实现
+#if ANDROID
+        builder.Services.AddSingleton<IHapticFeedbackService, FinanceTracker.App.Platforms.Android.Services.HapticFeedbackService>();
+#elif IOS
+        builder.Services.AddSingleton<IHapticFeedbackService, FinanceTracker.App.Platforms.iOS.Services.HapticFeedbackService>();
+#else
+        builder.Services.AddSingleton<IHapticFeedbackService, NoOpHapticFeedbackService>();
+#endif
+
         // 注册应用服务
         builder.Services.AddScoped<AuthenticationService>();
         builder.Services.AddScoped<BillEventService>();
+        // 页面读库的单车道：Tab 根页面常驻，一次账单变更会让多个页面同时重新加载，它们共用同一个 DbContext，必须串行（见 PageDataGate）
+        builder.Services.AddScoped<PageDataGate>();
+        // 「记一笔」Sheet 的开关：Tab 栏的 ＋、首页 / 账单页的入口调用它，布局里常驻的 AddBillSheet 订阅它（见 AddBillSheetService）
+        builder.Services.AddScoped<AddBillSheetService>();
+        // 「请统计 Tab 落在某个分段」的一次性请求：旧地址 /trend、/annual-report 的跳转页登记，统计页取走（见 StatisticsSegmentRequest）
+        builder.Services.AddScoped<StatisticsSegmentRequest>();
         builder.Services.AddScoped<BudgetAlertService>();
         builder.Services.AddScoped<HttpService>();
         // 云端可用性的短期记忆（单例）：云端连不上时，页面加载顺带的成员缓存刷新只等 3 秒，
         // 失败后 30 秒内直接读本地缓存，不再每次都白等连接超时
         builder.Services.AddSingleton(new CloudAvailability());
-        builder.Services.AddScoped<ILogViewerService, LogViewerService>();
+        // 错误日志页读 Serilog 写文件的同一个目录（LogViewerService 在不引用 MAUI 的类库里，自己算不出 FileSystem.AppDataDirectory）
+        builder.Services.AddScoped<ILogViewerService>(sp =>
+            new LogViewerService(sp.GetRequiredService<ILogger<LogViewerService>>(), logDirectory));
         // 语音记账：文本解析（中文口语 → 账单草稿）+ 语音录入桥接服务
         // （App 端 SpeechService 注册进 BillVoiceInputService 后走原生识别，见 ISpeechService 注册）
         builder.Services.AddScoped<IBillVoiceParser, BillVoiceParser>();

@@ -25,6 +25,13 @@ dotnet run --project server/FinanceTracker.Web.Server
 # 还原依赖
 dotnet restore
 
+# 单元测试（真实 SQLite + 迁移，无需数据库服务）
+dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj
+
+# E2E（Playwright，手机视口；先用脚本启动 Web.Server :5999，详见 tests/e2e/README.md）
+powershell -File tests/e2e/server.ps1 -Action start
+python tests/e2e/run_all.py
+
 # EF Core 数据库迁移 (在 server 目录下)
 dotnet ef migrations add <MigrationName> --project ../src/FinanceTracker.Infrastructure
 dotnet ef database update --project ../src/FinanceTracker.Infrastructure
@@ -33,7 +40,7 @@ dotnet ef database update --project ../src/FinanceTracker.Infrastructure
 ## 技术栈
 
 - **目标框架**: .NET 10.0
-- **移动端**: .NET MAUI Blazor (Android/iOS) + MASA Blazor UI 组件库
+- **移动端**: .NET MAUI Blazor (Android/iOS) + MASA Blazor（基础组件与页面栈）；视觉是 iOS 风格设计系统（设计令牌 + 复用组件，见 docs/adr/0007-ios-visual-system.md）
 - **后端**: ASP.NET Core Web API
 - **ORM**: Entity Framework Core + Npgsql (PostgreSQL)
 - **本地数据库**: SQLite
@@ -75,7 +82,7 @@ server/
 - **Bill (账单)**: 金额、类型(支出/收入)、分类、支付渠道、账本、交易时间、数据来源、同步状态
 - **Category (分类)**: 预设分类(UserId=null) + 用户自定义分类，区分支出/收入类型
 - **PaymentChannel (支付渠道)**: 预设渠道 + 用户自定义渠道
-- **Ledger (账本)**: 用户自建账本（无预设），账单通过 LedgerId 归属到账本（可空，null 表示未归属账本）
+- **Ledger (账本)**: 用户自建账本（无预设，不自动创建默认账本），账单通过 LedgerId 归属到账本。**新建/编辑账单时账本必填**（`BillService` 统一校验，界面各录入入口、账单 REST 接口、导入接口都会先拦截）；`Bill.LedgerId` 在实体/数据库/同步 DTO 中仍保持可空，只为兼容历史账单——历史上没有账本的账单照常展示与同步，统计里归入「未归属账本」，可通过编辑或账单列表的批量「归属账本」补上
 - **User (用户)**: 手机号作为唯一标识
 
 所有实体使用 `IsDeleted` 字段实现软删除，使用 `Guid` 作为主键。
@@ -91,9 +98,11 @@ server/
 7. **错误码语义分离**: 401（认证失败，客户端触发重新登录）与 403（已认证但无权操作，ForbiddenAccessException）严格区分——服务层权限错误必须抛 ForbiddenAccessException，绝不能抛 UnauthorizedAccessException（否则客户端会误判为登录过期而登出）；控制器中禁止使用 Forbid(string)（参数是认证方案名而非消息，误用会导致 500），统一用 StatusCode(StatusCodes.Status403Forbidden, new { message })
 8. **时间口径**: 账单时间（Bill.TransactionTime）在数据库和同步 DTO 中一律是 UTC；用户看到/输入的时间、"某天/某月/某年"边界、预算月份一律按应用时区（默认=运行环境本地时区）。两种口径之间只经 `FinanceTracker.Core.Time.AppTimeZone` 换算，业务代码禁止直接调用 `ToUniversalTime()` / `ToLocalTime()`（EF 从 SQLite 读出的 DateTime 其 Kind 为 Unspecified，极易二次换算）；统计区间统一左闭右开；导入接口由客户端上报 `UtcOffsetMinutes`；详见 docs/adr/0005-time-zone-handling.md
 9. **同步身份与时间戳**: 本地库与云端库各自生成用户 Id（同一账号在云端是 C，在各设备上分别是 LA/LB），`SyncService` 在同步边界把云端返回的"我"映射回本地用户 Id，历史上误挂在云端 Id 名下的数据每次同步幂等归还；同步代码在 `SyncTimestampScope` 内保存，不自动盖 `UpdatedAt`（标记同步状态不算编辑），采用云端版本时沿用云端的 `UpdatedAt`；服务端推送账本时所有者以 JWT 为准，不信任 DTO 的 `OwnerId`；云端令牌必须属于当前登录手机号（换号即作废，复用前核对令牌里的手机号）；服务端处理客户端推送时不得创建全局预设（`allowCreatePreset=false`）；成员关系的本地合并只走 `ISyncService.MergeLedgerMembersAsync`；读路径（页面加载顺带联网刷新账本成员缓存）不得被不可用的云端拖住——只给 `CloudAvailability` 的短期限（3 秒，真正取消请求），失败后 30 秒内直接读本地缓存，用户主动操作后的刷新不受此限；详见 docs/adr/0006-sync-identity-and-timestamps.md
+10. **视觉体系（iOS 风格、仅浅色）**: 样式的唯一来源是 `src/FinanceTracker.Web/wwwroot/css/tokens.css` 的 `--ft-*` 令牌（C# 侧给图表用的同值常量只放在 `Design/DesignTokens.cs`），页面只用 `Components/Ui` 的复用组件 + 令牌——Razor 里不写静态内联样式、不写死颜色，除白名单（`MApp` / `MErrorHandler` / `PPageStack` / `PStackPageBar` / `MECharts`）外不用 MASA 控件（`VisualSystemGuardTests` 扫描源码拦截）。应用壳是四个一级 Tab（首页 / 账单 / 统计 / 我的）+ 独立的「记一笔」圆钮：**切换 Tab 只用 `NavigationManager.NavigateTo(根路径)`，不得对 Tab 根路径 `Push`**；四个 Tab 的刷新只靠下拉（`PullToRefresh`，只重读本页数据、不联网同步），导航栏 / Hero 里不放刷新按钮（用户拍板，新增页面也不要补）；二级页面用 `SecondaryPage`，弹层（Sheet / Alert / ActionSheet）走 `OverlayBase`；每屏同时叠加的玻璃（`backdrop-filter`）≤ 3 层，玻璃只取 `--ft-glass-*` 令牌（「降低透明度」「低端设备」「不支持 backdrop-filter」三条降级路径共用一组不透明令牌）；金额统一经 `AmountDisplay`；安全区只读 `--ft-safe-*` 变量、不直接用 `env()`；原生能力（安全区 / 状态栏 / 触感 / 渲染降级）经 Web 层接口抽象，由 MAUI 宿主实现、Web.Server 提供空实现。UI 重构只改展示——不改实体 / 迁移 / REST / 同步 / 权限 / 时区 / 预算规则 / 导入解析；详见 docs/adr/0007-ios-visual-system.md
 
 ## 开发注意事项
 
 - MAUI Blazor 项目需要 Android/iOS 目标框架，Windows 上主要用 Android 模拟器调试
 - FinanceTracker.Web 是共享组件库，同时被 MAUI App 和 Blazor Server 引用
+- UI 的自动化验收只覆盖网页层：`tests/e2e` 的 Playwright 脚本用手机视口（390×844、触摸）访问 Web.Server；改 Razor / C# 后要重启 Web.Server 才生效（`wwwroot` 下的 CSS / JS 是实时的），跑 E2E 期间不要重启服务或同时跑别的会改本地库的脚本。玻璃的真实渲染、手势手感、状态栏图标、真机字体放大等只能在真机 / 模拟器人工验收
 - 预设分类和支付渠道在 IMPLEMENTATION-PLAN.md 中有完整列表

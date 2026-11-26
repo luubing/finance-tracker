@@ -1,8 +1,5 @@
 @page "/pending-bills"
-@using FinanceTracker.Core.Entities
-@using FinanceTracker.Core.Enums
-@using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Web.Services
+@using FinanceTracker.Web.Components.PendingBills
 @implements IDisposable
 @inject IPendingBillService PendingBillService
 @inject INotificationListenerPermissionService NotificationPermissionService
@@ -10,170 +7,289 @@
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject IBillService BillService
-@inject AuthenticationService AuthService
+@inject ILedgerService LedgerService
+@inject IUserDefaultService UserDefaultService
+@inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
+@inject BillEventService BillEvents
+@inject PageStackNavController NavController
 @inject IPopupService PopupService
+@inject ILogger<PendingBills> Logger
 
-<PStackPageBar Title="待确认账单"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    待确认账单页（二级页面模板，设计稿 screens/10-pending）：
+      · 顶部「自动识别」状态：通知栏识别、短信识别都开启时是一条绿色细状态条（右侧「设置」）；有一项没开是两行权限卡（各带「去开启」）
+      · 「N 笔待确认」+「确认前不计入统计」，下面是一张张卡片：来源行（支付渠道 · 通知栏 / 短信识别 + 时间）→ 分类色块 + 分类 / 备注 + 金额
+        → 账本芯片 +「忽略」+「确认入账」；右上角「全部忽略」（Alert 确认）
+      · 「确认入账」一键入账：金额、类型、数据来源、交易时间、备注沿用待确认项，分类取该类型下的「其他…」，支付渠道按名称匹配，账本是卡片上的账本芯片
+        （默认账本，点它可换；没有账本时点「确认入账」会弹出账本菜单，里面有「新建账本…」，行内建好）。
+      · 要修正（金额 / 类型 / 支付渠道 / 账本）就点卡片主行，在「确认账单」Sheet 里改完再「入账」；支付渠道没匹配到时点「确认入账」也会打开这个 Sheet 让用户选。
+    入账规则（待确认项怎么变成正式账单）在 Models/PendingBillConversion，展示规则在 Models/PendingBillPresentation，都有单元测试。
+    账单经 BillService 创建（账本必填、时间经 AppTimeZone 换成 UTC 都由服务层把关）；创建成功后通知其他页面刷新（BillEventService），
+    再从待确认列表移除；移除失败时账单已经有了，所以不报「创建失败」，而是告诉用户这条请点「忽略」，避免重复入账。
+    读写共享 DbContext 的部分经过 PageDataGate（常驻 Tab 页与它共用一个 DbContext）；待确认项自己用独立的 DbContext，不占队列。
+    后台捕获到新支付时（PendingBillsChanged）列表实时刷新。
+    观察属性（E2E）：pending-page、pending-content（data-state = loading｜error｜empty｜ready，data-count）、pending-count、pending-list、
+      pending-card 系列（见 PendingBillCard）、pending-ignore-all、pending-ignore-all-alert、pending-ledger-menu、capture-* 系列（见 AutoCaptureStatus）、
+      confirm-* 系列（见 PendingConfirmSheet）、pending-empty、pending-error / pending-retry。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    @if (!_notificationPermission)
-    {
-        <MAlert Type="AlertTypes.Info" Dense Class="mb-2">
-            开启"通知使用权"后，微信/支付宝的支付通知会自动填入待确认账单
-            <MButton Color="primary" Small Class="ml-2" OnClick="OpenNotificationSettings">
-                去开启
-            </MButton>
-        </MAlert>
-    }
-    @if (!_smsPermission)
-    {
-        <MAlert Type="AlertTypes.Info" Dense Class="mb-2">
-            授予短信权限后，银行扣款短信会自动填入待确认账单
-            <MButton Color="primary" Small Class="ml-2" OnClick="RequestSmsPermission">
-                去授权
-            </MButton>
-        </MAlert>
-    }
-
-    @if (_pendingBills.Count == 0)
-    {
-        <MCard>
-            <MCardText Class="text-center py-8">
-                <MIcon Size="48" Color="grey lighten-1">mdi-bell-check</MIcon>
-                <div class="mt-2 text--secondary">暂无待确认账单</div>
-                <div class="text-caption text--secondary mt-1">
-                    支付后，微信/支付宝通知与银行扣款短信会自动出现在这里
-                </div>
-            </MCardText>
-        </MCard>
-    }
-    else
-    {
-        <div class="d-flex justify-end mb-2">
-            <MButton Small Text Color="error" OnClick="ClearAll">
-                全部忽略
-            </MButton>
-        </div>
-
-        @foreach (var bill in _pendingBills)
+<SecondaryPage Title="@PendingBillPresentation.Title" TestId="pending-page">
+    <Actions>
+        @if (!_isLoading && _cards.Count > 0)
         {
-            <MCard Outlined Class="mb-2">
-                <MCardText Class="d-flex align-center pa-3">
-                    <MIcon Size="36"
-                           Color="@(bill.Type == BillType.Expense ? "error" : "success")"
-                           Class="mr-3">
-                        @(bill.Type == BillType.Income ? "mdi-arrow-down-circle" : "mdi-arrow-up-circle")
-                    </MIcon>
-                    <div class="flex-grow-1 min-width-0">
-                        <div class="text-subtitle-1">
-                            @(bill.Type == BillType.Expense ? "支出" : "收入") ¥@bill.Amount.ToString("N2")
-                        </div>
-                        <div class="text-caption text--secondary">
-                            @bill.Channel | @bill.TransactionTime.ToString("MM-dd HH:mm")
-                            <MIcon Size="14">@(bill.Source == BillSource.Notification ? "mdi-bell" : "mdi-message-text")</MIcon>
-                            @(bill.Source == BillSource.Notification ? "通知栏" : "短信")
-                        </div>
-                        @if (!string.IsNullOrEmpty(bill.Note))
-                        {
-                            <div class="text-caption text--secondary text-truncate">
-                                @(bill.Note.Length > 40 ? bill.Note[..40] + "…" : bill.Note)
-                            </div>
-                        }
-                    </div>
-                    <MButton Small Color="primary" Class="ml-2" OnClick="() => ConfirmBill(bill)">
-                        确认
-                    </MButton>
-                    <MButton Small Text Color="error" OnClick="() => IgnoreBill(bill)">
-                        忽略
-                    </MButton>
-                </MCardText>
-            </MCard>
+            <GlassButton Kind="ButtonKind.GlassDanger"
+                         TestId="pending-ignore-all"
+                         OnClick="AskIgnoreAll">@PendingBillPresentation.IgnoreAllLabel</GlassButton>
         }
-    }
-</MContainer>
+    </Actions>
+    <ChildContent>
+        <div class="ft-pending"
+             data-testid="pending-content"
+             data-state="@ContentState"
+             data-count="@_cards.Count"
+             aria-busy="@(_isLoading ? "true" : null)">
+            <AutoCaptureStatus Loaded="_permissionsLoaded"
+                               NotificationEnabled="_notificationEnabled"
+                               SmsEnabled="_smsEnabled"
+                               NotificationBusy="_notificationBusy"
+                               SmsBusy="_smsBusy"
+                               OnEnableNotification="EnableNotificationAsync"
+                               OnEnableSms="EnableSmsAsync"
+                               OnSettings="OpenSettings" />
 
-<!-- 确认对话框：用户可修正金额/类型/渠道后入库 -->
-@if (_confirmingBill != null)
-{
-    <MDialog Value="true" Persistent MaxWidth="480">
-        <ChildContent>
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-check-circle</MIcon>
-                    确认账单
-                </MCardTitle>
-                <MCardText>
-                    <MTextField @bind-Value="_amountText"
-                                Label="金额"
-                                Type="number"
-                                Prefix="¥"
-                                Outlined
-                                Dense />
+            @if (_isLoading)
+            {
+                <ul class="ft-pending__list" data-testid="pending-skeleton" aria-hidden="true">
+                    @for (var i = 0; i < 2; i++)
+                    {
+                        <li class="ft-pcard ft-pcard--skeleton">
+                            <span class="ft-skeleton ft-skeleton--sub"></span>
+                            <span class="ft-pcard__sk-main">
+                                <span class="ft-skeleton ft-skeleton--tile"></span>
+                                <span class="ft-skeleton ft-skeleton--title"></span>
+                            </span>
+                            <span class="ft-skeleton ft-pcard__sk-foot"></span>
+                        </li>
+                    }
+                </ul>
+            }
+            else if (_loadFailed)
+            {
+                <EmptyState Icon="mdi-cloud-alert-outline" Title="待确认账单加载失败" Text="稍后重试一下" TestId="pending-error">
+                    <Action>
+                        <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-refresh" TestId="pending-retry" OnClick="RetryAsync">重试</GlassButton>
+                    </Action>
+                </EmptyState>
+            }
+            else if (_cards.Count == 0)
+            {
+                <EmptyState Icon="mdi-bell-check-outline"
+                            Title="@PendingBillPresentation.EmptyTitle"
+                            Text="@PendingBillPresentation.EmptyText"
+                            TestId="pending-empty" />
+            }
+            else
+            {
+                <div class="ft-pending__summary">
+                    <span class="ft-pending__count" data-testid="pending-count">@PendingBillPresentation.CountText(_cards.Count)</span>
+                    <span class="ft-pending__note">@PendingBillPresentation.StatsNote</span>
+                </div>
+                <ul class="ft-pending__list" data-testid="pending-list">
+                    @foreach (var card in _cards)
+                    {
+                        <PendingBillCard @key="card.Id"
+                                         Model="card"
+                                         LedgerId="LedgerIdOf(card.Id)"
+                                         LedgerName="@LedgerNameOf(card.Id)"
+                                         Busy="_busy.Contains(card.Id)"
+                                         OnEdit="OpenEdit"
+                                         OnConfirm="ConfirmAsync"
+                                         OnIgnore="IgnoreAsync"
+                                         OnPickLedger="OpenLedgerMenu" />
+                    }
+                </ul>
+            }
+        </div>
+    </ChildContent>
+</SecondaryPage>
 
-                    <MSwitch @bind-Value="_isIncome"
-                             Label="收入"
-                             Class="mt-4" />
+@* 确认账单（修改后入账）：短信识别页读到的短信也是先进待确认列表，再从这里确认 *@
+<PendingConfirmSheet @bind-Visible="_sheetVisible"
+                     Draft="_draft"
+                     Channels="_channels"
+                     Ledgers="_ledgers"
+                     UserId="_userId"
+                     OnConfirm="OnSheetConfirmAsync"
+                     OnLedgerCreated="OnLedgerCreated" />
 
-                    <MSelect TItem="string" TItemValue="string" TValue="string"
-                             @bind-Value="_channel"
-                             Items="@_channelNames"
-                             ItemText="@(item => item)"
-                             ItemValue="@(item => item)"
-                             Label="支付渠道"
-                             Outlined
-                             Dense />
-                </MCardText>
-                <MCardActions>
-                    <MSpacer />
-                    <MButton Text OnClick="CancelConfirm">取消</MButton>
-                    <MButton Color="primary" OnClick="ConfirmCreateBill">创建账单</MButton>
-                </MCardActions>
-            </MCard>
-        </ChildContent>
-    </MDialog>
-}
+@* 卡片上的账本菜单：自己的账本 + 「新建账本…」；选中项是这张卡片当前使用的账本 *@
+<LedgerMenu @bind-Visible="_ledgerMenuOpen"
+            Anchor="_ledgerAnchor"
+            Ledgers="_ledgers"
+            SelectedId="MenuSelectedId"
+            OnSelect="OnMenuLedgerSelected"
+            OnCreate="OpenLedgerSheet"
+            TestId="pending-ledger-menu" />
+
+<LedgerFormSheet @bind-Visible="_ledgerSheetOpen"
+                 UserId="_userId"
+                 OnCreated="OnMenuLedgerCreated" />
+
+@* 两项自动识别都开启之后，状态条上的「设置」：通知使用权（系统设置）/ 短信识别页 *@
+<ActionSheet @bind-Visible="_settingsOpen" Title="@PendingBillPresentation.SettingsSheetTitle" TestId="capture-settings-sheet">
+    <ActionSheetItem Icon="mdi-bell-cog-outline" TestId="capture-settings-notification" OnClick="EnableNotificationAsync">@PendingBillPresentation.SettingsNotificationItem</ActionSheetItem>
+    <ActionSheetItem Icon="mdi-message-text-outline" TestId="capture-settings-sms" OnClick="OpenSmsPage">@PendingBillPresentation.SettingsSmsItem</ActionSheetItem>
+</ActionSheet>
+
+<GlassAlert @bind-Visible="_ignoreAllOpen"
+            Title="@PendingBillPresentation.IgnoreAllTitle"
+            Message="@PendingBillPresentation.IgnoreAllMessage(_cards.Count)"
+            ConfirmText="@PendingBillPresentation.IgnoreAllLabel"
+            Destructive
+            OnConfirm="IgnoreAllAsync"
+            TestId="pending-ignore-all-alert" />
 
 @code {
-    private List<PendingBill> _pendingBills = new();
-    private bool _notificationPermission;
-    private bool _smsPermission;
+    private bool _disposed;
     private Guid _userId;
-    private List<string> _channelNames = new();
+    private bool _isLoading = true;
+    private bool _loadFailed;
+    private int _pendingVersion;
 
-    protected override async Task OnInitializedAsync()
+    // 数据：待确认项 + 入账需要的分类 / 支付渠道 / 账本（只列自己的账本：通知 / 短信捕获的账单不自动记入别人共享的账本）
+    private List<PendingBill> _pending = new();
+    private List<PendingCardModel> _cards = new();
+    private List<Category> _categories = new();
+    private List<PaymentChannel> _channels = new();
+    private List<LedgerModel> _ledgers = new();
+    private Guid? _defaultLedgerId;
+
+    // 每张卡片上用户选过的账本（待确认项 Id → 账本 Id）；没选过的用默认账本
+    private readonly Dictionary<Guid, Guid> _chosenLedger = new();
+
+    // 正在入账 / 忽略的待确认项：对应卡片的按钮禁用，防止重复入账
+    private readonly HashSet<Guid> _busy = new();
+
+    // 自动识别权限
+    private bool _permissionsLoaded;
+    private bool _notificationEnabled;
+    private bool _smsEnabled;
+    private bool _notificationBusy;
+    private bool _smsBusy;
+    private bool _settingsOpen;
+
+    // 确认账单 Sheet
+    private bool _sheetVisible;
+    private PendingConfirmDraft _draft = new(PendingBillPresentation.ConfirmSheetTitle, string.Empty, string.Empty, null, null, null, false, null, null);
+    private Guid? _sheetPendingId;
+
+    // 卡片的账本菜单与行内新建账本
+    private bool _ledgerMenuOpen;
+    private bool _ledgerSheetOpen;
+    private ElementReference? _ledgerAnchor;
+    private Guid? _menuTargetId;
+
+    private bool _ignoreAllOpen;
+
+    private string ContentState => _isLoading ? "loading" : _loadFailed ? "error" : _cards.Count == 0 ? "empty" : "ready";
+
+    private Guid? MenuSelectedId => _menuTargetId is { } id ? LedgerIdOf(id) : null;
+
+    protected override void OnInitialized()
     {
-        var userId = await AuthService.GetUserIdAsync();
-        if (userId.HasValue)
+        // 后台捕获到新支付时实时刷新列表
+        PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
+    }
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与预算页、分类页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
         {
-            _userId = userId.Value;
+            return;
         }
 
-        _pendingBills = await PendingBillService.GetPendingBillsAsync();
-        _notificationPermission = await NotificationPermissionService.HasPermissionAsync();
-        _smsPermission = await SmsService.HasPermissionAsync();
-
-        // 加载支付渠道名称列表，供确认对话框下拉选择
-        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
-        _channelNames = channels.Select(c => c.Name).ToList();
-
-        // 后台捕获新支付时实时刷新列表
-        PendingBillService.PendingBillsChanged += OnPendingBillsChanged;
+        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        await Task.WhenAll(LoadAsync(), LoadPermissionsAsync());
+        _isLoading = false;
+        StateHasChanged();
     }
 
     public void Dispose()
     {
+        _disposed = true;
         PendingBillService.PendingBillsChanged -= OnPendingBillsChanged;
     }
 
+    // ------------------------------------------------------------------ 读取
+
+    /// <summary>
+    /// 读待确认项与入账需要的分类 / 支付渠道 / 账本。账本读不出来时不能当作「没有账本」（那会误导用户去新建），
+    /// 所以任何一步失败都整页显示错误状态并提供重试。
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        try
+        {
+            // 待确认项走独立的 DbContext，不占共享 DbContext 的队列
+            var pendingTask = PendingBillService.GetPendingBillsAsync();
+
+            await DataGate.RunAsync(async () =>
+            {
+                _categories = await CategoryService.GetCategoriesAsync(_userId);
+                _channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+                (_ledgers, _defaultLedgerId) = await LedgerModel.LoadOwnAsync(LedgerService, UserDefaultService, _userId, _defaultLedgerId);
+            });
+
+            _pending = await pendingTask;
+            Rebuild();
+            _loadFailed = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载待确认账单失败");
+            _loadFailed = true;
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.LoadFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+        }
+    }
+
+    /// <summary>读权限状态：平台调用失败按「未开启」处理（给出「去开启」，用户点了会得到明确反馈）</summary>
+    private async Task LoadPermissionsAsync()
+    {
+        try
+        {
+            _notificationEnabled = await NotificationPermissionService.HasPermissionAsync();
+            _smsEnabled = await SmsService.HasPermissionAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取自动识别权限状态失败");
+        }
+
+        _permissionsLoaded = true;
+    }
+
+    private async Task RetryAsync()
+    {
+        _isLoading = true;
+        _loadFailed = false;
+        StateHasChanged();
+
+        await LoadAsync();
+        _isLoading = false;
+    }
+
+    /// <summary>
+    /// 后台捕获新支付 / 其他页面处理了待确认项：重读列表。事件可能来自后台线程，经 InvokeAsync 回到渲染线程；
+    /// 连续多次事件只采用最后一次读到的结果。
+    /// </summary>
     private async void OnPendingBillsChanged(object? sender, EventArgs e)
     {
         try
         {
-            _pendingBills = await PendingBillService.GetPendingBillsAsync();
-            await InvokeAsync(StateHasChanged);
+            await InvokeAsync(ReloadPendingAsync);
         }
         catch (Exception)
         {
@@ -181,120 +297,363 @@
         }
     }
 
-    private async Task OpenNotificationSettings()
+    private async Task ReloadPendingAsync()
     {
-        await NotificationPermissionService.OpenSettingsAsync();
-    }
-
-    private async Task RequestSmsPermission()
-    {
-        _smsPermission = await SmsService.RequestPermissionAsync();
-        if (_smsPermission)
+        if (_disposed || _isLoading)
         {
-            await PopupService.EnqueueSnackbarAsync("短信权限已授予", AlertTypes.Success);
-        }
-    }
-
-    // ===== 确认入库 =====
-    private PendingBill? _confirmingBill;
-    private string _amountText = string.Empty;
-    private bool _isIncome;
-    private string _channel = string.Empty;
-
-    private void ConfirmBill(PendingBill bill)
-    {
-        _confirmingBill = bill;
-        _amountText = bill.Amount.ToString("0.##");
-        _isIncome = bill.Type == BillType.Income;
-        _channel = bill.Channel;
-    }
-
-    private void CancelConfirm()
-    {
-        _confirmingBill = null;
-    }
-
-    private async Task ConfirmCreateBill()
-    {
-        if (_confirmingBill == null) return;
-
-        if (!decimal.TryParse(_amountText.Trim(), out var amount) || amount <= 0)
-        {
-            await PopupService.EnqueueSnackbarAsync("请输入有效的金额", AlertTypes.Warning);
             return;
         }
 
-        var bill = _confirmingBill;
-        _confirmingBill = null;
+        var version = ++_pendingVersion;
+        var list = await PendingBillService.GetPendingBillsAsync();
+        if (_disposed || version != _pendingVersion)
+        {
+            return;
+        }
 
-        // 以用户在对话框中修正后的值为准（金额/类型/渠道）
-        var type = _isIncome ? BillType.Income : BillType.Expense;
+        _pending = list;
+        Rebuild();
+        StateHasChanged();
+    }
+
+    /// <summary>由待确认项重新算出全部卡片（卡片上显示「入账时会使用的分类」，与入账规则同一个）</summary>
+    private void Rebuild()
+    {
+        var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+        _cards = _pending
+            .Select(p => PendingBillPresentation.BuildCard(
+                p,
+                PendingBillConversion.PickCategory(_categories, p.Type),
+                PendingBillConversion.MatchChannel(_channels, p.Channel),
+                now))
+            .ToList();
+    }
+
+    private PendingBill? Find(Guid id) => _pending.FirstOrDefault(p => p.Id == id);
+
+    // ------------------------------------------------------------------ 账本
+
+    /// <summary>这张卡片入账时使用的账本：用户在它上面选过的优先，其次默认账本；都没有（还没有账本）为空</summary>
+    private Guid? LedgerIdOf(Guid pendingId) =>
+        PendingBillPresentation.ResolveLedger(
+            _chosenLedger.TryGetValue(pendingId, out var chosen) ? chosen : null,
+            _defaultLedgerId,
+            _ledgers);
+
+    private string? LedgerNameOf(Guid pendingId) =>
+        LedgerIdOf(pendingId) is { } id ? _ledgers.FirstOrDefault(l => l.Id == id)?.Name : null;
+
+    private void OpenLedgerMenu(PendingBillCard.LedgerPick pick)
+    {
+        _menuTargetId = pick.PendingId;
+        _ledgerAnchor = pick.Anchor;
+        _ledgerMenuOpen = true;
+    }
+
+    private void OnMenuLedgerSelected(Guid ledgerId)
+    {
+        if (_menuTargetId is { } id)
+        {
+            _chosenLedger[id] = ledgerId;
+        }
+    }
+
+    private void OpenLedgerSheet() => _ledgerSheetOpen = true;
+
+    /// <summary>卡片的账本菜单里「新建账本…」保存后：放进账本列表，并让那张卡片用它</summary>
+    private Task OnMenuLedgerCreated(Ledger created)
+    {
+        AddLedger(created);
+
+        if (_menuTargetId is { } id)
+        {
+            _chosenLedger[id] = created.Id;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>确认账单 Sheet 里行内新建了账本：放进账本列表（Sheet 自己会选中它）</summary>
+    private Task OnLedgerCreated(Ledger created)
+    {
+        AddLedger(created);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>把新账本放进列表（自己的账本之后）；之前一个账本都没有时，它成为默认账本——所有卡片从此都有账本可用</summary>
+    private void AddLedger(Ledger created)
+    {
+        if (_ledgers.All(l => l.Id != created.Id))
+        {
+            _ledgers.Add(LedgerModel.FromEntity(created));
+        }
+
+        _defaultLedgerId ??= created.Id;
+    }
+
+    // ------------------------------------------------------------------ 入账
+
+    /// <summary>
+    /// 卡片上的「确认入账」：一键入账。支付渠道没匹配到时不猜，打开「确认账单」让用户选；账本缺失时卡片已拦下（弹账本菜单），这里再兜一层。
+    /// </summary>
+    private async Task ConfirmAsync(Guid id)
+    {
+        if (_busy.Contains(id) || Find(id) is not { } pending)
+        {
+            return;
+        }
+
+        if (LedgerIdOf(id) is not { } ledgerId)
+        {
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.ChooseLedgerMessage, AlertTypes.Warning);
+            return;
+        }
+
+        if (PendingBillConversion.MatchChannel(_channels, pending.Channel) is not { } channel)
+        {
+            OpenSheet(pending);
+            return;
+        }
+
+        var values = new PendingConfirmValues(pending.Amount, pending.Type == BillType.Income, channel.Id, ledgerId);
+        await ReportAsync(await CreateBillAsync(pending, values));
+    }
+
+    /// <summary>「确认账单」Sheet 里点「入账」：以用户修正后的值为准</summary>
+    private async Task<ConfirmResult> OnSheetConfirmAsync(PendingConfirmValues values)
+    {
+        if (_sheetPendingId is not { } id || Find(id) is not { } pending)
+        {
+            // 这笔待确认项已经不在了（被忽略 / 被清理）：不再入账，收起 Sheet
+            _sheetVisible = false;
+            var gone = ConfirmResult.Invalid(PendingBillPresentation.GoneMessage);
+            await ReportAsync(gone);
+            return gone;
+        }
+
+        var result = await CreateBillAsync(pending, values);
+        await ReportAsync(result);
+        return result;
+    }
+
+    /// <summary>
+    /// 把待确认项变成正式账单：创建账单 → 通知其他页面刷新 → 从待确认列表移除。
+    /// 账单保存成功就立刻把这张卡片拿掉（不给重复入账的机会）；之后只是移除存储里的待确认项，失败也不能说「创建失败」。
+    /// </summary>
+    private async Task<ConfirmResult> CreateBillAsync(PendingBill pending, PendingConfirmValues values)
+    {
+        var type = values.IsIncome ? BillType.Income : BillType.Expense;
+        var category = PendingBillConversion.PickCategory(_categories, type);
+        if (category is null)
+        {
+            return ConfirmResult.Invalid(PendingBillPresentation.NoCategoryMessage(type));
+        }
+
+        var bill = PendingBillConversion.NewBill(
+            _userId,
+            values.Amount,
+            type,
+            category.Id,
+            values.ChannelId,
+            values.LedgerId,
+            pending.TransactionTime,
+            pending.Note,
+            pending.Source);
+
+        _busy.Add(pending.Id);
+        StateHasChanged();
 
         try
         {
-            var categories = await CategoryService.GetCategoriesAsync(_userId);
-            var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
-
-            var category = categories.FirstOrDefault(c => c.Type == type && c.Name.Contains("其他"))
-                           ?? categories.FirstOrDefault(c => c.Type == type);
-
-            var paymentChannel = channels.FirstOrDefault(c => c.Name == _channel)
-                                 ?? channels.FirstOrDefault(c => c.Name.Contains(_channel));
-
-            if (category == null || paymentChannel == null)
-            {
-                await PopupService.EnqueueSnackbarAsync("无法匹配分类或支付渠道", AlertTypes.Warning);
-                return;
-            }
-
-            var newBill = new Core.Entities.Bill
-            {
-                UserId = _userId,
-                Amount = amount,
-                Type = type,
-                CategoryId = category.Id,
-                PaymentChannelId = paymentChannel.Id,
-                TransactionTime = bill.TransactionTime,
-                Note = bill.Note,
-                Source = bill.Source,
-                SyncStatus = SyncStatus.Pending
-            };
-
-            await BillService.CreateBillAsync(newBill);
-
-            // 待确认项走独立的 DbContext（IDbContextFactory），与上面的账单保存无法放进同一个事务。
-            // 账单此时已经保存成功：若移除失败不能再报"创建账单失败"，否则用户会重试并产生重复账单
             try
             {
-                await PendingBillService.RemoveAsync(bill.Id);
+                await DataGate.RunAsync(() => BillService.CreateBillAsync(bill));
             }
-            catch (Exception removeEx)
+            catch (Exception ex)
             {
-                // 账单已经入库：当前页面不能再给这条待确认项留着"确认"按钮（点两次就是两笔账单）。
-                // 存储里那条待确认项没删掉，下次进入页面还会出现，届时只能点"忽略"
-                _pendingBills.RemoveAll(p => p.Id == bill.Id);
-                await PopupService.EnqueueSnackbarAsync(
-                    $"账单已创建，但从待确认列表移除失败（{removeEx.GetUserMessage()}）。这条待确认项下次打开页面时还会出现，请点「忽略」，不要重复确认",
-                    AlertTypes.Warning);
-                return;
+                Logger.LogWarning(ex, "待确认账单入账失败");
+                return ConfirmResult.Failed(PendingBillPresentation.CreateFailedMessage(ex.GetUserMessage()));
             }
 
-            await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
+            // 账单已经保存：其他页面据事件刷新，这张卡片立刻消失
+            BillEvents.NotifyBillChanged();
+            _pending.RemoveAll(p => p.Id == pending.Id);
+            _chosenLedger.Remove(pending.Id);
+            Rebuild();
+
+            try
+            {
+                // 待确认项走独立的 DbContext，与上面的账单保存无法放进同一个事务
+                await PendingBillService.RemoveAsync(pending.Id);
+            }
+            catch (Exception ex)
+            {
+                // 存储里那条没删掉，下次进入页面还会出现，届时只能点「忽略」
+                Logger.LogWarning(ex, "账单已创建，但移除待确认项失败");
+                return ConfirmResult.Saved(PendingBillPresentation.RemoveFailedMessage(ex.GetUserMessage()));
+            }
+
+            return ConfirmResult.Saved();
+        }
+        finally
+        {
+            _busy.Remove(pending.Id);
+        }
+    }
+
+    private async Task ReportAsync(ConfirmResult result)
+    {
+        var message = result.Message ?? string.Empty;
+
+        switch (result.Status)
+        {
+            case ConfirmStatus.Saved when result.Message is null:
+                await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.ConfirmedMessage, AlertTypes.Success);
+                break;
+
+            case ConfirmStatus.Failed:
+                await PopupService.EnqueueSnackbarAsync(message, AlertTypes.Error);
+                break;
+
+            default:
+                await PopupService.EnqueueSnackbarAsync(message, AlertTypes.Warning);
+                break;
+        }
+    }
+
+    // ------------------------------------------------------------------ 确认账单 Sheet
+
+    private void OpenEdit(Guid id)
+    {
+        if (!_busy.Contains(id) && Find(id) is { } pending)
+        {
+            OpenSheet(pending);
+        }
+    }
+
+    private void OpenSheet(PendingBill pending)
+    {
+        var card = _cards.First(c => c.Id == pending.Id);
+        var channel = PendingBillConversion.MatchChannel(_channels, pending.Channel);
+
+        _draft = new PendingConfirmDraft(
+            PendingBillPresentation.ConfirmSheetTitle,
+            card.SourceLine,
+            card.TimeText,
+            card.NoteText.Length == 0 ? null : card.NoteText,
+            channel is null ? PendingBillPresentation.ChannelNotMatchedHint : null,
+            pending.Amount,
+            pending.Type == BillType.Income,
+            channel?.Id,
+            LedgerIdOf(pending.Id));
+        _sheetPendingId = pending.Id;
+        _sheetVisible = true;
+    }
+
+    // ------------------------------------------------------------------ 忽略
+
+    private async Task IgnoreAsync(Guid id)
+    {
+        if (!_busy.Add(id))
+        {
+            return;
+        }
+
+        StateHasChanged();
+
+        try
+        {
+            await PendingBillService.RemoveAsync(id);
+            _pending.RemoveAll(p => p.Id == id);
+            _chosenLedger.Remove(id);
+            Rebuild();
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.IgnoredMessage, AlertTypes.Info);
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
+            Logger.LogWarning(ex, "忽略待确认账单失败");
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.IgnoreFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+        }
+        finally
+        {
+            _busy.Remove(id);
         }
     }
 
-    private async Task IgnoreBill(PendingBill bill)
+    private void AskIgnoreAll() => _ignoreAllOpen = true;
+
+    private async Task IgnoreAllAsync()
     {
-        await PendingBillService.RemoveAsync(bill.Id);
-        await PopupService.EnqueueSnackbarAsync("已忽略", AlertTypes.Info);
+        try
+        {
+            await PendingBillService.ClearAsync();
+            _pending.Clear();
+            _chosenLedger.Clear();
+            Rebuild();
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.IgnoredAllMessage, AlertTypes.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "全部忽略待确认账单失败");
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.IgnoreFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+        }
     }
 
-    private async Task ClearAll()
+    // ------------------------------------------------------------------ 自动识别权限
+
+    private async Task EnableNotificationAsync()
     {
-        await PendingBillService.ClearAsync();
+        if (_notificationBusy)
+        {
+            return;
+        }
+
+        _notificationBusy = true;
+        try
+        {
+            // 通知使用权只能在系统设置里开：跳过去之后提示用户开启后回来
+            await NotificationPermissionService.OpenSettingsAsync();
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.NotificationSettingsMessage, AlertTypes.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "打开通知使用权设置失败");
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.PermissionFailedMessage(ex.GetUserMessage()), AlertTypes.Warning);
+        }
+        finally
+        {
+            _notificationBusy = false;
+        }
     }
+
+    private async Task EnableSmsAsync()
+    {
+        if (_smsBusy)
+        {
+            return;
+        }
+
+        _smsBusy = true;
+        try
+        {
+            _smsEnabled = await SmsService.RequestPermissionAsync();
+            await PopupService.EnqueueSnackbarAsync(
+                _smsEnabled ? PendingBillPresentation.SmsGrantedMessage : PendingBillPresentation.SmsNotGrantedMessage,
+                _smsEnabled ? AlertTypes.Success : AlertTypes.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "申请短信权限失败");
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.PermissionFailedMessage(ex.GetUserMessage()), AlertTypes.Warning);
+        }
+        finally
+        {
+            _smsBusy = false;
+        }
+    }
+
+    private void OpenSettings() => _settingsOpen = true;
+
+    private void OpenSmsPage() => NavController.Push("/sms-recognition");
 }

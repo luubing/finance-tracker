@@ -1,4 +1,15 @@
 @using Microsoft.AspNetCore.Components.Routing
+@using FinanceTracker.Web.Components
+@inject NavigationManager Navigation
+
+@* 沉浸式：全局唯一，放在 ErrorBoundary 之外，页面渲染异常时安全区 / 状态栏逻辑仍然有效 *@
+<ImmersiveHost />
+
+@* 复用组件的手势行为层（左滑行、Sheet 拖拽收起）：全局唯一，文档级事件委托，见 wwwroot/js/ui.js *@
+<UiRuntime />
+
+@* 启动加载页的「外壳就绪」信号：全局唯一，放在 ErrorBoundary 之外——页面渲染异常时也要让加载页交接出去，露出错误内容而不是一直转圈 *@
+<StartupHost />
 
 <ErrorBoundary>
     <ChildContent>
@@ -7,23 +18,29 @@
                 <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layouts.MainLayout)" />
             </Found>
             <NotFound>
-                <MContainer>
-                    <MRow Justify="JustifyTypes.Center" Align="AlignTypes.Center" Style="height: 100vh;">
-                        <MCol Cols="12" Class="text-center">
-                            <MIcon Size="64" Color="grey lighten-1">mdi-alert-circle-outline</MIcon>
-                            <div class="text-h4 grey--text text--lighten-1 mt-4">页面未找到</div>
-                            <MButton Color="primary" Class="mt-4" Href="/">返回首页</MButton>
-                        </MCol>
-                    </MRow>
-                </MContainer>
+                @* 地址不存在：不进应用壳（没有 Tab 栏），但套上 AuthLayout 拿到应用的字体与底色；内容是通用空状态 + 回首页（设计令牌，不含 MASA 控件） *@
+                <LayoutView Layout="@typeof(Layouts.AuthLayout)">
+                    <div class="ft-fallback" data-statusbar-bg="light" data-testid="not-found">
+                        <EmptyState Icon="mdi-alert-circle-outline" Title="页面未找到" TestId="not-found-empty">
+                            <Action>
+                                <GlassButton Kind="ButtonKind.Brand" Large="true" OnClick="GoHome" TestId="not-found-home">返回首页</GlassButton>
+                            </Action>
+                        </EmptyState>
+                    </div>
+                </LayoutView>
             </NotFound>
         </Router>
     </ChildContent>
 
     <ErrorContent>
-        <div style="padding: 20px; color: #b71c1c; font-family: Consolas, monospace; font-size: 13px;">
-            <h4 style="margin: 0 0 8px;">组件渲染发生异常:</h4>
-            <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 12px; border-radius: 4px; margin: 0;">@context</pre>
+        @* 兜底：整个应用渲染失败时的错误信息（排错用，可长按复制）。渲染在任何布局之外，所以样式自带字体与底色，不依赖 MASA *@
+        <div class="ft-fatal" role="alert" data-testid="render-error">
+            <h2 class="ft-fatal__title">组件渲染发生异常</h2>
+            <pre class="ft-fatal__detail">@context</pre>
         </div>
     </ErrorContent>
 </ErrorBoundary>
+
+@code {
+    private void GoHome() => Navigation.NavigateTo("/");
+}

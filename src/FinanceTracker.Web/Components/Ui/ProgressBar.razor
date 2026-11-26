@@ -1,0 +1,59 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    进度条（设计稿 06 · 进度条）：6px 圆角条，三种配色（品牌 / 警示橙 / 危险红）。
+    只负责画条；「正常 / 接近上限 / 超支」的判定与文字说明由调用方（BudgetPresentation）给出——状态不能只靠颜色，
+    所以调用方必须同时提供 AriaValueText，并在旁边放文字说明。
+    - 无障碍：role="progressbar"，aria-valuenow 为 0–100 的整数，aria-valuetext 是带状态的文字（例如「已用 87%，接近上限」）。
+    - 观察属性（E2E）：data-testid、data-tone = brand | warning | danger、data-percent（条的宽度，0–100）。
+*@
+<div class="ft-progress ft-progress--@ToneKey @Class"
+     role="progressbar"
+     aria-valuemin="0"
+     aria-valuemax="100"
+     aria-valuenow="@Now"
+     aria-valuetext="@AriaValueText"
+     aria-label="@AriaLabel"
+     data-testid="@TestId"
+     data-tone="@ToneKey"
+     data-percent="@WidthText"
+     @attributes="AdditionalAttributes">
+    <span class="ft-progress__fill" style="width: @(WidthText)%"></span>
+</div>
+
+@code {
+    /// <summary>进度，0–100（超出范围按边界处理）</summary>
+    [Parameter] public decimal Percent { get; set; }
+
+    /// <summary>配色</summary>
+    [Parameter] public ProgressTone Tone { get; set; } = ProgressTone.Brand;
+
+    /// <summary>读屏名称（例如预算名）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>读屏的值说明，应包含状态（例如「已用 87%，接近上限」）；不给时只读百分比</summary>
+    [Parameter] public string? AriaValueText { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string ToneKey => Tone switch
+    {
+        ProgressTone.Warning => "warning",
+        ProgressTone.Danger => "danger",
+        _ => "brand",
+    };
+
+    private decimal Clamped => Math.Clamp(Percent, 0m, 100m);
+
+    private int Now => (int)Math.Floor(Clamped);
+
+    // 样式里的数字必须用不随区域设置变化的写法（小数点固定为 .）
+    private string WidthText => Clamped.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+}

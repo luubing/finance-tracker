@@ -1,0 +1,83 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    分段控件（设计稿 02 · 全部 / 支出 / 收入；统计页的月度 / 趋势 / 年度也用它）：灰色填充的胶囊轨道 + 白色滑块，
+    选中项文字加粗；切换时滑块沿轨道滑动。
+    - 语义：role="group" + 每段一个 button[aria-pressed]（读屏读「全部，按下」）；每段都可聚焦，Enter / 空格选中；
+      每段的点击区域都是整条轨道的高度（44），不是滑块的高度。
+    - 滑块位置由两个样式变量决定：--ft-seg-index（选中项序号）与 --ft-seg-count（段数），位移走 CSS 过渡；
+      「减弱动态效果」下直接就位、不滑动。
+    - 选中的值由调用方持有（Value + ValueChanged），本组件不保存状态；点已选中的那一段什么也不做。
+    - 观察属性（E2E）：根 data-testid（默认 segmented）与 data-value（当前值）；每一段 data-testid="segment"、data-value、aria-pressed。
+*@
+<div class="ft-seg @Class"
+     role="group"
+     aria-label="@AriaLabel"
+     data-testid="@TestId"
+     data-value="@Value"
+     style="@Style"
+     @attributes="AdditionalAttributes">
+    <span class="ft-seg__thumb" aria-hidden="true"></span>
+    @foreach (var option in Options)
+    {
+        var selected = option.Value == Value;
+        <button type="button"
+                class="ft-seg__item @(selected ? "ft-seg__item--on" : null)"
+                aria-pressed="@(selected ? "true" : "false")"
+                data-value="@option.Value"
+                data-testid="segment"
+                @onclick="() => SelectAsync(option)">@option.Label</button>
+    }
+</div>
+
+@code {
+    /// <summary>选项（至少一个）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<SegmentOption> Options { get; set; } = [];
+
+    /// <summary>当前选中的取值</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>选中另一段时触发，参数是新的取值</summary>
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>整个控件的读屏名称（例如「账单类型」）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "segmented";
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private int SelectedIndex
+    {
+        get
+        {
+            for (var i = 0; i < Options.Count; i++)
+            {
+                if (Options[i].Value == Value)
+                {
+                    return i;
+                }
+            }
+
+            return 0;
+        }
+    }
+
+    // 没有任何一段匹配 Value 时滑块停在第一段（调用方应保证 Value 在 Options 里）
+    private string Style => FormattableString.Invariant($"--ft-seg-index: {SelectedIndex}; --ft-seg-count: {Math.Max(1, Options.Count)};");
+
+    private async Task SelectAsync(SegmentOption option)
+    {
+        if (option.Value == Value)
+        {
+            return;
+        }
+
+        await ValueChanged.InvokeAsync(option.Value);
+    }
+}

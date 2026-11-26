@@ -1,0 +1,68 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    金额展示（设计稿 06 · 金额）：币种符号 + 整数（含千分位）+ 小数。特大档（Hero 主指标）整数大字、符号与小数缩小并略淡；
+    卡片档 / 列表档整数小数同大。拆分与格式由 MoneyPresentation 负责（两位小数、千分位固定为 , 与 .，不随设备区域设置变化）。
+    - 读屏：整体当作一个文本（role="img" + aria-label = 完整金额），不会把「8,713」「.50」分开读。
+    - 观察属性（E2E）：data-testid（调用方给）、data-amount（原始金额，两位小数）；各段的类名 ft-amount__sign / __cur / __int / __dec。
+    - FitWidth（Hero 的大金额用）：把金额的字符数写在 --ft-amount-chars 上，样式表按它和可用宽度把字号往小收（见 ui.css 首页一节），位数多也不越出版心。
+    - 几个 span 必须写在同一行：Razor 会把标签之间的换行变成空白文本，金额里就会出现空格。
+*@
+<span class="@CssClass" style="@FitStyle" role="img" aria-label="@Label" data-testid="@TestId" data-amount="@Plain" @attributes="AdditionalAttributes"><span class="ft-amount__sign">@_parts.Sign</span><span class="ft-amount__cur">@MoneyPresentation.Symbol</span><span class="ft-amount__int">@_parts.Integer</span><span class="ft-amount__dec">@_parts.Fraction</span></span>
+
+@code {
+    private AmountParts _parts;
+
+    /// <summary>金额</summary>
+    [Parameter] public decimal Amount { get; set; }
+
+    /// <summary>字号档位</summary>
+    [Parameter] public AmountSize Size { get; set; } = AmountSize.Md;
+
+    /// <summary>正数是否带 + 号（收入类展示）</summary>
+    [Parameter] public bool PlusForPositive { get; set; }
+
+    /// <summary>附加样式类（颜色等由调用方决定；组件本身继承父级文字色）</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>字号随可用宽度收缩（只有 ui.css 里写了对应规则的位置才生效）：写出 --ft-amount-chars（金额的字符数）</summary>
+    [Parameter] public bool FitWidth { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string Label => $"{_parts.Sign}{MoneyPresentation.Symbol}{_parts.Integer}{_parts.Fraction}";
+
+    // 字符数含符号、千分位与小数点（-¥9,997,591.60 = 14）；不适用时不写 style 属性
+    private string? FitStyle => FitWidth ? $"--ft-amount-chars:{Label.Length}" : null;
+
+    // 原始金额（两位小数、无千分位）：舍入后为 0 的金额（例如 -0.001）统一写成 0.00，不带负号
+    private string Plain
+    {
+        get
+        {
+            var rounded = Math.Round(Amount, 2, MidpointRounding.AwayFromZero);
+            return (rounded == 0m ? 0m : rounded).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    private string CssClass => string.Join(' ', new[]
+    {
+        "ft-amount",
+        Size switch
+        {
+            AmountSize.Xl => "ft-amount--xl",
+            AmountSize.Lg => "ft-amount--lg",
+            _ => "ft-amount--md",
+        },
+        Class,
+    }.Where(c => !string.IsNullOrEmpty(c)));
+
+    protected override void OnParametersSet()
+    {
+        _parts = MoneyPresentation.Split(Amount, PlusForPositive);
+    }
+}

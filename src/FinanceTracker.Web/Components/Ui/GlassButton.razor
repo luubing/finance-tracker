@@ -1,0 +1,95 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    按钮（设计稿 06 · 按钮）：玻璃圆按钮（导航栏的返回 / 更多）、玻璃红字（导航栏的「全部忽略」）、主要（品牌渐变）、次要（品牌浅底）、取消（灰）、删除（红）、文字。
+    只暴露样式选项、内容插槽与点击事件，不含业务逻辑。
+    - 点击热区不小于 44 × 44（--ft-hit）；按下缩放 0.96（--ft-press-scale）。
+    - 只有图标没有文字时必须给 AriaLabel（读屏名称）。
+    - Busy：进行中（例如保存）——禁用并标记 aria-busy，防止重复点击。
+*@
+<button type="@Type"
+        class="@CssClass"
+        disabled="@(Disabled || Busy)"
+        aria-label="@AriaLabel"
+        aria-busy="@(Busy ? "true" : null)"
+        data-testid="@TestId"
+        @onclick="OnClick"
+        @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <i class="mdi @Icon" aria-hidden="true"></i>
+    }
+    @if (ChildContent != null)
+    {
+        <span class="ft-btn__label">@ChildContent</span>
+    }
+</button>
+
+@code {
+    /// <summary>样式</summary>
+    [Parameter] public ButtonKind Kind { get; set; } = ButtonKind.Glass;
+
+    /// <summary>圆形（导航栏按钮）；默认是胶囊</summary>
+    [Parameter] public bool Round { get; set; }
+
+    /// <summary>大号（52 高，页面底部的主操作）</summary>
+    [Parameter] public bool Large { get; set; }
+
+    /// <summary>撑满一行</summary>
+    [Parameter] public bool Block { get; set; }
+
+    /// <summary>MDI 图标类名，例如 mdi-plus</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>读屏名称（只有图标时必填）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>button 的 type；表单提交按钮用 submit</summary>
+    [Parameter] public string Type { get; set; } = "button";
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>进行中：禁用并标记 aria-busy</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>附加样式类（布局微调用；不要用它改按钮的外观）</summary>
+    [Parameter] public string? Class { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string CssClass
+    {
+        get
+        {
+            var kind = Kind switch
+            {
+                ButtonKind.Glass => "ft-btn--glass ft-glass",
+                ButtonKind.Brand => "ft-btn--brand",
+                ButtonKind.Soft => "ft-btn--soft",
+                ButtonKind.Neutral => "ft-btn--neutral",
+                ButtonKind.Danger => "ft-btn--danger",
+                ButtonKind.GlassDanger => "ft-btn--glass-danger ft-glass",
+                _ => "ft-btn--text",
+            };
+
+            return string.Join(' ', new[]
+            {
+                "ft-btn",
+                kind,
+                Round ? "ft-btn--round" : null,
+                Large ? "ft-btn--lg" : null,
+                Block ? "ft-btn--block" : null,
+                Busy ? "ft-btn--busy" : null,
+                Class,
+            }.Where(c => !string.IsNullOrEmpty(c)));
+        }
+    }
+}

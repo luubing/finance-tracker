@@ -1,0 +1,41 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    分组圆角列表（设计稿 05 / 06 · 列表单元格）：可选的小标题 + 白色圆角卡片（里面放 ListCell / SwipeRow）+ 可选的脚注。
+    卡片之间的间距、卡片圆角、单元格之间的分隔线都由样式负责（--ft-radius-card、--ft-space-group、--ft-separator），
+    调用方只放内容。
+*@
+<section class="ft-group @Class" data-testid="@TestId" aria-label="@(string.IsNullOrEmpty(Header) ? null : Header)" @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Header))
+    {
+        <h2 class="ft-group__header">@Header</h2>
+    }
+    <div class="ft-group__body">
+        @ChildContent
+    </div>
+    @if (!string.IsNullOrEmpty(Footer))
+    {
+        <p class="ft-group__footer">@Footer</p>
+    }
+</section>
+
+@code {
+    /// <summary>卡片上方的小标题</summary>
+    [Parameter] public string? Header { get; set; }
+
+    /// <summary>卡片下方的脚注（说明文字）</summary>
+    [Parameter] public string? Footer { get; set; }
+
+    /// <summary>单元格</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>透传到根节点的其它属性（例如单选组的 role="radiogroup"）</summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+}

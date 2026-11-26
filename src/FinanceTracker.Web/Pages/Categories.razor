@@ -1,281 +1,375 @@
 @page "/categories"
-@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Entities
 @using FinanceTracker.Core.Enums
+@using FinanceTracker.Web.Components.Categories
 @inject ICategoryService CategoryService
 @inject IUserDefaultService UserDefaultService
+@inject IBillService BillService
 @inject AuthenticationService AuthStateService
-@inject NavigationManager Navigation
+@inject PageDataGate DataGate
 @inject IPopupService PopupService
+@inject ILogger<Categories> Logger
 
-<PStackPageBar Title="分类管理"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    分类管理（二级页面模板，设计稿 05 / screens 11-categories）：
+      · 顶部「支出 / 收入」分段（每个分类只属于一种账单类型）
+      · 「自定义」组：左滑出现「编辑」「删除」；点按整行进入编辑 Sheet（含设为默认、删除——左滑操作的非滑动等价入口）；
+        右侧是该分类下的账单数；末尾「新建分类」行
+      · 「预设分类」组：只读（不能改名、不能删除），右侧标注「预设」；点按弹出菜单，可设为 / 取消默认
+      · 「默认」徽标：默认支出分类与默认收入分类各有一个，设置沿用「用户默认值」服务，记一笔默认选中它
+    右上角「＋」与「新建分类」行都打开底部 Sheet（面板是共用的 CategoryFormSheet，「记一笔」的新建分类用同一个）；
+    删除用 Alert 确认（软删除；分类下还有账单时服务层拦截，这里给出提示）；提示走全局 Toast。
+    读库经过 PageDataGate 与常驻的 Tab 根页面排队（它们共用一个 DbContext）。
+    服务层校验与权限语义不变：本页只调用既有服务，不绕过任何校验。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <MRow>
-        <MCol Cols="12">
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-tag-multiple</MIcon>
-                    分类管理
-                    <MSpacer />
-                    <MButton Color="primary" OnClick="ShowCreateDialog">
-                        <MIcon Class="mr-2">mdi-plus</MIcon>
-                        添加分类
-                    </MButton>
-                </MCardTitle>
+<SecondaryPage Title="分类管理" TestId="categories-page">
+    <Actions>
+        <GlassButton Kind="ButtonKind.Brand" Round Icon="mdi-plus" AriaLabel="新建分类" TestId="category-add" OnClick="OpenCreate" />
+    </Actions>
+    <ChildContent>
+        <SegmentedControl Options="SegmentOptions"
+                          Value="@_segment"
+                          ValueChanged="OnSegmentChanged"
+                          AriaLabel="分类类型"
+                          TestId="categories-segment" />
 
-                <MCardText>
-                    <MTabs @bind-Value="_activeTab">
-                        <MTab Value="0">支出分类</MTab>
-                        <MTab Value="1">收入分类</MTab>
-                    </MTabs>
+        @if (_isLoading)
+        {
+            <GroupedList Header="自定义" TestId="categories-skeleton">
+                @for (var i = 0; i < 3; i++)
+                {
+                    <div class="ft-skeleton-row" aria-hidden="true">
+                        <span class="ft-skeleton ft-skeleton--tile"></span>
+                        <span class="ft-skeleton-row__main">
+                            <span class="ft-skeleton ft-skeleton--title"></span>
+                        </span>
+                    </div>
+                }
+            </GroupedList>
+        }
+        else if (_loadFailed)
+        {
+            <EmptyState Icon="mdi-cloud-alert-outline" Title="分类加载失败" Text="稍后重试一下" TestId="categories-error">
+                <Action>
+                    <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-refresh" TestId="categories-retry" OnClick="RetryAsync">重试</GlassButton>
+                </Action>
+            </EmptyState>
+        }
+        else
+        {
+            @* 自定义分类：始终有「新建分类」行，没有自定义分类时它就是这一组的全部内容 *@
+            <GroupedList Header="自定义"
+                         Footer="@(CustomRows.Count > 0 ? "左滑分类可编辑或删除，点按进入编辑、设为默认。" : null)"
+                         TestId="custom-categories">
+                @foreach (var category in CustomRows)
+                {
+                    <SwipeRow @key="category.Id" TestId="category-row" data-category-id="@category.Id.ToString()">
+                        <Actions>
+                            <SwipeAction Icon="mdi-pencil" Label="编辑" Tone="ActionTone.Brand" TestId="swipe-edit" OnClick="() => OpenEdit(category)" />
+                            <SwipeAction Icon="mdi-delete" Label="删除" Tone="ActionTone.Danger" TestId="swipe-delete" OnClick="() => AskDelete(category)" />
+                        </Actions>
+                        <ChildContent>
+                            <ListCell Title="@category.Name"
+                                      Value="@ManagedItemPresentation.UsageText(category.BillCount)"
+                                      Chevron
+                                      TestId="category-cell"
+                                      OnClick="() => OpenEdit(category)">
+                                <Leading>
+                                    <span class="ft-tile ft-tile--soft ft-tile--@category.Tone" aria-hidden="true"><i class="mdi @category.Icon"></i></span>
+                                </Leading>
+                                <Badges>
+                                    @if (category.IsDefault)
+                                    {
+                                        <Badge Kind="BadgeKind.Brand" TestId="badge-default">默认</Badge>
+                                    }
+                                </Badges>
+                            </ListCell>
+                        </ChildContent>
+                    </SwipeRow>
+                }
+                <ListCell Title="新建分类" Class="ft-cell--brand" TestId="category-add-row" OnClick="OpenCreate">
+                    <Leading>
+                        <span class="ft-tile ft-tile--outline" aria-hidden="true"><i class="mdi mdi-plus"></i></span>
+                    </Leading>
+                </ListCell>
+            </GroupedList>
 
-                    <MTabsItems Value="_activeTab">
-                        <MTabItem Value="0">
-                            <MList>
-                                @foreach (var category in _expenseCategories)
-                                {
-                                    <MListItem>
-                                        <MListItemIcon>
-                                            <MIcon>@category.Icon</MIcon>
-                                        </MListItemIcon>
-                                        <MListItemContent>
-                                            <MListItemTitle>@category.Name</MListItemTitle>
-                                        </MListItemContent>
-                                        <MListItemAction Class="d-flex align-center">
-                                            <MButton Icon OnClick="() => SetDefaultCategory(category)">
-                                                <MIcon Color="@(category.IsDefault ? "warning" : "default")">mdi-star</MIcon>
-                                            </MButton>
-                                            @if (!category.IsPreset)
-                                            {
-                                                <MButton Icon OnClick="() => ShowEditDialog(category)">
-                                                    <MIcon>mdi-pencil</MIcon>
-                                                </MButton>
-                                                <MButton Icon OnClick="() => DeleteCategory(category)">
-                                                    <MIcon Color="error">mdi-delete</MIcon>
-                                                </MButton>
-                                            }
-                                            else
-                                            {
-                                                <MChip Small Outlined>预设</MChip>
-                                            }
-                                        </MListItemAction>
-                                    </MListItem>
-                                }
-                            </MList>
-                        </MTabItem>
+            @* 预设分类：只读，点按只能设为 / 取消默认 *@
+            <GroupedList Header="预设分类"
+                         Footer="预设分类不能修改或删除，点按可设为默认。"
+                         TestId="preset-categories">
+                @foreach (var category in PresetRows)
+                {
+                    <ListCell @key="category.Id"
+                              Title="@category.Name"
+                              Value="@ManagedItemPresentation.PresetLabel"
+                              TestId="preset-cell"
+                              OnClick="() => OpenPresetMenu(category)">
+                        <Leading>
+                            <span class="ft-tile ft-tile--soft ft-tile--@category.Tone" aria-hidden="true"><i class="mdi @category.Icon"></i></span>
+                        </Leading>
+                        <Badges>
+                            @if (category.IsDefault)
+                            {
+                                <Badge Kind="BadgeKind.Brand" TestId="badge-default">默认</Badge>
+                            }
+                        </Badges>
+                    </ListCell>
+                }
+            </GroupedList>
+        }
+    </ChildContent>
+</SecondaryPage>
 
-                        <MTabItem Value="1">
-                            <MList>
-                                @foreach (var category in _incomeCategories)
-                                {
-                                    <MListItem>
-                                        <MListItemIcon>
-                                            <MIcon>@category.Icon</MIcon>
-                                        </MListItemIcon>
-                                        <MListItemContent>
-                                            <MListItemTitle>@category.Name</MListItemTitle>
-                                        </MListItemContent>
-                                        <MListItemAction>
-                                            <MButton Icon OnClick="() => SetDefaultCategory(category)">
-                                                <MIcon Color="@(category.IsDefault ? "warning" : "default")">mdi-star</MIcon>
-                                            </MButton>
-                                            @if (!category.IsPreset)
-                                            {
-                                                <MButton Icon OnClick="() => ShowEditDialog(category)">
-                                                    <MIcon>mdi-pencil</MIcon>
-                                                </MButton>
-                                                <MButton Icon OnClick="() => DeleteCategory(category)">
-                                                    <MIcon Color="error">mdi-delete</MIcon>
-                                                </MButton>
-                                            }
-                                            else
-                                            {
-                                                <MChip Small Outlined>预设</MChip>
-                                            }
-                                        </MListItemAction>
-                                    </MListItem>
-                                }
-                            </MList>
-                        </MTabItem>
-                    </MTabsItems>
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-</MContainer>
+@* 新建 / 编辑分类（底部 Sheet；面板是共用的 CategoryFormSheet；编辑时的默认 / 删除是本页自己的操作，放进插槽） *@
+<CategoryFormSheet @bind-Visible="_sheetVisible"
+                   UserId="_userId"
+                   Type="_sheetType"
+                   Editing="FormTarget"
+                   OnSaved="OnCategorySavedAsync"
+                   OnClosed="OnSheetClosed">
+    <EditingExtras>
+        @if (_editing is { } editing)
+        {
+            <GroupedList>
+                <ListCell Icon="mdi-star" Tone="orange" Title="设为默认分类" Subtitle="@DefaultSubtitle(editing.Type)">
+                    <Trailing>
+                        <ToggleSwitch Value="@editing.IsDefault" ValueChanged="OnDefaultToggled" AriaLabel="设为默认分类" TestId="category-default-switch" />
+                    </Trailing>
+                </ListCell>
+            </GroupedList>
 
-<!-- 创建/编辑对话框 -->
-<MDialog @bind-Value="_showDialog" MaxWidth="500">
-    <MCard>
-        <MCardTitle>
-            @(_isEditing ? "编辑分类" : "创建分类")
-        </MCardTitle>
+            <GroupedList>
+                <ListCell Title="删除分类" Destructive TestId="category-delete-cell" OnClick="() => AskDelete(editing)" />
+            </GroupedList>
+        }
+    </EditingExtras>
+</CategoryFormSheet>
 
-        <MCardText>
-            <MForm @ref="_form" Model="_categoryModel" OnValidSubmit="SaveCategory">
-                <MTextField @bind-Value="_categoryModel.Name"
-                            Label="分类名称"
-                            Outlined
-                            Dense
-                            Required />
+@* 预设分类的菜单：只能设为 / 取消默认 *@
+<ActionSheet @bind-Visible="_presetMenuVisible"
+             Title="@_presetTarget?.Name"
+             Message="预设分类不能修改或删除"
+             OnClosed="OnPresetMenuClosed"
+             TestId="category-preset-sheet">
+    <ActionSheetItem Icon="mdi-star" TestId="preset-default" OnClick="TogglePresetDefaultAsync">
+        @CategoryPresentation.DefaultMenuLabel(_presetTarget?.Type ?? BillType.Expense, _presetTarget?.IsDefault == true)
+    </ActionSheetItem>
+</ActionSheet>
 
-                <MTextField @bind-Value="_categoryModel.Icon"
-                            Label="图标（mdi-xxx）"
-                            Outlined
-                            Dense
-                            Placeholder="mdi-tag" />
-
-                <MSelect @bind-Value="_categoryModel.Type"
-                         Items="_typeItems"
-                         ItemText="i => i.Text"
-                         ItemValue="i => i.Value"
-                         Label="分类类型"
-                         Outlined
-                         Dense />
-
-                <MTextField @bind-Value="_categoryModel.SortOrder"
-                            Label="排序顺序"
-                            Outlined
-                            Dense
-                            Type="number" />
-            </MForm>
-        </MCardText>
-
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CloseDialog">取消</MButton>
-            <MButton Color="primary" OnClick="SaveCategory">保存</MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+@* 删除确认 *@
+<GlassAlert @bind-Visible="_deleteVisible"
+            Title="@($"删除分类「{_deleteTarget?.Name}」？")"
+            Message="删除后该分类不再显示。分类下还有账单时无法删除，请先把账单改到其他分类。"
+            ConfirmText="删除"
+            Destructive
+            OnConfirm="DeleteConfirmedAsync"
+            OnClosed="OnDeleteClosed"
+            TestId="category-delete-alert" />
 
 @code {
-    private StringNumber _activeTab = 0;
-    private List<CategoryModel> _expenseCategories = new();
-    private List<CategoryModel> _incomeCategories = new();
-    private bool _showDialog;
-    private bool _isEditing;
-    private CategoryModel _categoryModel = new();
-    private MForm? _form;
+    /// <summary>一行分类（取数时一次性算好，渲染时不再查库）</summary>
+    private sealed record CategoryRow(
+        Guid Id,
+        string Name,
+        string Icon,
+        string Tone,
+        int SortOrder,
+        BillType Type,
+        bool IsPreset,
+        bool IsDefault,
+        int BillCount);
+
+    private static readonly IReadOnlyList<SegmentOption> SegmentOptions =
+        CategoryPresentation.Segments.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
+
+    private List<CategoryRow> _rows = new();
+    private string _segment = CategoryPresentation.SegmentExpense;
+
     private Guid _userId;
+    private bool _isLoading = true;
+    private bool _loadFailed;
 
-    private List<(string Text, BillType Value)> _typeItems = new()
-    {
-        ("支出", BillType.Expense),
-        ("收入", BillType.Income)
-    };
+    // 新建 / 编辑 Sheet（表单状态在 CategoryFormSheet 里；这里只记「是否显示」「新建哪种类型」与「正在编辑哪一个」）
+    private bool _sheetVisible;
+    private BillType _sheetType = BillType.Expense;
+    private CategoryRow? _editing;
 
-    protected override async Task OnInitializedAsync()
+    // 预设分类菜单、删除确认 Alert
+    private bool _presetMenuVisible;
+    private CategoryRow? _presetTarget;
+    private bool _deleteVisible;
+    private CategoryRow? _deleteTarget;
+
+    private BillType CurrentType => CategoryPresentation.TypeOf(_segment);
+
+    private List<CategoryRow> CustomRows => _rows.Where(r => !r.IsPreset && r.Type == CurrentType).ToList();
+
+    private List<CategoryRow> PresetRows => _rows.Where(r => r.IsPreset && r.Type == CurrentType).ToList();
+
+    /// <summary>表单的初始值：编辑时取正在编辑的那一行；新建时为空</summary>
+    private NameIconTarget? FormTarget => _editing is { } row ? new NameIconTarget(row.Id, row.Name, row.Icon, row.SortOrder) : null;
+
+    private static string DefaultSubtitle(BillType type) =>
+        type == BillType.Income ? "记收入时默认选中这个分类" : "记支出时默认选中这个分类";
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与账本页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // AuthenticationService 带电路级缓存，且对预渲染 / 电路断开做了安全封装（失败返回 null，保持 Guid.Empty）
         _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
-
-        await LoadCategories();
+        await LoadAsync();
+        _isLoading = false;
+        StateHasChanged();
     }
 
-    private async Task LoadCategories()
-    {
-        var categories = await CategoryService.GetCategoriesAsync(_userId);
-        var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
-
-        _expenseCategories = categories
-            .Where(c => c.Type == BillType.Expense)
-            .Select(c => new CategoryModel
-            {
-                Id = c.Id,
-                Name = c.Name,
-                Icon = c.Icon,
-                Type = c.Type,
-                IsPreset = c.IsPreset,
-                IsDefault = userDefault?.DefaultExpenseCategoryId == c.Id,
-                SortOrder = c.SortOrder
-            })
-            .ToList();
-
-        _incomeCategories = categories
-            .Where(c => c.Type == BillType.Income)
-            .Select(c => new CategoryModel
-            {
-                Id = c.Id,
-                Name = c.Name,
-                Icon = c.Icon,
-                Type = c.Type,
-                IsPreset = c.IsPreset,
-                IsDefault = userDefault?.DefaultIncomeCategoryId == c.Id,
-                SortOrder = c.SortOrder
-            })
-            .ToList();
-    }
-
-    private void ShowCreateDialog()
-    {
-        _isEditing = false;
-        var type = _activeTab?.ToString() == "1" ? BillType.Income : BillType.Expense;
-        _categoryModel = new CategoryModel
-        {
-            Type = type,
-            Icon = "mdi-tag"
-        };
-        _showDialog = true;
-    }
-
-    private void ShowEditDialog(CategoryModel category)
-    {
-        _isEditing = true;
-        _categoryModel = new CategoryModel
-        {
-            Id = category.Id,
-            Name = category.Name,
-            Icon = category.Icon,
-            Type = category.Type,
-            SortOrder = category.SortOrder
-        };
-        _showDialog = true;
-    }
-
-    private void CloseDialog()
-    {
-        _showDialog = false;
-    }
-
-    private async Task SaveCategory()
+    private async Task LoadAsync()
     {
         try
         {
-            if (_isEditing)
+            // 取数时一次性把「默认」「账单数」算好；同一个 DbContext 不支持并行查询，逐个统计，并与其它页面的读库排队
+            var rows = await DataGate.RunAsync(async () =>
             {
-                var category = new Core.Entities.Category
-                {
-                    Id = _categoryModel.Id,
-                    UserId = _userId,
-                    Name = _categoryModel.Name,
-                    Icon = _categoryModel.Icon ?? "mdi-tag",
-                    Type = _categoryModel.Type,
-                    SortOrder = _categoryModel.SortOrder
-                };
+                var categories = await CategoryService.GetCategoriesAsync(_userId);
+                var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
 
-                await CategoryService.UpdateCategoryAsync(category);
-                await PopupService.EnqueueSnackbarAsync("分类更新成功", AlertTypes.Success);
-            }
-            else
+                var loaded = new List<CategoryRow>(categories.Count);
+                foreach (var category in categories)
+                {
+                    var isDefault = category.Type == BillType.Income
+                        ? userDefault?.DefaultIncomeCategoryId == category.Id
+                        : userDefault?.DefaultExpenseCategoryId == category.Id;
+
+                    // 预设分类不显示账单数（右侧标注「预设」），省掉这几次查询
+                    var billCount = category.IsPreset ? 0 : await BillService.GetBillCountAsync(_userId, categoryId: category.Id);
+
+                    loaded.Add(new CategoryRow(
+                        category.Id,
+                        category.Name,
+                        CategoryPresentation.NormalizeIcon(category.Icon),
+                        CategoryPresentation.ToneFor(category.Name, category.Id),
+                        category.SortOrder,
+                        category.Type,
+                        category.IsPreset,
+                        isDefault,
+                        billCount));
+                }
+
+                return loaded;
+            });
+
+            _rows = rows;
+            _loadFailed = false;
+            SyncEditingRow();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载分类失败");
+            // 已经有数据时保留旧数据（只提示）；第一次就失败才整页显示错误状态
+            _loadFailed = _rows.Count == 0;
+            await PopupService.EnqueueSnackbarAsync($"加载分类失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _isLoading = true;
+        _loadFailed = false;
+        StateHasChanged();
+
+        await LoadAsync();
+        _isLoading = false;
+    }
+
+    /// <summary>
+    /// 列表重新加载后，让正在编辑的那一行指向最新数据（例如默认状态变了）
+    /// </summary>
+    private void SyncEditingRow()
+    {
+        if (_editing is not null)
+        {
+            _editing = _rows.FirstOrDefault(r => r.Id == _editing.Id) ?? _editing;
+        }
+    }
+
+    private void OnSegmentChanged(string segment)
+    {
+        _segment = segment;
+    }
+
+    // ------------------------------------------------------------------ 新建 / 编辑
+
+    private void OpenCreate()
+    {
+        _editing = null;
+        _sheetType = CurrentType;
+        _sheetVisible = true;
+    }
+
+    private void OpenEdit(CategoryRow category)
+    {
+        _editing = category;
+        _sheetType = category.Type;
+        _sheetVisible = true;
+    }
+
+    // Sheet 退出动画结束后清理「正在编辑」（动画期间保持原内容，避免闪动）
+    private void OnSheetClosed() => _editing = null;
+
+    // 保存成功（Sheet 已被要求收起）：重新加载列表
+    private async Task OnCategorySavedAsync(Category saved)
+    {
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------ 设为默认
+
+    private async Task OnDefaultToggled(bool makeDefault)
+    {
+        if (_editing is { } editing)
+        {
+            await SetDefaultAsync(editing, makeDefault);
+        }
+    }
+
+    private void OpenPresetMenu(CategoryRow category)
+    {
+        _presetTarget = category;
+        _presetMenuVisible = true;
+    }
+
+    private void OnPresetMenuClosed() => _presetTarget = null;
+
+    private async Task TogglePresetDefaultAsync()
+    {
+        // 菜单项先收起菜单再触发（此时 _presetTarget 仍有值，清理发生在退出动画结束后的 OnClosed）
+        if (_presetTarget is { } category)
+        {
+            await SetDefaultAsync(category, !category.IsDefault);
+        }
+    }
+
+    private async Task SetDefaultAsync(CategoryRow category, bool makeDefault)
+    {
+        try
+        {
+            var categoryId = makeDefault ? category.Id : (Guid?)null;
+            var result = category.Type == BillType.Income
+                ? await UserDefaultService.SetDefaultIncomeCategoryAsync(_userId, categoryId)
+                : await UserDefaultService.SetDefaultExpenseCategoryAsync(_userId, categoryId);
+
+            if (result)
             {
-                var category = new Core.Entities.Category
-                {
-                    UserId = _userId,
-                    Name = _categoryModel.Name,
-                    Icon = _categoryModel.Icon ?? "mdi-tag",
-                    Type = _categoryModel.Type,
-                    SortOrder = _categoryModel.SortOrder
-                };
-
-                await CategoryService.CreateCategoryAsync(category);
-                await PopupService.EnqueueSnackbarAsync("分类创建成功", AlertTypes.Success);
+                await PopupService.EnqueueSnackbarAsync(CategoryPresentation.DefaultChangedMessage(makeDefault), AlertTypes.Success);
+                await LoadAsync();
             }
-
-            CloseDialog();
-            await LoadCategories();
         }
         catch (Exception ex)
         {
@@ -283,8 +377,27 @@
         }
     }
 
-    private async Task DeleteCategory(CategoryModel category)
+    // ------------------------------------------------------------------ 删除
+
+    private void AskDelete(CategoryRow category)
     {
+        _deleteTarget = category;
+        _deleteVisible = true;
+    }
+
+    private void OnDeleteClosed()
+    {
+        _deleteTarget = null;
+    }
+
+    private async Task DeleteConfirmedAsync()
+    {
+        // Alert 先于 OnConfirm 关闭，此时 _deleteTarget 仍有值（清理发生在退出动画结束后的 OnClosed）
+        if (_deleteTarget is not { } category)
+        {
+            return;
+        }
+
         try
         {
             var result = await CategoryService.DeleteCategoryAsync(category.Id, _userId);
@@ -292,7 +405,13 @@
             if (result)
             {
                 await PopupService.EnqueueSnackbarAsync("分类删除成功", AlertTypes.Success);
-                await LoadCategories();
+
+                if (_editing?.Id == category.Id)
+                {
+                    _sheetVisible = false;
+                }
+
+                await LoadAsync();
             }
             else
             {
@@ -311,48 +430,5 @@
         {
             await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
-    }
-
-    private async Task SetDefaultCategory(CategoryModel category)
-    {
-        try
-        {
-            bool result;
-            if (category.Type == BillType.Expense)
-            {
-                result = await UserDefaultService.SetDefaultExpenseCategoryAsync(
-                    _userId,
-                    category.IsDefault ? null : category.Id);
-            }
-            else
-            {
-                result = await UserDefaultService.SetDefaultIncomeCategoryAsync(
-                    _userId,
-                    category.IsDefault ? null : category.Id);
-            }
-
-            if (result)
-            {
-                await PopupService.EnqueueSnackbarAsync(
-                    category.IsDefault ? "已取消默认分类" : "已设置为默认分类",
-                    AlertTypes.Success);
-                await LoadCategories();
-            }
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-    }
-
-    private class CategoryModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string? Icon { get; set; }
-        public BillType Type { get; set; }
-        public bool IsPreset { get; set; }
-        public bool IsDefault { get; set; }
-        public int SortOrder { get; set; }
     }
 }

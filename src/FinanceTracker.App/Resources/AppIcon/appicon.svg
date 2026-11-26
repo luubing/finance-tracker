@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  应用图标 · 背景层（冷启动设计稿 docs/design/cold-start：图标与启动画面同色，点开图标不再变色）。
+  品牌主渐变 160°：#7A45FF → #4318FF（= tokens.css 里的 ft-brand-2 → ft-brand 两个令牌）。
+  前景层（白色 wallet-outline）在 appiconfg.svg；Android 自适应图标分两层，iOS 在构建时合成一张。
+-->
+<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="brand" x1="0.329" y1="0.03" x2="0.671" y2="0.97">
+            <stop offset="0" stop-color="#7A45FF" />
+            <stop offset="1" stop-color="#4318FF" />
+        </linearGradient>
+    </defs>
+    <rect width="456" height="456" fill="url(#brand)" />
+</svg>

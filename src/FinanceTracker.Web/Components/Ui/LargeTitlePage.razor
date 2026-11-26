@@ -1,0 +1,70 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    一级页面「大标题页」模板（设计稿 02 · 账单；统计、我的也用它）：
+    顶部是一条粘在屏幕上方的导航栏（右侧放玻璃圆按钮），下面是 34px 的大标题；页面向上滚动、大标题滚到导航栏之下以后，
+    导航栏填上页面背景色，居中浮现同名的小标题（右侧按钮不动）。向下回到顶部时反过来。
+
+    结构（根节点就是 Tab 根页面的滚动容器 .ft-tabpage，带 data-scroll-root——「再点一次 Tab 回到顶部」、Tab 栏滚动收缩、下拉刷新都认它）：
+      header.ft-lnav（position: sticky; top: 0，高 = 状态栏安全区 + 44）
+        └ .ft-lnav__bar：居中的小标题（装饰，读屏忽略）+ 右侧操作插槽
+      [PullToRefresh]（给了 OnRefresh 才渲染，在大标题上方：下拉时把大标题推下去，导航栏不动）
+      h1.ft-large-title：大标题（读屏读它，页面里唯一的 h1）
+      .ft-tabpage__body：页面内容
+
+    折叠状态由 wwwroot/js/ui.js 的滚动监听写在根节点的 data-title-collapsed 上（Blazor 不渲染这个属性，重绘不会冲掉它）：
+    大标题的底边滚到导航栏底边之上就是 "true"，否则 "false"。折叠后的导航栏是不透明的页面背景色，不是玻璃，不占玻璃层预算；
+    导航栏里的玻璃圆按钮各自是一层，页面最多放两个（加上 Tab 栏正好 3 层，见 ADR 0007）。
+    观察属性（E2E）：根 data-testid（TestId）、data-title-collapsed；导航栏 large-nav、小标题 large-nav-title、大标题 large-title。
+*@
+<div class="ft-tabpage ft-lt @Class"
+     data-scroll-root
+     data-large-title
+     data-testid="@TestId"
+     aria-busy="@(Busy ? "true" : null)">
+    <header class="ft-lnav" data-testid="large-nav">
+        <div class="ft-lnav__bar">
+            <span class="ft-lnav__title" aria-hidden="true" data-testid="large-nav-title">@Title</span>
+            <div class="ft-lnav__actions">
+                @Actions
+            </div>
+        </div>
+    </header>
+
+    @if (OnRefresh.HasDelegate)
+    {
+        <PullToRefresh OnRefresh="OnRefresh" TestId="@RefreshTestId" />
+    }
+
+    <h1 class="ft-large-title" data-testid="large-title">@Title</h1>
+
+    <div class="ft-tabpage__body">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    /// <summary>标题：大标题与折叠后的小标题共用</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>导航栏右侧的操作（GlassButton，最多两个玻璃圆按钮）</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>页面内容</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>正在加载：根节点标记 aria-busy</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>下拉刷新：给了才会在大标题上方放下拉刷新区（只刷新本页数据）；下拉是唯一的刷新入口，不提供按钮形式的等价入口（ADR 0007）</summary>
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    /// <summary>下拉刷新区的 E2E 钩子</summary>
+    [Parameter] public string? RefreshTestId { get; set; } = "pull-refresh";
+
+    /// <summary>根节点附加样式类（页面自己的样式前缀，例如 ft-bills）</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子：根节点的 data-testid</summary>
+    [Parameter] public string? TestId { get; set; } = "large-title-page";
+}

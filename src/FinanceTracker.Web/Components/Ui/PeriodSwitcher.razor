@@ -1,0 +1,55 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    月份 / 年份胶囊切换器（设计稿 screens 03-stats ②）：白色胶囊，左右两个箭头按钮 + 居中的「2026年11月」。
+    统计 Tab 的月度用它切月份，年度（12 号）用它切年份——组件只管外观与按钮，「现在是哪一月」由调用方持有，
+    平移与边界规则在 StatisticsPresentation.ShiftMonth / ShiftYear（纯函数）。
+    - 两个箭头按钮的点击区域都是 44 × 44；到边界（CanPrevious / CanNext 为 false）时置灰且不可点。
+    - 读屏：箭头按钮的名称带上目标（「上一月，2026年10月」）；中间的文字是 aria-live="polite"，切换后会被播报。
+    - 观察属性（E2E）：根 data-testid（TestId）；按钮 {TestId}-prev / {TestId}-next；文字 {TestId}-label（data-label 同值）。
+*@
+<div class="ft-period @Class" role="group" aria-label="@AriaLabel" data-testid="@TestId">
+    <button type="button"
+            class="ft-period__btn"
+            aria-label="@PreviousLabel"
+            disabled="@(!CanPrevious)"
+            data-testid="@(TestId + "-prev")"
+            @onclick="OnPrevious"><i class="mdi mdi-chevron-left" aria-hidden="true"></i></button>
+    <span class="ft-period__label" aria-live="polite" data-label="@Label" data-testid="@(TestId + "-label")">@Label</span>
+    <button type="button"
+            class="ft-period__btn"
+            aria-label="@NextLabel"
+            disabled="@(!CanNext)"
+            data-testid="@(TestId + "-next")"
+            @onclick="OnNext"><i class="mdi mdi-chevron-right" aria-hidden="true"></i></button>
+</div>
+
+@code {
+    /// <summary>中间的文字，例如「2026年11月」</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>「上一个」按钮的读屏名称</summary>
+    [Parameter] public string PreviousLabel { get; set; } = "上一个";
+
+    /// <summary>「下一个」按钮的读屏名称</summary>
+    [Parameter] public string NextLabel { get; set; } = "下一个";
+
+    /// <summary>能否再往前（false 时「上一个」置灰）</summary>
+    [Parameter] public bool CanPrevious { get; set; } = true;
+
+    /// <summary>能否再往后（false 时「下一个」置灰）</summary>
+    [Parameter] public bool CanNext { get; set; } = true;
+
+    [Parameter] public EventCallback OnPrevious { get; set; }
+
+    [Parameter] public EventCallback OnNext { get; set; }
+
+    /// <summary>整个切换器的读屏名称（例如「月份」）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子前缀</summary>
+    [Parameter] public string TestId { get; set; } = "period";
+}

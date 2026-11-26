@@ -11,19 +11,27 @@ public class LogViewerService : ILogViewerService
     private readonly ILogger<LogViewerService> _logger;
     private readonly string _logDirectory;
 
-    public LogViewerService(ILogger<LogViewerService> logger)
+    /// <param name="logger">本服务自己的日志</param>
+    /// <param name="logDirectory">
+    /// Serilog 写日志文件的目录。
+    /// MAUI 宿主必须传它写日志用的目录（<c>FileSystem.AppDataDirectory/Logs</c>）：本类编译在不引用 MAUI 的类库里，
+    /// 自己算不出那个目录——早先用 <c>#if ANDROID || IOS</c> 取 <c>FileSystem</c> 的分支在这个类库里永远不会编译，
+    /// 真机上读的是另一个目录，日志页永远是空的。
+    /// 不传时用桌面默认目录（Web.Server 的开发场景；E2E 也传一个专用目录，「清除日志」才不会碰到开发机上真实的日志文件）。
+    /// </param>
+    public LogViewerService(ILogger<LogViewerService> logger, string? logDirectory = null)
     {
         _logger = logger;
-        // 根据平台设置日志目录
-#if ANDROID || IOS
-        _logDirectory = Path.Combine(FileSystem.AppDataDirectory, "Logs");
-#else
-        _logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FinanceTracker", "Logs");
-#endif
+        _logDirectory = string.IsNullOrWhiteSpace(logDirectory) ? DefaultLogDirectory() : logDirectory;
     }
 
+    /// <summary>桌面默认日志目录：%LOCALAPPDATA%\FinanceTracker\Logs</summary>
+    private static string DefaultLogDirectory() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FinanceTracker", "Logs");
+
     /// <summary>
-    /// 获取日志列表
+    /// 获取日志列表。日志文件读不出来时直接抛出异常（不吞成空列表）：
+    /// 调用方（错误日志页）靠它显示「加载失败 + 重试」，吞掉的话用户会把读取失败当成「暂无错误日志」。
     /// </summary>
     public async Task<(List<LogEntry> Logs, int TotalCount)> GetLogsAsync(
         DateTime? startDate = null,
@@ -33,57 +41,49 @@ public class LogViewerService : ILogViewerService
         int pageSize = 20,
         List<string>? levels = null)
     {
-        try
+        var allLogs = await ReadAllLogsAsync();
+
+        // 应用筛选条件
+        var filteredLogs = allLogs.AsQueryable();
+
+        if (startDate.HasValue)
         {
-            var allLogs = await ReadAllLogsAsync();
-
-            // 应用筛选条件
-            var filteredLogs = allLogs.AsQueryable();
-
-            if (startDate.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(l => l.Timestamp >= startDate.Value);
-            }
-
-            if (endDate.HasValue)
-            {
-                filteredLogs = filteredLogs.Where(l => l.Timestamp <= endDate.Value.AddDays(1).AddTicks(-1));
-            }
-
-            if (!string.IsNullOrWhiteSpace(searchText))
-            {
-                var searchLower = searchText.ToLower();
-                filteredLogs = filteredLogs.Where(l =>
-                    l.Message.ToLower().Contains(searchLower) ||
-                    l.ExceptionType.ToLower().Contains(searchLower) ||
-                    l.Source.ToLower().Contains(searchLower) ||
-                    l.FullMessage.ToLower().Contains(searchLower));
-            }
-
-            // 按日志级别筛选
-            if (levels != null && levels.Count > 0)
-            {
-                filteredLogs = filteredLogs.Where(l => levels.Contains(l.Level));
-            }
-
-            // 按时间倒序排序
-            var sortedLogs = filteredLogs.OrderByDescending(l => l.Timestamp).ToList();
-
-            var totalCount = sortedLogs.Count;
-
-            // 分页
-            var pagedLogs = sortedLogs
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-
-            return (pagedLogs, totalCount);
+            filteredLogs = filteredLogs.Where(l => l.Timestamp >= startDate.Value);
         }
-        catch (Exception ex)
+
+        if (endDate.HasValue)
         {
-            _logger.LogError(ex, "获取日志列表失败");
-            return (new List<LogEntry>(), 0);
+            filteredLogs = filteredLogs.Where(l => l.Timestamp <= endDate.Value.AddDays(1).AddTicks(-1));
         }
+
+        if (!string.IsNullOrWhiteSpace(searchText))
+        {
+            var searchLower = searchText.ToLower();
+            filteredLogs = filteredLogs.Where(l =>
+                l.Message.ToLower().Contains(searchLower) ||
+                l.ExceptionType.ToLower().Contains(searchLower) ||
+                l.Source.ToLower().Contains(searchLower) ||
+                l.FullMessage.ToLower().Contains(searchLower));
+        }
+
+        // 按日志级别筛选
+        if (levels != null && levels.Count > 0)
+        {
+            filteredLogs = filteredLogs.Where(l => levels.Contains(l.Level));
+        }
+
+        // 按时间倒序排序
+        var sortedLogs = filteredLogs.OrderByDescending(l => l.Timestamp).ToList();
+
+        var totalCount = sortedLogs.Count;
+
+        // 分页
+        var pagedLogs = sortedLogs
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return (pagedLogs, totalCount);
     }
 
     /// <summary>
@@ -146,6 +146,13 @@ public class LogViewerService : ILogViewerService
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             });
 
+            // 导出目录可能还不存在（桌面端的缓存目录第一次用）：先建出来，否则第一次导出必然失败
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
             await File.WriteAllTextAsync(filePath, json);
 
             _logger.LogInformation("日志已导出到: {FilePath}", filePath);
@@ -159,42 +166,32 @@ public class LogViewerService : ILogViewerService
     }
 
     /// <summary>
-    /// 获取日志统计信息
+    /// 获取日志统计信息。与 <see cref="GetLogsAsync"/> 一样，日志文件读不出来时抛出异常而不是返回全 0 的统计。
     /// </summary>
     public async Task<LogStatistics> GetStatisticsAsync()
     {
-        try
-        {
-            var allLogs = await ReadAllLogsAsync();
-            var today = DateTime.Today;
-            var weekStart = today.AddDays(-(int)today.DayOfWeek);
+        var allLogs = await ReadAllLogsAsync();
+        var today = DateTime.Today;
+        var weekStart = today.AddDays(-(int)today.DayOfWeek);
 
-            var statistics = new LogStatistics
-            {
-                TotalCount = allLogs.Count,
-                TodayCount = allLogs.Count(l => l.Timestamp.Date == today),
-                WeekCount = allLogs.Count(l => l.Timestamp >= weekStart),
-                TotalSizeBytes = CalculateTotalLogSize(),
-                EarliestLog = allLogs.MinBy(l => l.Timestamp)?.Timestamp,
-                LatestLog = allLogs.MaxBy(l => l.Timestamp)?.Timestamp,
-                ExceptionTypeCounts = allLogs
-                    .GroupBy(l => l.ExceptionType)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-                SourceCounts = allLogs
-                    .GroupBy(l => l.Source)
-                    .ToDictionary(g => g.Key, g => g.Count()),
-                LevelCounts = allLogs
-                    .GroupBy(l => l.Level)
-                    .ToDictionary(g => g.Key, g => g.Count())
-            };
-
-            return statistics;
-        }
-        catch (Exception ex)
+        return new LogStatistics
         {
-            _logger.LogError(ex, "获取日志统计失败");
-            return new LogStatistics();
-        }
+            TotalCount = allLogs.Count,
+            TodayCount = allLogs.Count(l => l.Timestamp.Date == today),
+            WeekCount = allLogs.Count(l => l.Timestamp >= weekStart),
+            TotalSizeBytes = CalculateTotalLogSize(),
+            EarliestLog = allLogs.MinBy(l => l.Timestamp)?.Timestamp,
+            LatestLog = allLogs.MaxBy(l => l.Timestamp)?.Timestamp,
+            ExceptionTypeCounts = allLogs
+                .GroupBy(l => l.ExceptionType)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            SourceCounts = allLogs
+                .GroupBy(l => l.Source)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            LevelCounts = allLogs
+                .GroupBy(l => l.Level)
+                .ToDictionary(g => g.Key, g => g.Count())
+        };
     }
 
     /// <summary>
@@ -213,6 +210,8 @@ public class LogViewerService : ILogViewerService
             .OrderByDescending(f => f)
             .ToList();
 
+        Exception? firstFailure = null;
+        var failedCount = 0;
         foreach (var file in logFiles)
         {
             try
@@ -234,8 +233,17 @@ public class LogViewerService : ILogViewerService
             }
             catch (Exception ex)
             {
+                // 个别文件读不出来（例如被占用）：记一条警告，其余文件照常展示
                 _logger.LogWarning(ex, "读取日志文件失败: {FileName}", file);
+                firstFailure ??= ex;
+                failedCount++;
             }
+        }
+
+        // 有日志文件却一个都没读出来，这不是「没有日志」而是读取失败：抛出去，让调用方显示失败而不是空状态
+        if (failedCount > 0 && failedCount == logFiles.Count)
+        {
+            throw new IOException($"{logFiles.Count} 个日志文件全部读取失败", firstFailure);
         }
 
         return logs;
@@ -263,10 +271,29 @@ public class LogViewerService : ILogViewerService
                 level = levelElement.GetString() ?? "Error";
             }
 
+            // 属性：除 Serilog 的保留字段（@ 开头）外都是上下文；SourceContext 单独作为「来源」，不放进上下文列表
+            var properties = new Dictionary<string, string>();
+            var renderable = new Dictionary<string, string>();
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.Name.StartsWith("@")) continue;
+
+                // 渲染消息模板时 SourceContext 也是可引用的属性
+                renderable[property.Name] = property.Value.ToString();
+                if (property.Name == "SourceContext") continue;
+                properties[property.Name] = property.Value.ToString();
+            }
+
+            // 消息：RenderedCompactJsonFormatter 写好了渲染后的 @m；应用用的 CompactJsonFormatter 只写模板 @mt（属性另列），
+            // 此时要自己把属性代入模板，否则「消息」永远是空的
             var message = string.Empty;
-            if (root.TryGetProperty("@m", out var messageElement))
+            if (root.TryGetProperty("@m", out var messageElement) && messageElement.ValueKind == JsonValueKind.String)
             {
                 message = messageElement.GetString() ?? string.Empty;
+            }
+            else if (root.TryGetProperty("@mt", out var templateElement) && templateElement.ValueKind == JsonValueKind.String)
+            {
+                message = LogMessageTemplate.Render(templateElement.GetString(), renderable);
             }
 
             var exceptionType = string.Empty;
@@ -282,14 +309,6 @@ public class LogViewerService : ILogViewerService
             if (root.TryGetProperty("SourceContext", out var sourceElement))
             {
                 source = sourceElement.GetString() ?? string.Empty;
-            }
-
-            // 提取其他属性
-            var properties = new Dictionary<string, string>();
-            foreach (var property in root.EnumerateObject())
-            {
-                if (property.Name.StartsWith("@") || property.Name == "SourceContext") continue;
-                properties[property.Name] = property.Value.ToString();
             }
 
             // 生成唯一ID（使用时间戳+文件名+行号）

@@ -1,5 +1,6 @@
 using FinanceTracker.Core.Entities;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Services;
 using FinanceTracker.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,9 +16,9 @@ namespace FinanceTracker.Infrastructure.Services;
 public class PendingBillService : IPendingBillService
 {
     /// <summary>
-    /// 待确认账单上限，防止异常场景下无限增长
+    /// 待确认账单上限，防止异常场景下无限增长（取接口上的同一个常量：批量加入的调用方要按它算剩余容量）
     /// </summary>
-    public const int MaxCount = 200;
+    public const int MaxCount = IPendingBillService.MaxCount;
 
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
 
@@ -51,12 +52,8 @@ public class PendingBillService : IPendingBillService
             await using var db = await _dbFactory.CreateDbContextAsync();
 
             // 去重：同一条支付可能同时触发短信+通知（如银行扣款短信 + 微信通知），
-            // 或系统对同一通知多次回调，按 来源+交易时间(±1分钟)+金额 判重
-            var duplicate = await db.PendingBills.AsNoTracking().AnyAsync(b =>
-                b.Source == pendingBill.Source &&
-                b.Amount == pendingBill.Amount &&
-                b.TransactionTime >= pendingBill.TransactionTime.AddMinutes(-1) &&
-                b.TransactionTime <= pendingBill.TransactionTime.AddMinutes(1));
+            // 或系统对同一通知多次回调，按 来源+交易时间(±1分钟)+金额 判重（规则见 PendingBillDeduplication）
+            var duplicate = await db.PendingBills.AsNoTracking().AnyAsync(PendingBillDeduplication.IsDuplicateOf(pendingBill));
 
             if (duplicate)
             {

@@ -84,6 +84,67 @@ public sealed class HttpLedgerMemberServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task 共享账本列表带着所有者_账本页据此展示所有者手机号()
+    {
+        var ledgerId = await CreateCloudLedgerAsync("家庭");
+        var memberId = await InviteInCloudAsync(ledgerId, LedgerMemberRole.Viewer);
+        await using var invitee = await _cloud.AddDeviceAsync(_inviteeCloudId, InviteePhone);
+        var service = CreateService(invitee, _inviteeCloudId);
+        await service.GetPendingInvitationsAsync(invitee.UserId);
+        await service.RespondAsync(memberId, invitee.UserId, accept: true);
+
+        var shared = Assert.Single(await service.GetSharedLedgersAsync(invitee.UserId));
+
+        Assert.NotNull(shared.User);                                  // 账本页要用所有者展示「所有者 138****0099」
+        Assert.Equal(_cloud.AccountId, shared.User.Id);
+        Assert.Equal(OwnerPhone, shared.User.PhoneNumber);
+    }
+
+    [Fact]
+    public async Task 成员数只统计已生效成员_待确认邀请时不暴露账本的成员数()
+    {
+        var ledgerId = await CreateCloudLedgerAsync("家庭");
+        var memberId = await InviteInCloudAsync(ledgerId, LedgerMemberRole.Editor);
+        await using var invitee = await _cloud.AddDeviceAsync(_inviteeCloudId, InviteePhone);
+        var service = CreateService(invitee, _inviteeCloudId);
+        Assert.Single(await service.GetPendingInvitationsAsync(invitee.UserId));
+
+        // 还只是待确认邀请：我不是这个账本的生效成员，不能借此知道它有几个成员
+        var beforeAccept = await service.GetActiveMemberCountsAsync(invitee.UserId, new[] { ledgerId });
+        Assert.Empty(beforeAccept);
+
+        await service.RespondAsync(memberId, invitee.UserId, accept: true);
+
+        var other = Guid.NewGuid();
+        var afterAccept = await service.GetActiveMemberCountsAsync(invitee.UserId, new[] { ledgerId, other });
+        Assert.Equal(2, afterAccept[ledgerId]);                       // 所有者 + 我
+        Assert.False(afterAccept.ContainsKey(other));                 // 不是我的账本 / 没有成员行：不出现
+        Assert.Empty(await service.GetActiveMemberCountsAsync(invitee.UserId, Array.Empty<Guid>()));
+    }
+
+    [Theory]
+    [InlineData(LedgerMemberRole.Viewer, true)]
+    [InlineData(LedgerMemberRole.Editor, false)]
+    public async Task 只读账本只认已生效的只读成员_待确认邀请不算_角色在本地缓存里判定(LedgerMemberRole role, bool expectedReadOnly)
+    {
+        var ledgerId = await CreateCloudLedgerAsync("家庭");
+        var memberId = await InviteInCloudAsync(ledgerId, role);
+        await using var invitee = await _cloud.AddDeviceAsync(_inviteeCloudId, InviteePhone);
+        var service = CreateService(invitee, _inviteeCloudId);
+        Assert.Single(await service.GetPendingInvitationsAsync(invitee.UserId));
+
+        // 还是待确认邀请：不是生效成员，不算只读成员（与服务层拒绝只读成员改账单是同一条规则）
+        Assert.Empty(await service.GetReadOnlyLedgerIdsAsync(invitee.UserId, new[] { ledgerId }));
+
+        await service.RespondAsync(memberId, invitee.UserId, accept: true);
+
+        var readOnly = await service.GetReadOnlyLedgerIdsAsync(invitee.UserId, new[] { ledgerId, Guid.NewGuid() });
+        Assert.Equal(expectedReadOnly, readOnly.Contains(ledgerId));
+        Assert.Equal(expectedReadOnly ? 1 : 0, readOnly.Count);
+        Assert.Empty(await service.GetReadOnlyLedgerIdsAsync(invitee.UserId, Array.Empty<Guid>()));
+    }
+
+    [Fact]
     public async Task 同机另一个账号占用了账本所有者的手机号_合并成员关系不失败()
     {
         var ledgerId = await CreateCloudLedgerAsync("家庭");
@@ -144,7 +205,62 @@ public sealed class HttpLedgerMemberServiceTests : IAsyncLifetime
         Assert.False(availability.IsInBackoff);
     }
 
+    [Fact]
+    public async Task 所有者移除成员后_本地缓存里该成员行同步标记为删除()
+    {
+        await using var owner = await _cloud.AddDeviceAsync();
+        var ledger = await owner.AddLedgerAsync("家庭");
+        var syncResult = await owner.Sync.SyncBillsAsync(owner.UserId);
+        Assert.True(syncResult.Success, syncResult.ErrorMessage);
+        var service = CreateService(owner, _cloud.AccountId);
+        var invited = await service.InviteAsync(ledger.Id, owner.UserId, InviteePhone, LedgerMemberRole.Editor);
+        await RespondInCloudAsync(invited.Id, accept: true);               // 被邀请人在自己的设备上接受
+        var beforeRemove = await service.GetMembersAsync(ledger.Id, owner.UserId);
+        Assert.Equal(2, beforeRemove.Count);                                // 所有者 + 新成员
+        var updatedAtBefore = beforeRemove.Single(m => m.Id == invited.Id).UpdatedAt;
+
+        await service.RemoveMemberAsync(ledger.Id, invited.Id, owner.UserId);
+
+        // 云端对「别人被移除」的拉取不再下发那条成员行：缓存必须由本地自己对齐，否则被移除的成员会一直留在列表里
+        var members = await service.GetMembersAsync(ledger.Id, owner.UserId);
+        Assert.Equal(LedgerMemberRole.Owner, Assert.Single(members).Role);
+        var row = await owner.Db.Context.LedgerMembers.IgnoreQueryFilters().AsNoTracking().SingleAsync(m => m.Id == invited.Id);
+        Assert.True(row.IsDeleted);                                        // 软删除，不是物理删除
+        Assert.Equal(updatedAtBefore, row.UpdatedAt);                      // 对齐云端不算编辑：更新时间不被盖成本机时钟
+
+        var counts = await service.GetActiveMemberCountsAsync(owner.UserId, new[] { ledger.Id });
+        Assert.Equal(1, counts[ledger.Id]);                                // 账本页的成员数 / 「共享」标记随之更新
+    }
+
+    [Fact]
+    public async Task 被移除的成员可以被重新邀请_云端更晚的成员行不会被本地的删除标记压住()
+    {
+        await using var owner = await _cloud.AddDeviceAsync();
+        var ledger = await owner.AddLedgerAsync("家庭");
+        var syncResult = await owner.Sync.SyncBillsAsync(owner.UserId);
+        Assert.True(syncResult.Success, syncResult.ErrorMessage);
+        var service = CreateService(owner, _cloud.AccountId);
+        var invited = await service.InviteAsync(ledger.Id, owner.UserId, InviteePhone, LedgerMemberRole.Editor);
+        await RespondInCloudAsync(invited.Id, accept: true);
+        await service.GetMembersAsync(ledger.Id, owner.UserId);
+        await service.RemoveMemberAsync(ledger.Id, invited.Id, owner.UserId);
+
+        var reinvited = await service.InviteAsync(ledger.Id, owner.UserId, InviteePhone, LedgerMemberRole.Viewer);
+
+        Assert.Equal(invited.Id, reinvited.Id);                            // 复用原成员行（ADR 0004）
+        Assert.False(reinvited.IsDeleted);
+        Assert.Equal(LedgerMemberStatus.Pending, reinvited.Status);
+        Assert.Equal(LedgerMemberRole.Viewer, reinvited.Role);
+    }
+
     // ───────────── 辅助 ─────────────
+
+    /// <summary>被邀请人在云端响应邀请（模拟对方在自己的设备上接受 / 拒绝）</summary>
+    private async Task RespondInCloudAsync(Guid memberId, bool accept)
+    {
+        await using var context = _cloud.CreateContext();
+        await new LedgerMemberService(context).RespondAsync(memberId, _inviteeCloudId, accept);
+    }
 
     /// <summary>直接在云端库里建一个归云端账号所有的账本</summary>
     private async Task<Guid> CreateCloudLedgerAsync(string name)
@@ -179,7 +295,7 @@ public sealed class HttpLedgerMemberServiceTests : IAsyncLifetime
 
     /// <summary>
     /// 替身云端 HTTP：把成员相关的写接口转给真实的云端 LedgerMemberService（以指定云端账号的身份）。
-    /// 只实现用到的两个接口：邀请成员、响应邀请。
+    /// 只实现用到的三个接口：邀请成员、响应邀请、移除成员。
     /// </summary>
     private sealed class CloudMemberApiHandler(FakeCloud cloud, Guid cloudAccountId) : HttpMessageHandler
     {
@@ -204,6 +320,14 @@ public sealed class HttpLedgerMemberServiceTests : IAsyncLifetime
                     .Include(m => m.User).Include(m => m.Ledger)
                     .SingleAsync(m => m.Id == member.Id, cancellationToken);
                 return Ok(LedgerMemberSyncDto.FromEntity(loaded));
+            }
+
+            var remove = Regex.Match(path, @"/api/ledgers/(?<ledger>[0-9a-fA-F-]{36})/members/(?<member>[0-9a-fA-F-]{36})$");
+            if (request.Method == HttpMethod.Delete && remove.Success)
+            {
+                await service.RemoveMemberAsync(
+                    Guid.Parse(remove.Groups["ledger"].Value), Guid.Parse(remove.Groups["member"].Value), cloudAccountId);
+                return Ok(new { });
             }
 
             var respond = Regex.Match(path, @"/api/invitations/(?<member>[0-9a-fA-F-]{36})/respond$");

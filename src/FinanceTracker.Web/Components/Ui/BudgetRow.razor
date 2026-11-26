@@ -1,0 +1,63 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    预算行（设计稿 06 / screens 01-home、09-budgets）：图标块 + 名称（+ 灰色小字的范围）+ 右上角文字说明 + 进度条。
+    三种状态——正常（品牌色）/ 接近上限 ≥ 80%（橙）/ 超支（红）——除了进度条颜色，文字说明也随状态变化
+    （剩余 / 仅剩 / 超支 / 已用完），颜色不是唯一线索。文字与状态判定都在 BudgetRowModel 里（BudgetPresentation）。
+    - 可点按（预算页）：给了 OnClick，名称变成一个按钮（读屏名称 = 「编辑预算：名称，状态文字」），
+      它的点击区域用伪元素铺满整行——整行都能点，但进度条（role="progressbar"）不会被嵌进按钮里（按钮的子节点对读屏是「纯展示」的）。
+      没给 OnClick（首页的预算区）名称就是普通文字。
+    - 观察属性（E2E）：data-testid（默认 budget-row）、data-state = normal | warning | over、data-percent（显示的使用百分比）；
+      名称 budget-name（可点按时是按钮）、文字说明 budget-remain，进度条 budget-progress（data-tone）。
+*@
+<div class="ft-budgetrow"
+     data-testid="@TestId"
+     data-budget-id="@Model.BudgetId"
+     data-state="@BudgetPresentation.StateKey(Model.State)"
+     data-percent="@Model.ShownPercent">
+    <span class="ft-tile ft-tile--soft ft-tile--@Model.Tone" aria-hidden="true"><i class="mdi @Model.Icon"></i></span>
+    <div class="ft-budgetrow__main">
+        <div class="ft-budgetrow__head">
+            <span class="ft-budgetrow__title">
+                @if (OnClick.HasDelegate)
+                {
+                    <button type="button" class="ft-budgetrow__name ft-budgetrow__open" aria-label="@BudgetPagePresentation.OpenAriaLabel(Model)" data-testid="budget-name" @onclick="HandleClick">@Model.Name</button>
+                }
+                else
+                {
+                    <span class="ft-budgetrow__name" data-testid="budget-name">@Model.Name</span>
+                }
+                @if (!string.IsNullOrEmpty(Model.Tag))
+                {
+                    <span class="ft-budgetrow__tag" data-testid="budget-tag">@Model.Tag</span>
+                }
+            </span>
+            <span class="ft-budgetrow__remain" data-testid="budget-remain">@Model.RemainText</span>
+        </div>
+        <ProgressBar Percent="Model.BarPercent"
+                     Tone="ToneOf(Model.State)"
+                     AriaLabel="@Model.Name"
+                     AriaValueText="@Model.AriaValueText"
+                     TestId="budget-progress" />
+    </div>
+</div>
+
+@code {
+    /// <summary>要显示的预算行</summary>
+    [Parameter, EditorRequired] public BudgetRowModel Model { get; set; } = null!;
+
+    /// <summary>点按整行（参数是预算 Id）；不给就是只读行</summary>
+    [Parameter] public EventCallback<Guid> OnClick { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "budget-row";
+
+    private Task HandleClick() => OnClick.InvokeAsync(Model.BudgetId);
+
+    private static ProgressTone ToneOf(BudgetState state) => state switch
+    {
+        BudgetState.Over => ProgressTone.Danger,
+        BudgetState.Warning => ProgressTone.Warning,
+        _ => ProgressTone.Brand,
+    };
+}

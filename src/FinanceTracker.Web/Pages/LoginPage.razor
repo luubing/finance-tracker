@@ -1,77 +1,108 @@
 @page "/login"
 @layout AuthLayout
 @using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Shared.Validators
 @using FinanceTracker.Web.Services
 @inject IAuthService AuthService
 @inject AuthenticationService AuthStateService
 @inject NavigationManager Navigation
 @inject IPopupService PopupService
 
-<MContainer Style="max-width: 400px; margin-top: 100px;">
-    <MCard>
-        <MCardTitle Class="text-center">
-            <MIcon Large Color="primary" Class="mb-2">mdi-wallet</MIcon>
-            <div class="text-h4 font-weight-bold">记账本</div>
-        </MCardTitle>
+@*
+    登录页（设计稿 05 · 二级页面与弹层 / screens 12-login）：沉浸式渐变背景铺满整屏（含状态栏之下）+ 玻璃 Logo，
+    底部是白色圆角面板——手机号输入、校验提示、「登录 / 注册」主按钮。无验证码，首次使用手机号自动注册。
 
-        <MCardText>
-            <MForm @ref="_form" Model="_model" OnValidSubmit="HandleLogin">
-                <MTextField @bind-Value="_model.PhoneNumber"
-                            Placeholder="请输入手机号"
-                            Outlined
-                            Dense
-                            Rules="PhoneNumberRules"
-                            Type="tel"
-                            maxlength="11">
-                    <PrependInnerContent>
-                        <MIcon>mdi-phone</MIcon>
-                    </PrependInnerContent>
-                </MTextField>
+    认证行为与改造前完全一致（本页只换外观）：
+      · 手机号规则、提交时的校验、RegisterOrLoginAsync → SaveUserInfoAsync → 回到首页（replace）、失败走错误 Toast，都没动；
+      · 唯一新增：提交前去掉手机号首尾空格（账本成员页邀请手机号同一做法），规则集中在 LoginPresentation。
+    布局：
+      · 使用 AuthLayout（没有页面栈、没有 Tab 栏）；根节点占满整屏高度，背景渐变声明 data-statusbar-bg="dark"（状态栏用白色图标）。
+      · 面板贴底，上方的品牌区弹性伸缩：键盘弹出、可视高度变小时，品牌区先被压缩（超出部分被面板盖住），面板与按钮始终在可视范围内；
+        面板的左右 / 底部内边距让出安全区。
+      · 校验提示的位置预留固定高度：提示出现不会把按钮顶下去（输入框失焦会先于「点按钮」发生，位置一动点击就落空了）。
+    输入框是「不受控」的（与搜索框同一做法）：内容由用户键入、由浏览器持有，不把 _phone 回写成 value——Blazor Server 下回写会用
+    往返之前的旧值盖掉用户在往返期间继续敲的字（敲得快时字符丢失 / 闪烁）；_phone 只用来在提交时取值。输入框的 maxlength=11 沿用旧页面。
+    观察属性（E2E）：login-page、login-title、login-phone（输入框）、login-error（校验提示）、login-submit（按钮）。
+*@
+@* data-ft-ready：首屏就绪标记，启动加载页（wwwroot/js/boot.js）据此交接——本页渲染出来就是就绪（没有要等的数据） *@
+<div class="ft-login" data-statusbar-bg="dark" data-testid="login-page" data-ft-ready="login">
+    <div class="ft-login__hero">
+        <span class="ft-login__orb ft-login__orb--a" aria-hidden="true"></span>
+        <span class="ft-login__orb ft-login__orb--b" aria-hidden="true"></span>
+        <span class="ft-login__orb ft-login__orb--c" aria-hidden="true"></span>
+        <div class="ft-login__brand">
+            <span class="ft-login__logo ft-glass-dark" aria-hidden="true"><i class="mdi mdi-wallet-outline"></i></span>
+            <h1 class="ft-login__name" data-testid="login-title">@LoginPresentation.AppName</h1>
+            <p class="ft-login__slogan">@LoginPresentation.Slogan</p>
+        </div>
+    </div>
 
-                <MButton Type="submit"
-                         Color="primary"
-                         Block
-                         Large
-                         Loading="_loading"
-                         Disabled="_loading">
-                    登录/注册
-                </MButton>
-            </MForm>
-        </MCardText>
+    <form class="ft-login__panel" novalidate @onsubmit="SubmitAsync" @onsubmit:preventDefault data-testid="login-panel">
+        <h2 class="ft-login__title">@LoginPresentation.PanelTitle</h2>
+        <p class="ft-login__hint">@LoginPresentation.PanelHint</p>
 
-        <MCardActions Class="px-4 pb-4">
-            <MAlert Type="AlertTypes.Info" Dense Text Class="mb-0">
-                首次使用手机号将自动注册
-            </MAlert>
-        </MCardActions>
-    </MCard>
-</MContainer>
+        <label class="ft-login__field @(_error is null ? null : "ft-login__field--error")">
+            <span class="ft-login__country" aria-hidden="true">@LoginPresentation.CountryCode</span>
+            <input class="ft-login__input"
+                   @ref="_phoneInput"
+                   type="tel"
+                   inputmode="numeric"
+                   autocomplete="tel-national"
+                   enterkeyhint="go"
+                   maxlength="@LoginPresentation.PhoneMaxLength"
+                   placeholder="@LoginPresentation.PhonePlaceholder"
+                   aria-label="@LoginPresentation.PhoneLabel"
+                   aria-invalid="@(_error is null ? null : "true")"
+                   aria-describedby="login-error"
+                   data-testid="login-phone"
+                   @oninput="OnPhoneInput" />
+        </label>
+
+        @* 提示行预留固定高度（见上方说明）；role=alert 让读屏在提示出现时立刻播报 *@
+        <p class="ft-login__error" id="login-error" role="alert" data-testid="login-error">@_error</p>
+
+        <GlassButton Kind="ButtonKind.Brand"
+                     Large
+                     Block
+                     Type="submit"
+                     Busy="_loading"
+                     AriaLabel="@(_loading ? LoginPresentation.SubmittingLabel : null)"
+                     TestId="login-submit">@LoginPresentation.SubmitText</GlassButton>
+    </form>
+</div>
 
 @code {
-    private MForm? _form;
-    private LoginModel _model = new();
+    private ElementReference _phoneInput;
+    private string _phone = string.Empty;
+    private string? _error;
     private bool _loading;
 
-    private List<Func<string, StringBoolean>> PhoneNumberRules => new()
+    private void OnPhoneInput(ChangeEventArgs e)
     {
-        value =>
-        {
-            var result = PhoneValidator.Validate(value);
-            return result.IsValid ? true : result.ErrorMessage!;
-        }
-    };
+        _phone = e.Value?.ToString() ?? string.Empty;
 
-    private async Task HandleLogin()
+        // 用户在改了：旧的提示不再成立，等下一次提交再校验（边输入边报错只会吓人）
+        _error = null;
+    }
+
+    private async Task SubmitAsync()
     {
         if (_loading) return;
+
+        var phone = LoginPresentation.Normalize(_phone);
+        _error = LoginPresentation.ValidatePhone(phone);
+        if (_error is not null)
+        {
+            // 把焦点还给输入框，方便直接改（键盘用户 / 软键盘已经收起时）
+            await _phoneInput.FocusAsync();
+            return;
+        }
 
         _loading = true;
 
         try
         {
-            // 调用本地服务进行登录
-            var user = await AuthService.RegisterOrLoginAsync(_model.PhoneNumber);
+            // 调用本地服务进行登录（首次使用该手机号会自动注册）
+            var user = await AuthService.RegisterOrLoginAsync(phone);
 
             // 保存用户信息
             await AuthStateService.SaveUserInfoAsync(user.Id, user.PhoneNumber);
@@ -81,16 +112,11 @@
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"登录失败: {ex.GetUserMessage()}", AlertTypes.Error);
+            await PopupService.EnqueueSnackbarAsync(LoginPresentation.FailureMessage(ex.GetUserMessage()), AlertTypes.Error);
         }
         finally
         {
             _loading = false;
         }
-    }
-
-    private class LoginModel
-    {
-        public string PhoneNumber { get; set; } = string.Empty;
     }
 }

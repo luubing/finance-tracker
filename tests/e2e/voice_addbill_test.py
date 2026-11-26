@@ -1,92 +1,75 @@
 # -*- coding: utf-8 -*-
 """
-E2E 测试：语音录入功能集成验证（记账页语音栏）。
+E2E 测试：语音录入功能集成验证（记一笔 Sheet 标题栏右侧的麦克风，手机视口）。
 
 前置条件：
-  1. pip install playwright && python -m playwright install chromium
+  1. pip install -r tests/e2e/requirements.txt && python -m playwright install chromium
   2. FinanceTracker.Web.Server 已用 http 启动配置运行（Development 环境，监听 http://localhost:5999）：
-     dotnet run --project server/FinanceTracker.Web.Server --launch-profile http
+     powershell tests/e2e/server.ps1 -Action start
 
 验证点：
-  - /add-bill 页面正常加载（分类/支付渠道渲染，既有回归点）
-  - 语音录入栏正常渲染（麦克风按钮 + 引导文案/降级提示）
-  - billVoiceInput.js 模块可加载，无头浏览器（无 Web Speech API）下静默降级不报错
-  - 无页面 JS 错误（OnInitializedAsync 中语音能力检测不崩溃）
+  - 旧地址 /add-bill 深链进入后升起记一笔 Sheet（分类 / 支付渠道渲染，既有回归点）
+  - 麦克风按钮渲染在标题栏右侧，读屏名称写明「语音记账」
+  - billVoiceInput.js 模块可加载，无头浏览器（无 Web Speech API）下静默降级：置灰 + 点按给出一句说明，手动填写不受影响
+  - 无页面 JS 错误（语音能力检测在 Sheet 升起时执行，不崩溃）
 
 注意：真实语音识别（麦克风）无法在无头浏览器中自动化，解析逻辑由单元测试覆盖
-（tests/unit/FinanceTracker.Tests/Services/BillVoiceParserTests.cs）。
+（tests/unit/FinanceTracker.Tests/Services/BillVoiceParserTests.cs）；本脚本只验证「入口」与「不支持环境的降级」。
+语音覆盖层（实时转写、高亮与芯片、说完了 / 取消 / 失败、预填与保存、降级）由 voice_overlay_test.py 注入假的 SpeechRecognition 覆盖；
+按住说话 / 真机手感见 ticket 17 的人工验收清单。
 """
 import sys
-import os
-import json
-from playwright.sync_api import sync_playwright
 
-# ======== 配置 ========
-BASE_URL = os.environ.get("E2E_BASE_URL", "http://localhost:5999")   # Web.Server 的 http 启动配置（见 launchSettings.json）
-TEST_PHONE = "13800138000"
-TIMEOUT_MS = 30_000
+from e2e_base import TestRun, dump_html, login, open_app, require_server, session, shot, wait_attr
 
-# Windows 控制台默认 GBK，统一切换 UTF-8
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+
+def toast_shown(page, text: str) -> bool:
+    try:
+        page.wait_for_function(
+            "(t) => [...document.querySelectorAll('.m-enqueued-snackbars .m-snack__wrapper')].some((e) => e.textContent.includes(t))",
+            arg=text,
+            timeout=8000,
+        )
+        return True
+    except Exception:  # noqa: BLE001 - 超时就是没出现
+        return False
 
 
 def main() -> int:
-    console_msgs: list[str] = []
-    page_errors: list[str] = []
-    result: dict = {}
+    require_server()
+    run = TestRun("voice-addbill")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.on("console", lambda m: console_msgs.append(f"[{m.type}] {m.text}"))
-        page.on("pageerror", lambda e: page_errors.append(str(e)))
+    with session() as s:
+        page = s.page
+        login(page)
 
-        page.goto(f"{BASE_URL}/", wait_until="networkidle", timeout=TIMEOUT_MS)
-        page.wait_for_selector("input[type='tel']", timeout=25_000)
+        # ---- 深链进入记一笔 Sheet ----
+        open_app(page, "/add-bill")
+        sheet = page.get_by_test_id("addbill-sheet")
+        sheet.wait_for(state="visible")
+        wait_attr(page, '[data-testid="addbill-sheet"]', "data-ready", "true")
 
-        # ---- 登录 ----
-        page.locator("input[type='tel']").fill(TEST_PHONE)
-        page.get_by_role("button", name="登录/注册").click()
-        page.wait_for_timeout(4_000)
+        body = sheet.inner_text()
+        run.check("记账 Sheet 加载（标题「记一笔」）", "记一笔" in body)
+        run.check("分类渲染（餐饮美食）", "餐饮美食" in body)
+        run.check("支付渠道渲染", "支付渠道" in body)
 
-        # ---- 直接进入记一笔页面 ----
-        page.goto(f"{BASE_URL}/add-bill", wait_until="networkidle", timeout=TIMEOUT_MS)
-        page.wait_for_timeout(3_000)
+        # ---- 语音入口 ----
+        mic = page.get_by_test_id("addbill-voice")
+        run.check("麦克风按钮渲染", mic.count() == 1 and mic.is_visible())
+        label = mic.get_attribute("aria-label") or ""
+        disabled = mic.get_attribute("aria-disabled") == "true"
+        # 两种合法状态：环境支持时可用；不支持时置灰、读屏名称注明（均不应报错）
+        run.check("语音就绪或降级（置灰 + 说明）", "语音记账" in label and ("不支持" in label) == disabled, label)
+        if disabled:
+            mic.click()
+            run.check("不支持语音识别的环境：点按只给一句说明，键盘仍可用", toast_shown(page, "当前环境不支持语音识别") and page.get_by_test_id("keypad").is_visible())
 
-        body = page.inner_text("body")
-        result["add_bill_loaded"] = "选择分类" in body
-        result["categories_rendered"] = "餐饮" in body
-        result["payment_channels_rendered"] = "支付渠道" in body
+        shot(page, "voice-addbill")
+        dump_html(page, "voice_addbill_add-bill")
+        run.check_clean(s.errors)
 
-        # ---- 语音录入栏 ----
-        result["voice_bar_rendered"] = page.locator(".voice-bar").count() >= 1
-        result["mic_button_present"] = page.locator(".voice-bar button").count() >= 1
-        # 两种合法状态：环境支持时显示引导文案；不支持时显示降级提示（均不应报错）
-        result["voice_ready_or_degraded"] = "说出账单" in body or "当前环境不支持语音识别" in body
-
-        with open("e2e_voice_addbill_page.html", "w", encoding="utf-8") as f:
-            f.write(page.content())
-
-        browser.close()
-
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    print("=== PAGE ERRORS ===")
-    print("\n".join(page_errors) or "(none)")
-    print("=== CONSOLE ERRORS ===")
-    print("\n".join(m for m in console_msgs if m.startswith("[error]")) or "(none)")
-
-    ok = (
-        result["add_bill_loaded"]
-        and result["categories_rendered"]
-        and result["payment_channels_rendered"]
-        and result["voice_bar_rendered"]
-        and result["mic_button_present"]
-        and result["voice_ready_or_degraded"]
-        and not page_errors
-    )
-    print("E2E VOICE ADDBILL TEST:", "PASSED" if ok else "FAILED")
-    return 0 if ok else 1
+    return run.finish()
 
 
 if __name__ == "__main__":

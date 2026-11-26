@@ -1,385 +1,440 @@
 @page "/budgets"
-@using FinanceTracker.Core.Enums
-@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Components.Budgets
 @inject IBudgetService BudgetService
 @inject ICategoryService CategoryService
 @inject ILedgerService LedgerService
 @inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
 @inject IPopupService PopupService
+@inject ILogger<Budgets> Logger
 
-<PStackPageBar Title="预算"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    预算页（二级页面模板，设计稿 05 / screens 09-budgets）：
+      · 顶部：月份胶囊（上一月 / 下一月）+ 账本胶囊（全部账本 / 某个账本）；预算月份按应用时区（ADR 0005）
+      · 环形总览卡：使用率、已用、剩余（超支时是红色的「超支 ¥…」）；状态色三档（正常 / ≥ 80% 接近上限 / 超支），颜色之外有文字
+      · 「日均可用」提示（只读）：总预算剩余额度 ÷ 本月剩余天数（含今天）；只在查看当前月份、有总预算且没超支时显示
+      · 分类预算进度行（图标、分类名、已用 / 额度、进度条）：左滑出现「编辑」「删除」；点按整行进入编辑 Sheet
+        （Sheet 里有「删除预算」——左滑操作的非滑动等价入口）；末尾「新建分类预算」行
+      · 右上角「＋」与各处的「新建」都打开同一个底部 Sheet（BudgetFormSheet）；删除用 Alert 确认
+    预算规则（总预算 + 分类预算、可按账本独立设置、同月同范围同分类唯一）全部由 BudgetService 校验，本页不绕过：
+    只调用既有服务，唯一性等应用层校验的提示显示在表单里（Toast 只留给意外错误）。
+    指定账本时的口径沿用服务层：显示该账本的预算 + 全部账本的预算；不指定账本只显示全部账本的预算。
+    读库经过 PageDataGate 与常驻的 Tab 根页面排队（它们共用一个 DbContext）。
+    观察属性（E2E）：budgets-page、budgets-content（data-state = loading | error | empty | ready，data-year / data-month / data-ledger 是已加载完成的筛选）、
+    budget-add、budget-period（-prev / -next / -label）、budget-ledger-pill、budget-ledger-sheet / budget-ledger-all / budget-ledger-option、
+    budget-overview 系列（见 BudgetOverviewCard）、budget-daily（data-days / data-per-day）、budget-total-guide、
+    budget-other-totals、budget-category-group、budget-swipe / swipe-edit / swipe-delete、budget-row 系列（见 BudgetRow）、
+    budget-category-add、budget-empty / budget-empty-add、budgets-error / budgets-retry、budget-delete-alert。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <MRow>
-        <MCol Cols="12">
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-wallet</MIcon>
-                    预算管理
-                    <MSpacer />
-                    <MButton Color="primary" OnClick="ShowCreateDialog">
-                        <MIcon Class="mr-2">mdi-plus</MIcon>
-                        添加预算
-                    </MButton>
-                </MCardTitle>
+<SecondaryPage Title="预算" TestId="budgets-page">
+    <Actions>
+        <GlassButton Kind="ButtonKind.Brand" Round Icon="mdi-plus" AriaLabel="新建预算" TestId="budget-add" OnClick="OpenCreate" />
+    </Actions>
+    <ChildContent>
+        <div class="ft-budgets"
+             data-testid="budgets-content"
+             data-state="@ContentState"
+             data-year="@_loadedYear"
+             data-month="@_loadedMonth"
+             data-ledger="@(_loadedLedgerId?.ToString())"
+             aria-busy="@(_isLoading ? "true" : null)">
+            <div class="ft-budgets__filters" data-testid="budget-filters">
+                <PeriodSwitcher Label="@StatisticsPresentation.MonthLabel(_year, _month)"
+                                PreviousLabel="@StatisticsPresentation.PreviousMonthLabel(_year, _month)"
+                                NextLabel="@StatisticsPresentation.NextMonthLabel(_year, _month)"
+                                CanPrevious="@StatisticsPresentation.CanShiftMonth(_year, _month, -1)"
+                                CanNext="@StatisticsPresentation.CanShiftMonth(_year, _month, 1)"
+                                OnPrevious="PreviousMonthAsync"
+                                OnNext="NextMonthAsync"
+                                AriaLabel="预算月份"
+                                TestId="budget-period" />
+                @if (_ledgers.Count > 0)
+                {
+                    <FilterPill Text="@LedgerPillText"
+                                Icon="mdi-book-outline"
+                                AriaLabel="@StatisticsPresentation.LedgerPillAriaLabel(LedgerPillText)"
+                                TestId="budget-ledger-pill"
+                                OnClick="OpenLedgerSheet" />
+                }
+            </div>
 
-                <MCardText>
-                    <!-- 月份切换 -->
-                    <div class="d-flex align-center mb-2">
-                        <MButton Icon OnClick="PreviousMonth">
-                            <MIcon>mdi-chevron-left</MIcon>
-                        </MButton>
-                        <div class="text-subtitle-1 font-weight-bold mx-2">@($"{_year}年{_month:D2}月")</div>
-                        <MButton Icon OnClick="NextMonth">
-                            <MIcon>mdi-chevron-right</MIcon>
-                        </MButton>
-                    </div>
-
-                    <!-- 账本筛选 -->
-                    <MSelect Value="_selectedLedgerId"
-                             ValueChanged="@((Guid? v) => OnLedgerFilterChanged(v))"
-                             Items="_ledgers"
-                             ItemText="l => l.Name"
-                             ItemValue="l => (Guid?)l.Id"
-                             Label="账本（不选仅显示全部账本的预算）"
-                             Outlined
-                             Dense
-                             Clearable
-                             HideDetails="true"
-                             Class="mb-2" />
-
-                    @if (_statuses.Count == 0)
+            @if (_isLoading)
+            {
+                <div class="ft-budgetcard ft-budgetcard--skeleton" data-testid="budgets-skeleton" aria-hidden="true">
+                    <span class="ft-skeleton ft-budgetcard__sk-ring"></span>
+                    <span class="ft-budgetcard__sk-lines">
+                        <span class="ft-skeleton ft-skeleton--sub"></span>
+                        <span class="ft-skeleton ft-budgetcard__sk-amount"></span>
+                        <span class="ft-skeleton ft-skeleton--title"></span>
+                    </span>
+                </div>
+                <GroupedList Header="@BudgetPagePresentation.CategoryGroupTitle">
+                    @for (var i = 0; i < 3; i++)
                     {
-                        <div class="text-center py-8">
-                            <MIcon Size="64" Color="grey lighten-1">mdi-wallet-outline</MIcon>
-                            <div class="text-h6 grey--text text--lighten-1 mt-4">当月暂无预算，点击右上角添加</div>
+                        <div class="ft-skeleton-row" aria-hidden="true">
+                            <span class="ft-skeleton ft-skeleton--tile"></span>
+                            <span class="ft-skeleton-row__main">
+                                <span class="ft-skeleton ft-skeleton--title"></span>
+                            </span>
                         </div>
                     }
-                    else
+                </GroupedList>
+            }
+            else if (_loadFailed)
+            {
+                <EmptyState Icon="mdi-cloud-alert-outline" Title="预算加载失败" Text="稍后重试一下" TestId="budgets-error">
+                    <Action>
+                        <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-refresh" TestId="budgets-retry" OnClick="RetryAsync">重试</GlassButton>
+                    </Action>
+                </EmptyState>
+            }
+            else if (_model is { IsEmpty: true })
+            {
+                <EmptyState Icon="mdi-wallet-outline" Title="还没有预算" Text="设定额度，快超支时提醒你" TestId="budget-empty">
+                    <Action>
+                        <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-plus" TestId="budget-empty-add" OnClick="OpenCreate">新建预算</GlassButton>
+                    </Action>
+                </EmptyState>
+            }
+            else if (_model is { } model)
+            {
+                if (model.Overview is { } overview)
+                {
+                    <BudgetOverviewCard Model="overview" OnEdit="() => OpenEdit(overview.BudgetId)" />
+                }
+                else
+                {
+                    @* 只有分类预算、没有总预算：引导设置总预算（有了总预算才有总览与「日均可用」） *@
+                    <GroupedList TestId="budget-total-group">
+                        <ListCell Icon="mdi-wallet"
+                                  Tone="purple"
+                                  Title="设置总预算"
+                                  Subtitle="给这个月定一个总额度，随时看还剩多少"
+                                  Chevron
+                                  TestId="budget-total-guide"
+                                  OnClick="OpenCreateTotal" />
+                    </GroupedList>
+                }
+
+                if (model.Daily is { } daily)
+                {
+                    <div class="ft-callout ft-callout--warning"
+                         role="status"
+                         data-testid="budget-daily"
+                         data-days="@daily.DaysLeft"
+                         data-per-day="@daily.PerDay.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)">
+                        <i class="mdi mdi-alert-circle-outline ft-callout__icon" aria-hidden="true"></i>
+                        <span class="ft-callout__text" data-testid="budget-daily-text">@BudgetPagePresentation.DailyAvailableText(daily)</span>
+                    </div>
+                }
+
+                if (model.OtherTotals.Count > 0)
+                {
+                    <GroupedList Header="@BudgetPagePresentation.OtherTotalsGroupTitle" TestId="budget-other-totals">
+                        @foreach (var row in model.OtherTotals)
+                        {
+                            @BudgetRowTemplate(row)
+                        }
+                    </GroupedList>
+                }
+
+                <GroupedList Header="@BudgetPagePresentation.CategoryGroupTitle"
+                             Footer="@BudgetPagePresentation.Footnote"
+                             TestId="budget-category-group">
+                    @foreach (var row in model.Categories)
                     {
-                        <MList>
-                            @foreach (var status in _statuses)
-                            {
-                                var budget = _budgets.FirstOrDefault(b => b.Id == status.BudgetId);
-                                if (budget == null)
-                                {
-                                    continue;
-                                }
-
-                                <MListItem>
-                                    <MListItemIcon>
-                                        <MIcon>@status.CategoryIcon</MIcon>
-                                    </MListItemIcon>
-                                    <MListItemContent>
-                                        <MListItemTitle>
-                                            @status.CategoryName
-                                            @if (status.LedgerName != null)
-                                            {
-                                                <span class="text-caption text--secondary">（@status.LedgerName）</span>
-                                            }
-                                        </MListItemTitle>
-                                        <MListItemSubtitle>
-                                            @status.UsedAmount.ToString("N2") / @status.Amount.ToString("N2")
-                                            @if (status.RemainingAmount < 0)
-                                            {
-                                                <span class="error--text">超支 @((-status.RemainingAmount).ToString("N2"))</span>
-                                            }
-                                        </MListItemSubtitle>
-                                        <MProgressLinear Value="@((double)Math.Min(status.UsagePercentage, 100m))"
-                                                         Color="@GetProgressColor(status.UsagePercentage)"
-                                                         Height="6"
-                                                         Rounded
-                                                         Class="mt-1" />
-                                        <div class="text-caption text--secondary mt-1">
-                                            已使用 @status.UsagePercentage.ToString("0.0")%
-                                        </div>
-                                    </MListItemContent>
-                                    <MListItemAction>
-                                        <MButton Icon OnClick="() => ShowEditDialog(budget)">
-                                            <MIcon>mdi-pencil</MIcon>
-                                        </MButton>
-                                        <MButton Icon OnClick="() => DeleteBudget(budget)">
-                                            <MIcon Color="error">mdi-delete</MIcon>
-                                        </MButton>
-                                    </MListItemAction>
-                                </MListItem>
-                            }
-                        </MList>
+                        @BudgetRowTemplate(row)
                     }
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-</MContainer>
+                    <ListCell Title="新建分类预算" Class="ft-cell--brand" TestId="budget-category-add" OnClick="OpenCreateCategory">
+                        <Leading>
+                            <span class="ft-tile ft-tile--outline" aria-hidden="true"><i class="mdi mdi-plus"></i></span>
+                        </Leading>
+                    </ListCell>
+                </GroupedList>
+            }
+        </div>
+    </ChildContent>
+</SecondaryPage>
 
-<!-- 创建/编辑对话框 -->
-<MDialog @bind-Value="_showDialog" MaxWidth="500">
-    <MCard>
-        <MCardTitle>
-            @(_isEditing ? "编辑预算" : "创建预算")
-        </MCardTitle>
+@* 新建 / 编辑预算（底部 Sheet） *@
+<BudgetFormSheet @bind-Visible="_sheetVisible"
+                 UserId="_userId"
+                 Target="_target"
+                 Ledgers="_ledgers"
+                 Categories="_categories"
+                 OnSaved="OnBudgetSavedAsync"
+                 OnDelete="AskDeleteFromSheet"
+                 OnClosed="OnSheetClosed" />
 
-        <MCardText>
-            <MForm @ref="_form" Model="_budgetModel" OnValidSubmit="SaveBudget">
-                <MRow>
-                    <MCol Cols="6">
-                        <MTextField @bind-Value="_budgetModel.Year"
-                                    Label="年份"
-                                    Outlined
-                                    Dense
-                                    Required
-                                    Type="number" />
-                    </MCol>
-                    <MCol Cols="6">
-                        <MTextField @bind-Value="_budgetModel.Month"
-                                    Label="月份 (1-12)"
-                                    Outlined
-                                    Dense
-                                    Required
-                                    Type="number" />
-                    </MCol>
-                </MRow>
+@* 账本菜单：全部账本 + 用户自己的账本；选中项带对勾 *@
+<ActionSheet @bind-Visible="_ledgerSheet" Title="选择账本" TestId="budget-ledger-sheet">
+    <ActionSheetItem Icon="@(_ledgerId is null ? "mdi-check" : null)"
+                     TestId="budget-ledger-all"
+                     aria-current="@(_ledgerId is null ? "true" : null)"
+                     OnClick="() => SelectLedgerAsync(null)">@StatisticsPresentation.AllLedgersText</ActionSheetItem>
+    @foreach (var ledger in _ledgers)
+    {
+        var id = ledger.Id;
+        <ActionSheetItem @key="id"
+                         Icon="@(_ledgerId == id ? "mdi-check" : null)"
+                         TestId="budget-ledger-option"
+                         data-ledger-id="@id"
+                         aria-current="@(_ledgerId == id ? "true" : null)"
+                         OnClick="() => SelectLedgerAsync(id)">@ledger.Name</ActionSheetItem>
+    }
+</ActionSheet>
 
-                <MSelect @bind-Value="_budgetModel.LedgerId"
-                         Items="_ledgers"
-                         ItemText="l => l.Name"
-                         ItemValue="l => (Guid?)l.Id"
-                         Label="账本（不选为全部账本）"
-                         Outlined
-                         Dense
-                         Clearable />
-
-                <MSelect @bind-Value="_budgetModel.CategoryId"
-                         Items="_categories"
-                         ItemText="c => c.Name"
-                         ItemValue="c => (Guid?)c.Id"
-                         Label="分类（不选为总预算）"
-                         Outlined
-                         Dense
-                         Clearable>
-                    <SelectionContent Context="item">
-                        <MIcon Class="mr-2">@(item.Item?.Icon ?? "mdi-wallet")</MIcon>
-                        @(item.Item?.Name ?? "总预算")
-                    </SelectionContent>
-                </MSelect>
-
-                <MTextField @bind-Value="_budgetModel.Amount"
-                            Label="预算金额"
-                            Outlined
-                            Dense
-                            Required
-                            Type="number" />
-            </MForm>
-        </MCardText>
-
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CloseDialog">取消</MButton>
-            <MButton Color="primary" OnClick="SaveBudget">保存</MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+@* 删除确认 *@
+<GlassAlert @bind-Visible="_deleteVisible"
+            Title="@BudgetFormPresentation.DeleteTitle(_deleteName ?? string.Empty)"
+            Message="@BudgetFormPresentation.DeleteMessage"
+            ConfirmText="删除"
+            Destructive
+            OnConfirm="DeleteConfirmedAsync"
+            OnClosed="OnDeleteClosed"
+            TestId="budget-delete-alert" />
 
 @code {
-    private int _year = DateTime.Now.Year;
-    private int _month = DateTime.Now.Month;
-
-    private List<Budget> _budgets = new();
-    private List<BudgetStatus> _statuses = new();
-    private List<Core.Entities.Category> _categories = new();
-    private List<Core.Entities.Ledger> _ledgers = new();
-
-    private bool _showDialog;
-    private bool _isEditing;
-    private bool _saving;
-    private BudgetModel _budgetModel = new();
-    private MForm? _form;
     private Guid _userId;
+    private bool _isLoading = true;
+    private bool _loadFailed;
 
-    // 账本筛选（与预算列表/执行状态口径联动）
-    private Guid? _selectedLedgerId;
+    // 当前选择的筛选（月份按应用时区的当前月起步）；_loaded* 是最近一次加载完成时对应的筛选（E2E 据此等待加载结束）
+    private int _year;
+    private int _month;
+    private Guid? _ledgerId;
+    private int _loadedYear;
+    private int _loadedMonth;
+    private Guid? _loadedLedgerId;
+    private int _loadVersion;
 
-    protected override async Task OnInitializedAsync()
+    private List<LedgerModel> _ledgers = new();
+    private List<Category> _categories = new();
+    private List<BudgetStatus> _statuses = new();
+    private BudgetPageModel? _model;
+
+    // 新建 / 编辑 Sheet、账本菜单、删除确认 Alert
+    private bool _sheetVisible;
+    private BudgetFormTarget? _target;
+    private bool _ledgerSheet;
+    private bool _deleteVisible;
+    private BudgetStatus? _deleteTarget;
+    private string? _deleteName;
+
+    private string LedgerPillText => StatisticsPresentation.LedgerPillText(_ledgerId, _ledgers);
+
+    private string ContentState => _isLoading ? "loading" : _loadFailed ? "error" : _model is { IsEmpty: true } ? "empty" : "ready";
+
+    protected override void OnInitialized()
     {
+        var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+        (_year, _month) = (now.Year, now.Month);
+    }
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与分类页、账本页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // AuthenticationService 带电路级缓存，且对预渲染 / 电路断开做了安全封装（失败返回 null，保持 Guid.Empty）
         _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
-
-        await LoadCategoriesAndLedgers();
-        await LoadBudgets();
+        await LoadOptionsAsync();
+        await LoadAsync();
+        _isLoading = false;
+        StateHasChanged();
     }
 
-    private async Task LoadCategoriesAndLedgers()
+    /// <summary>账本与支出分类（筛选与表单的选项）。失败不影响预算展示：只是没有账本筛选 / 选不了分类，下次进入页面再读</summary>
+    private async Task LoadOptionsAsync()
     {
-        // 预算针对支出分类设置
-        _categories = await CategoryService.GetCategoriesAsync(_userId, BillType.Expense);
-        _ledgers = await LedgerService.GetLedgersAsync(_userId);
-    }
-
-    private async Task LoadBudgets()
-    {
-        _budgets = await BudgetService.GetBudgetsAsync(_userId, _year, _month, _selectedLedgerId);
-        _statuses = await BudgetService.GetBudgetStatusAsync(_userId, _year, _month, _selectedLedgerId);
-    }
-
-    /// <summary>
-    /// 账本筛选变更：指定账本时显示该账本的预算 + 全部账本的预算，未指定时仅显示全部账本的预算
-    /// </summary>
-    private async Task OnLedgerFilterChanged(Guid? ledgerId)
-    {
-        _selectedLedgerId = ledgerId;
-        await LoadBudgets();
-    }
-
-    private async Task PreviousMonth()
-    {
-        if (_month == 1)
-        {
-            _year--;
-            _month = 12;
-        }
-        else
-        {
-            _month--;
-        }
-
-        await LoadBudgets();
-    }
-
-    private async Task NextMonth()
-    {
-        if (_month == 12)
-        {
-            _year++;
-            _month = 1;
-        }
-        else
-        {
-            _month++;
-        }
-
-        await LoadBudgets();
-    }
-
-    private string GetProgressColor(decimal usagePercentage)
-    {
-        return usagePercentage switch
-        {
-            >= 100 => "error",
-            >= 80 => "warning",
-            _ => "primary"
-        };
-    }
-
-    private void ShowCreateDialog()
-    {
-        _isEditing = false;
-        _budgetModel = new BudgetModel
-        {
-            Year = _year,
-            Month = _month,
-            LedgerId = _selectedLedgerId
-        };
-        _showDialog = true;
-    }
-
-    private void ShowEditDialog(Budget budget)
-    {
-        _isEditing = true;
-        _budgetModel = new BudgetModel
-        {
-            Id = budget.Id,
-            Year = budget.Year,
-            Month = budget.Month,
-            Amount = budget.Amount,
-            LedgerId = budget.LedgerId,
-            CategoryId = budget.CategoryId
-        };
-        _showDialog = true;
-    }
-
-    private void CloseDialog()
-    {
-        _showDialog = false;
-    }
-
-    private async Task SaveBudget()
-    {
-        if (_saving)
-        {
-            return;
-        }
-
-        if (!_budgetModel.Amount.HasValue || _budgetModel.Amount.Value <= 0)
-        {
-            await PopupService.EnqueueSnackbarAsync("请输入预算金额", AlertTypes.Warning);
-            return;
-        }
-
-        _saving = true;
-
         try
         {
-            if (_isEditing)
+            await DataGate.RunAsync(async () =>
             {
-                var budget = new Budget
-                {
-                    Id = _budgetModel.Id,
-                    UserId = _userId,
-                    Year = _budgetModel.Year,
-                    Month = _budgetModel.Month,
-                    Amount = _budgetModel.Amount.Value,
-                    LedgerId = _budgetModel.LedgerId,
-                    CategoryId = _budgetModel.CategoryId
-                };
-
-                await BudgetService.UpdateBudgetAsync(budget);
-                await PopupService.EnqueueSnackbarAsync("预算更新成功", AlertTypes.Success);
-            }
-            else
-            {
-                var budget = new Budget
-                {
-                    UserId = _userId,
-                    Year = _budgetModel.Year,
-                    Month = _budgetModel.Month,
-                    Amount = _budgetModel.Amount.Value,
-                    LedgerId = _budgetModel.LedgerId,
-                    CategoryId = _budgetModel.CategoryId
-                };
-
-                await BudgetService.CreateBudgetAsync(budget);
-                await PopupService.EnqueueSnackbarAsync("预算创建成功", AlertTypes.Success);
-            }
-
-            CloseDialog();
-            await LoadBudgets();
+                var ledgers = await LedgerService.GetLedgersAsync(_userId);
+                _ledgers = ledgers.Select(l => LedgerModel.FromEntity(l)).ToList();
+                _categories = await CategoryService.GetCategoriesAsync(_userId, BillType.Expense);
+            });
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
-        {
-            _saving = false;
+            Logger.LogWarning(ex, "加载预算页的账本与分类选项失败");
         }
     }
 
-    private async Task DeleteBudget(Budget budget)
+    /// <summary>
+    /// 按当前月份与账本筛选读预算执行情况。连续切换筛选时只采用最后一次的结果（先发出的慢请求回来也不覆盖）。
+    /// </summary>
+    private async Task LoadAsync()
     {
+        var version = ++_loadVersion;
+        var (year, month, ledgerId) = (_year, _month, _ledgerId);
+
         try
         {
-            var result = await BudgetService.DeleteBudgetAsync(budget.Id, _userId);
-
-            if (result)
+            var statuses = await DataGate.RunAsync(() => BudgetService.GetBudgetStatusAsync(_userId, year, month, ledgerId));
+            if (version != _loadVersion)
             {
-                await PopupService.EnqueueSnackbarAsync("预算删除成功", AlertTypes.Success);
-                await LoadBudgets();
+                return;
+            }
+
+            _statuses = statuses;
+            _model = BudgetPagePresentation.Build(statuses, ledgerId, year, month, AppTimeZone.ToLocal(DateTime.UtcNow));
+            (_loadedYear, _loadedMonth, _loadedLedgerId) = (year, month, ledgerId);
+            _loadFailed = false;
+        }
+        catch (Exception ex)
+        {
+            if (version != _loadVersion)
+            {
+                return;
+            }
+
+            Logger.LogWarning(ex, "加载预算失败");
+            // 已经有数据时保留旧数据（只提示）；第一次就失败才整页显示错误状态
+            _loadFailed = _model is null;
+            await PopupService.EnqueueSnackbarAsync($"加载预算失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _isLoading = true;
+        _loadFailed = false;
+        StateHasChanged();
+
+        await LoadOptionsAsync();
+        await LoadAsync();
+        _isLoading = false;
+    }
+
+    // ------------------------------------------------------------------ 筛选
+
+    private async Task PreviousMonthAsync()
+    {
+        (_year, _month) = StatisticsPresentation.ShiftMonth(_year, _month, -1);
+        await LoadAsync();
+    }
+
+    private async Task NextMonthAsync()
+    {
+        (_year, _month) = StatisticsPresentation.ShiftMonth(_year, _month, 1);
+        await LoadAsync();
+    }
+
+    private void OpenLedgerSheet() => _ledgerSheet = true;
+
+    private async Task SelectLedgerAsync(Guid? ledgerId)
+    {
+        _ledgerId = ledgerId;
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------ 新建 / 编辑
+
+    /// <summary>右上角「＋」与空状态的「新建预算」：已经有总预算就默认记分类预算，否则默认记总预算</summary>
+    private void OpenCreate() => OpenCreate(isCategory: _model?.Overview is not null);
+
+    private void OpenCreateTotal() => OpenCreate(isCategory: false);
+
+    private void OpenCreateCategory() => OpenCreate(isCategory: true);
+
+    private void OpenCreate(bool isCategory)
+    {
+        // 年月与账本沿用页面当前的筛选（旧页面也是如此），表单里可以改
+        _target = new BudgetFormTarget(null, _year, _month, null, _ledgerId, null, isCategory);
+        _sheetVisible = true;
+    }
+
+    private void OpenEdit(Guid budgetId)
+    {
+        if (_statuses.FirstOrDefault(s => s.BudgetId == budgetId) is not { } status)
+        {
+            return;
+        }
+
+        _target = new BudgetFormTarget(status.BudgetId, _year, _month, status.Amount, status.LedgerId, status.CategoryId, status.CategoryId is not null);
+        _sheetVisible = true;
+    }
+
+    // Sheet 退出动画结束后清理「正在编辑」（动画期间保持原内容，避免闪动）
+    private void OnSheetClosed() => _target = null;
+
+    /// <summary>
+    /// 保存成功（Sheet 已被要求收起）：切到刚保存的预算所在的月份与账本，再重新加载——
+    /// 表单里可以改年月与账本，不跟过去的话，用户可能保存完却看不到它。
+    /// 全部账本的预算在任何账本视图里都可见，所以保持当前账本不变。
+    /// </summary>
+    private async Task OnBudgetSavedAsync(Budget saved)
+    {
+        (_year, _month) = (saved.Year, saved.Month);
+        if (saved.LedgerId is { } ledgerId && _ledgers.Any(l => l.Id == ledgerId))
+        {
+            _ledgerId = ledgerId;
+        }
+
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------ 删除
+
+    private void AskDelete(Guid budgetId)
+    {
+        if (_statuses.FirstOrDefault(s => s.BudgetId == budgetId) is not { } status)
+        {
+            return;
+        }
+
+        _deleteTarget = status;
+        _deleteName = BudgetPagePresentation.PageRowName(status);
+        _deleteVisible = true;
+    }
+
+    private void AskDeleteFromSheet(BudgetFormTarget target)
+    {
+        if (target.Id is { } id)
+        {
+            AskDelete(id);
+        }
+    }
+
+    private void OnDeleteClosed()
+    {
+        _deleteTarget = null;
+        _deleteName = null;
+    }
+
+    private async Task DeleteConfirmedAsync()
+    {
+        // Alert 先于 OnConfirm 关闭，此时 _deleteTarget 仍有值（清理发生在退出动画结束后的 OnClosed）
+        if (_deleteTarget is not { } status)
+        {
+            return;
+        }
+
+        try
+        {
+            var deleted = await DataGate.RunAsync(() => BudgetService.DeleteBudgetAsync(status.BudgetId, _userId));
+
+            if (deleted)
+            {
+                await PopupService.EnqueueSnackbarAsync(BudgetFormPresentation.DeletedMessage, AlertTypes.Success);
+
+                if (_target?.Id == status.BudgetId)
+                {
+                    _sheetVisible = false;
+                }
+
+                await LoadAsync();
             }
             else
             {
-                await PopupService.EnqueueSnackbarAsync("预算不存在", AlertTypes.Warning);
+                await PopupService.EnqueueSnackbarAsync(BudgetFormPresentation.MissingMessage, AlertTypes.Warning);
             }
         }
         catch (Exception ex)
@@ -388,13 +443,16 @@
         }
     }
 
-    private class BudgetModel
-    {
-        public Guid Id { get; set; }
-        public int Year { get; set; } = DateTime.Now.Year;
-        public int Month { get; set; } = DateTime.Now.Month;
-        public decimal? Amount { get; set; }
-        public Guid? LedgerId { get; set; }
-        public Guid? CategoryId { get; set; }
-    }
+    // ------------------------------------------------------------------ 渲染
+
+    /// <summary>一行预算：左滑出现「编辑」「删除」；点按整行进入编辑 Sheet（非滑动等价入口）</summary>
+    private RenderFragment BudgetRowTemplate(BudgetRowModel row) => @<SwipeRow @key="row.BudgetId" TestId="budget-swipe" data-budget-id="@row.BudgetId.ToString()">
+        <Actions>
+            <SwipeAction Icon="mdi-pencil" Label="编辑" Tone="ActionTone.Brand" TestId="swipe-edit" OnClick="() => OpenEdit(row.BudgetId)" />
+            <SwipeAction Icon="mdi-delete" Label="删除" Tone="ActionTone.Danger" TestId="swipe-delete" OnClick="() => AskDelete(row.BudgetId)" />
+        </Actions>
+        <ChildContent>
+            <BudgetRow Model="row" OnClick="OpenEdit" />
+        </ChildContent>
+    </SwipeRow>;
 }

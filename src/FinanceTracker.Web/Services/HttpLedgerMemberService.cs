@@ -3,6 +3,7 @@ using FinanceTracker.Core.Enums;
 using FinanceTracker.Core.Exceptions;
 using FinanceTracker.Core.Interfaces;
 using FinanceTracker.Core.Models;
+using FinanceTracker.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -81,7 +82,7 @@ public class HttpLedgerMemberService : ILedgerMemberService
 
         if (response == null)
         {
-            throw new InvalidOperationException("邀请失败，请稍后重试");
+            throw new InvalidOperationException("云端没有返回邀请结果，请稍后重试");
         }
 
         // 接口返回的这一条成员关系直接合并进本地缓存（被邀请人处于待确认，不在"我的成员关系"拉取范围内）
@@ -103,7 +104,32 @@ public class HttpLedgerMemberService : ILedgerMemberService
     public async Task RemoveMemberAsync(Guid ledgerId, Guid memberId, Guid operatorUserId)
     {
         await _http.DeleteAsync<object>($"api/ledgers/{ledgerId}/members/{memberId}");
+
+        // 云端对「别人被移除」的拉取不再下发那条成员行（拉取只给我的成员行 + 账本里其他人的生效成员行，已删除的不在其中），
+        // 光靠随后的刷新，本地缓存里被移除的成员会一直是生效状态——成员页、成员数、共享状态都不会变。
+        // 云端已确认移除，所以本地直接把这一行标记为已删除
+        await MarkMemberRemovedLocallyAsync(ledgerId, memberId);
+
         await RefreshCacheAsync(operatorUserId, afterCloudAction: true);
+    }
+
+    /// <summary>
+    /// 把本地缓存里的成员行标记为已删除（软删除）。放在同步时间戳作用域内保存：这是在对齐云端已经发生的变化，不算一次编辑，
+    /// 不能把更新时间盖成本机当前时间——否则对方被重新邀请时，云端更晚版本的成员行会因为本机时钟偏快而不被采纳
+    /// </summary>
+    private async Task MarkMemberRemovedLocallyAsync(Guid ledgerId, Guid memberId)
+    {
+        using var timestampScope = SyncTimestampScope.Begin();
+
+        var member = await _context.LedgerMembers
+            .FirstOrDefaultAsync(m => m.Id == memberId && m.LedgerId == ledgerId && !m.IsDeleted);
+        if (member == null)
+        {
+            return;
+        }
+
+        member.IsDeleted = true;
+        await _context.SaveChangesAsync();
     }
 
     /// <inheritdoc />
@@ -193,13 +219,21 @@ public class HttpLedgerMemberService : ILedgerMemberService
     {
         await RefreshCacheAsync(userId);
 
-        return await _context.LedgerMembers
-            .Where(m => m.UserId == userId && m.Status == LedgerMemberStatus.Active &&
-                !m.IsDeleted && m.Role != LedgerMemberRole.Owner)
-            .Where(m => !m.Ledger.IsDeleted)
-            .Select(m => m.Ledger)
-            .OrderBy(l => l.CreatedAt)
-            .ToListAsync();
+        return await LedgerMemberQueries.GetSharedLedgersAsync(_context, userId);
+    }
+
+    /// <inheritdoc />
+    public Task<Dictionary<Guid, int>> GetActiveMemberCountsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds)
+    {
+        // 只读本地缓存、不联网：调用方通常刚读过 GetSharedLedgersAsync（它已刷新过一次缓存）
+        return LedgerMemberQueries.CountActiveMembersAsync(_context, userId, ledgerIds);
+    }
+
+    /// <inheritdoc />
+    public Task<HashSet<Guid>> GetReadOnlyLedgerIdsAsync(Guid userId, IReadOnlyCollection<Guid> ledgerIds)
+    {
+        // 只读本地缓存、不联网：与 BillService 拒绝只读成员改账单用同一条查询，界面与服务层口径一致
+        return LedgerMemberQueries.GetReadOnlyLedgerIdsAsync(_context, userId, ledgerIds);
     }
 
     /// <summary>

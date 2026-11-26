@@ -1,0 +1,78 @@
+@namespace FinanceTracker.Web.Components.Statistics
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject PageStackNavController NavController
+@inject StatisticsSegmentRequest SegmentRequest
+
+@*
+    旧地址（/trend、/annual-report）在应用内被压栈打开时显示的跳转页：马上把自己换成统计 Tab 的对应分段。
+    直接访问旧地址（书签、刷新）由宿主在 HTTP 层 302 到新地址（Web.Server 的 Program.cs），不经过这里——
+    页面栈对「初始地址就是旧地址」的情形没有干净的出路（会在历史里留下一条旧地址，返回时落在空白页上）。
+
+    落在哪个分段由 StatisticsSegmentRequest 一次性告诉统计页，而不是靠地址里的 ?segment=：带参数的地址会留在历史里，
+    用户之后切了分段、进二级页面再返回时，地址又回到带参数的形态，会把用户切换后的分段冲掉。
+
+    用 GoBackToTab 而不是 NavigateTo(replace)：旧地址是被 Push 出来的，页面栈里有它的一页，
+    只改地址不清栈会在统计页上面残留一张空白全屏页；GoBackToTab 一次完成「清栈 + 切到 Tab 根页面」。
+    页面栈对连续两次导航操作只认第一次（250ms 内的第二次调用被静默丢弃）：本页是 Push 之后才渲染出来的，
+    所以先等过这个窗口再调用；万一还是被丢（地址没变）就再试，最多 MaxAttempts 次。
+    观察属性（E2E）：stats-redirect（只在落地前的瞬间存在）。
+*@
+
+<div class="ft-redirect" data-testid="stats-redirect" role="status">
+    <i class="mdi mdi-loading ft-redirect__spinner ft-spin" aria-hidden="true"></i>
+    <span>正在打开统计…</span>
+</div>
+
+@code {
+    private const int FirstDelayMs = 300;
+    private const int RetryDelayMs = 400;
+    private const int MaxAttempts = 3;
+
+    private readonly CancellationTokenSource _cts = new();
+
+    /// <summary>要落到的统计分段（趋势 / 年度）</summary>
+    [Parameter, EditorRequired]
+    public string Segment { get; set; } = StatisticsPresentation.SegmentMonthly;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            await RedirectAsync(_cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // 页面已经被换掉
+        }
+    }
+
+    private async Task RedirectAsync(CancellationToken cancellationToken)
+    {
+        // 先登记请求再导航：统计页在地址变到统计页时（已存在）或被创建时（首次进入）取走它
+        SegmentRequest.Request(Segment);
+
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            await Task.Delay(attempt == 0 ? FirstDelayMs : RetryDelayMs, cancellationToken);
+
+            if (StatisticsPresentation.IsStatisticsUri(Navigation.Uri))
+            {
+                return;
+            }
+
+            NavController.GoBackToTab(StatisticsPresentation.RootPath, disableTransition: true);
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

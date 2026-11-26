@@ -1,0 +1,59 @@
+@namespace FinanceTracker.Web.Components.Bills
+
+@*
+    账单 Tab 的条件标签（设计稿 02 / 06 · 条件条）：每个筛选维度一颗，排在可横向滑动的一行里。
+    - 没设置条件（Active = false）：文字 + 下拉箭头的中性胶囊，点按 = 打开筛选 Sheet 并定位到这一组（OnOpen）。
+      文字是维度名（「分类」）；时间维度在默认的「本月」时文字是「本月」（Value 有值但 Active = false：默认视图不算条件，设计稿 02 里就是中性的「本月 ⌄」）。
+    - 已设置条件（Active = true）：品牌色浅底 + 描边，文字是当前条件；点文字 = 调整（OnOpen，同样打开 Sheet 定位到这一组），
+      点 × = 单独移除这个条件（OnRemove，列表与汇总立即联动）。两个按钮各自 44 高。
+    - 读屏名称：「时间：本月，点按调整」「分类，点按设置」「移除时间条件：本年」（文案在 BillListPresentation）。
+    - 观察属性（E2E）：根 data-testid（TestId）、data-active、data-dimension；已设置时文字按钮 chip-open、移除按钮 chip-remove。
+*@
+@if (!Active || string.IsNullOrEmpty(Value))
+{
+    <button type="button"
+            class="ft-chip"
+            aria-label="@BillListPresentation.ChipLabel(Dimension, Value)"
+            aria-haspopup="dialog"
+            data-testid="@TestId"
+            data-active="false"
+            data-dimension="@DimensionKey"
+            @onclick="OnOpen">
+        <span class="ft-chip__label">@(string.IsNullOrEmpty(Value) ? BillListPresentation.DimensionName(Dimension) : Value)</span>
+        <i class="mdi mdi-chevron-down ft-chip__chevron" aria-hidden="true"></i>
+    </button>
+}
+else
+{
+    @* 已设置的形态与别的页面的条件条共用 ConditionChip（同一套标记与样式，读屏名称由本组件按账单筛选维度给出） *@
+    <ConditionChip Text="@Value"
+                   GroupLabel="@BillListPresentation.DimensionName(Dimension)"
+                   OpenLabel="@BillListPresentation.ChipLabel(Dimension, Value)"
+                   RemoveLabel="@BillListPresentation.ChipRemoveLabel(Dimension, Value)"
+                   TestId="@TestId"
+                   data-dimension="@DimensionKey"
+                   OnOpen="OnOpen"
+                   OnRemove="OnRemove" />
+}
+
+@code {
+    /// <summary>这颗标签对应的筛选维度</summary>
+    [Parameter, EditorRequired] public BillFilterDimension Dimension { get; set; }
+
+    /// <summary>当前值的文案；为空表示这个维度没有可显示的值（标签上写维度名）</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>是不是已设置的条件（品牌色标签 + ×）；默认的「本月」有值但不是条件，传 false</summary>
+    [Parameter] public bool Active { get; set; }
+
+    /// <summary>点标签（没设置条件时整颗，已设置时文字部分）：打开筛选 Sheet</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnOpen { get; set; }
+
+    /// <summary>点 ×：移除这个维度的条件（只在已设置条件时出现）</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnRemove { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    private string DimensionKey => Dimension.ToString().ToLowerInvariant();
+}

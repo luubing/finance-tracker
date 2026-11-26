@@ -1,0 +1,34 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@* 左滑行露出的一个操作按钮（图标 + 文字，宽 76）。点击后脚本会自动收起所在的行；业务由 OnClick 承担 *@
+<button type="button"
+        class="ft-swipe__action ft-swipe__action--@ToneName"
+        data-testid="@TestId"
+        @onclick="OnClick"
+        @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrEmpty(Icon))
+    {
+        <i class="mdi @Icon" aria-hidden="true"></i>
+    }
+    <span>@Label</span>
+</button>
+
+@code {
+    /// <summary>MDI 图标类名</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>文字（同时是读屏名称）</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    [Parameter] public ActionTone Tone { get; set; } = ActionTone.Brand;
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string ToneName => Tone.ToString().ToLowerInvariant();
+}

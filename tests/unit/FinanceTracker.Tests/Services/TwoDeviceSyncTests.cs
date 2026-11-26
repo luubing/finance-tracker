@@ -78,6 +78,55 @@ public sealed class TwoDeviceSyncTests : IAsyncLifetime
         Assert.DoesNotContain(await _b.Db.Context.Users.IgnoreQueryFilters().ToListAsync(), u => u.Id == _cloud.AccountId);
     }
 
+    // ───────────── 账本必填：历史上没有账本的账单，同步通道仍要兼容 ─────────────
+
+    [Fact]
+    public async Task 历史没有账本的账单_照常同步_另一台设备拉到的仍然没有账本()
+    {
+        // 账本必填只约束"新建/编辑"：实体、数据库、同步 DTO 的 LedgerId 仍然可空，
+        // 升级前创建的历史账单不能因为新规则而同步失败或被丢弃
+        var legacy = await _a.AddLegacyBillWithoutLedgerAsync(12.5m);
+
+        await SyncOkAsync(_a);
+
+        await using (var cloudContext = _cloud.CreateContext())
+        {
+            var cloudBill = await cloudContext.Bills.IgnoreQueryFilters().SingleAsync(b => b.Id == legacy.Id);
+            Assert.Equal(_cloud.AccountId, cloudBill.UserId);
+            Assert.Null(cloudBill.LedgerId);
+        }
+
+        await SyncOkAsync(_b);
+
+        var pulled = Assert.Single(await _b.Bills.GetBillsAsync(_b.UserId));
+        Assert.Equal(legacy.Id, pulled.Id);
+        Assert.Null(pulled.LedgerId);
+    }
+
+    [Fact]
+    public async Task 历史账单批量归属账本后_账本和账单都同步到云端和另一台设备()
+    {
+        var legacy = await _a.AddLegacyBillWithoutLedgerAsync(12.5m);
+        await SyncOkAsync(_a);
+        var travel = await _a.AddLedgerAsync("旅行");
+
+        // "批量归属账本"把账单改成待同步；账本是新建的，云端还没有它，同步时必须一并带上
+        Assert.Equal(1, await _a.Bills.AssignBillsToLedgerAsync(new List<Guid> { legacy.Id }, _a.UserId, travel.Id));
+        await SyncOkAsync(_a);
+
+        await using (var cloudContext = _cloud.CreateContext())
+        {
+            var cloudBill = await cloudContext.Bills.IgnoreQueryFilters().SingleAsync(b => b.Id == legacy.Id);
+            Assert.Equal(travel.Id, cloudBill.LedgerId);
+        }
+
+        await SyncOkAsync(_b);
+
+        var pulled = Assert.Single(await _b.Bills.GetBillsAsync(_b.UserId));
+        Assert.Equal(travel.Id, pulled.LedgerId);
+        Assert.Contains(await _b.Ledgers.GetLedgersAsync(_b.UserId), l => l.Id == travel.Id);
+    }
+
     [Fact]
     public async Task 推送账本_云端归属云端账号而不是客户端自报的本地用户()
     {

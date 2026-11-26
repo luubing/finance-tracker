@@ -1,0 +1,91 @@
+@namespace FinanceTracker.Web.Components.Categories
+@using FinanceTracker.Core.Entities
+@using FinanceTracker.Core.Enums
+@inject ICategoryService CategoryService
+@inject PageDataGate DataGate
+
+@*
+    新建 / 编辑分类的底部 Sheet：分类管理页与「记一笔」的「新建分类」共用同一个面板。
+    - 新建：按 Type（账单类型）创建自定义分类，保存后经 OnSaved 把新分类交给调用方
+      （分类页重新加载列表，「记一笔」自动选中它）；编辑：Editing 不为空，分类的类型不可修改。
+    - 表单本身（名称校验、图标网格、保存中、提示）是通用的 NameIconFormSheet，这里只负责落库：调用 CategoryService，服务层校验不变。
+    - 编辑模式下 EditingExtras 插槽放页面自己的操作（设为默认、删除）。
+    - 数据库里的分类没有颜色字段，色块由分类 Id 稳定取色（见 CategoryPresentation.ToneFor），所以表单里没有颜色选择。
+    - 观察属性（E2E）：category-sheet、category-name、category-sort、category-form-error、category-save。
+*@
+<NameIconFormSheet Visible="Visible"
+                   VisibleChanged="VisibleChanged"
+                   Noun="分类"
+                   TestIdPrefix="category"
+                   NamePlaceholder="@CategoryPresentation.NamePlaceholder(Type)"
+                   IconChoices="CategoryPresentation.IconChoices"
+                   DefaultIcon="@CategoryPresentation.DefaultIcon"
+                   PreviewTone="@PreviewTone"
+                   Editing="Editing"
+                   EditingExtras="EditingExtras"
+                   Save="SaveAsync"
+                   OnSaved="HandleSavedAsync"
+                   OnClosed="OnClosed" />
+
+@code {
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>当前登录用户（自定义分类的所有者）</summary>
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    /// <summary>新建分类的账单类型（支出 / 收入）；编辑时是该分类自己的类型，保存时原样带回，不能修改</summary>
+    [Parameter] public BillType Type { get; set; } = BillType.Expense;
+
+    /// <summary>要编辑的分类；为空表示新建。打开 Sheet 时按它初始化表单</summary>
+    [Parameter] public NameIconTarget? Editing { get; set; }
+
+    /// <summary>编辑模式下表单末尾的页面自有操作（设为默认分类、删除）</summary>
+    [Parameter] public RenderFragment? EditingExtras { get; set; }
+
+    /// <summary>保存成功（新建或更新）后触发，参数是保存后的分类；此时 Sheet 已被要求收起</summary>
+    [Parameter] public EventCallback<Category> OnSaved { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发（调用方在这里清理「正在编辑」的状态）</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private Category? _saved;
+
+    /// <summary>预览色块：编辑时与列表里该分类的颜色一致；新建时分类还没有 Id，用灰色，保存后按 Id 取色</summary>
+    private string PreviewTone => Editing is { } editing ? CategoryPresentation.ToneFor(editing.Name, editing.Id) : "gray";
+
+    private async Task SaveAsync(NameIconValues values)
+    {
+        // 写库也排进页面数据闸门：此时别的 Tab 根页面可能正在后台重新加载，同一个 DbContext 不允许并行执行
+        var editing = Editing;
+        _saved = await DataGate.RunAsync(async () => editing is not null
+            ? await CategoryService.UpdateCategoryAsync(new Category
+            {
+                Id = editing.Id,
+                UserId = UserId,
+                Name = values.Name,
+                Icon = values.Icon,
+                Type = Type,
+                SortOrder = values.SortOrder,
+            })
+            : await CategoryService.CreateCategoryAsync(new Category
+            {
+                UserId = UserId,
+                Name = values.Name,
+                Icon = values.Icon,
+                Type = Type,
+                SortOrder = values.SortOrder,
+            }));
+    }
+
+    private async Task HandleSavedAsync()
+    {
+        if (_saved is { } saved)
+        {
+            _saved = null;
+            await OnSaved.InvokeAsync(saved);
+        }
+    }
+}

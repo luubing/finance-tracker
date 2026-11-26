@@ -3,14 +3,19 @@
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
 
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ft-boot="booting">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：与 App 宿主一致，铺满刘海 / 手势条区域（沉浸式），安全区由 --ft-safe-* 变量避让 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>记账本</title>
     <base href="~/" />
     <link href="_content/Masa.Blazor/css/masa-blazor.min.css" rel="stylesheet" />
+    <!-- 加载顺序：masa → tokens（设计令牌）→ app（全局 / 安全区）→ ui（复用组件层）→ boot（启动加载页）；MAUI 宿主（index.html）顺序相同 -->
+    <link href="_content/FinanceTracker.Web/css/tokens.css" rel="stylesheet" />
     <link href="_content/FinanceTracker.Web/css/app.css" rel="stylesheet" />
+    <link href="_content/FinanceTracker.Web/css/ui.css" rel="stylesheet" />
+    <link href="_content/FinanceTracker.Web/css/boot.css" rel="stylesheet" />
     <style>
         /* Blazor 错误提示条：默认隐藏，仅在运行时发生未处理异常时由 blazor.server.js 显示 */
         #blazor-error-ui {
@@ -32,11 +37,29 @@
             top: 0.5rem;
         }
     </style>
-    <link href="https://cdn.jsdelivr.net/npm/@@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- 图标字体与 ECharts 来自 CDN，不能放在这里：<head> 里的同步资源会挡住首次绘制，慢网 / 离线时加载页也出不来。
+         改由 boot.js 在页面 load 之后注入，见页尾 -->
     <component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
 </head>
 <body>
+    <!-- 启动加载页（冷启动设计稿 docs/design/cold-start）：必须放在应用根之外——电路接管后会重写应用根的内容，
+         由 boot.js 在首屏就绪后交接并移除。Logo 是内联 SVG（MDI wallet-outline），不等图标字体。MAUI 宿主（index.html）里是同一份标记。 -->
+    <div id="ft-boot" class="ft-boot" data-state="booting" data-statusbar-bg="dark" data-testid="boot">
+        <span class="ft-boot__sr" role="status">记账本，正在加载</span>
+        <div class="ft-boot__curtain"></div>
+        <div class="ft-boot__brand" aria-hidden="true">
+            <span class="ft-boot__logo ft-glass-dark">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M5,3C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V16.72C21.59,16.37 22,15.74 22,15V9C22,8.26 21.59,7.63 21,7.28V5A2,2 0 0,0 19,3H5M5,5H19V7H13A2,2 0 0,0 11,9V15A2,2 0 0,0 13,17H19V19H5V5M13,9H20V15H13V9M16,10.5A1.5,1.5 0 0,0 14.5,12A1.5,1.5 0 0,0 16,13.5A1.5,1.5 0 0,0 17.5,12A1.5,1.5 0 0,0 16,10.5Z" /></svg>
+            </span>
+            <div class="ft-boot__name">记账本</div>
+            <div class="ft-boot__slogan">简单、安心的个人记账</div>
+        </div>
+        <div class="ft-boot__foot" aria-hidden="true">
+            <div class="ft-boot__spinner"></div>
+            <span>正在加载…</span>
+        </div>
+    </div>
+
     @RenderBody()
 
     <div id="blazor-error-ui">
@@ -50,6 +73,11 @@
         <a class="dismiss">🗙</a>
     </div>
 
+    <!-- 启动脚本：加载页的行为层 + 页面 load 之后才注入的 CDN 资源（图标字体 / ECharts）。放在 Blazor 脚本之前，计时与观察尽早开始 -->
+    <script src="_content/FinanceTracker.Web/js/boot.js"
+            data-css="https://cdn.jsdelivr.net/npm/@@mdi/font@7.2.96/css/materialdesignicons.min.css"
+            data-font="Material Design Icons"
+            data-scripts="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="_framework/blazor.server.js"></script>
     <script src="_content/Masa.Blazor/js/masa-blazor.js"></script>
     <script>

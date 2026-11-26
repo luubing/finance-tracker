@@ -1,0 +1,62 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    账单行（设计稿 06 / screens 01-home、02-bills）：分类图标块 + 「分类 · 备注」+「支付渠道 · 账本」+ 金额与时间。
+    - 渲染所需的文字、金额、时间、配色都在 BillRowModel 里（BillPresentation 取数时一次算好）；本组件只负责排版与点按。
+    - 金额：支出用常规文字色带负号，收入用绿色带正号；历史无账本的账单副标题里标注「未归属账本」。
+    - 点按整行（OnClick 给出账单 Id）；读屏读 BillRowModel.AriaLabel（把一行里的信息连成一句话）。
+    - 批量选择模式（账单 Tab）：Selectable 时行首多一个圆形勾选框，整行变成 role="checkbox"（aria-checked 随 Selected）；
+      Disabled 时整行置灰不可点（批量选择里不能选的行，例如共享账本里其他成员记的账单）。
+    - 观察属性（E2E）：data-testid（默认 bill-row）、data-bill-id、data-income、data-selected（仅 Selectable 时）；金额 bill-amount、时间 bill-time。
+*@
+<ListCell Title="@(Model.CategoryName ?? Model.Title)"
+          TitleNote="@Model.NoteText"
+          Subtitle="@Model.Subtitle"
+          AriaLabel="@Model.AriaLabel"
+          Class="@CssClass"
+          TestId="@TestId"
+          Disabled="Disabled"
+          OnClick="HandleClick"
+          data-bill-id="@Model.Id"
+          data-income="@(Model.IsIncome ? "true" : "false")"
+          role="@(Selectable ? "checkbox" : null)"
+          aria-checked="@(Selectable ? (Selected ? "true" : "false") : null)"
+          data-selected="@(Selectable ? (Selected ? "true" : "false") : null)">
+    <Leading>
+        @if (Selectable)
+        {
+            <span class="ft-check @(Selected ? "ft-check--on" : null)" aria-hidden="true"><i class="mdi mdi-check"></i></span>
+        }
+        <span class="ft-tile ft-tile--soft ft-tile--@Model.Tone" aria-hidden="true"><i class="mdi @Model.Icon"></i></span>
+    </Leading>
+    <Trailing>
+        <span class="ft-billrow__side">
+            <span class="ft-billrow__amount @(Model.IsIncome ? "ft-billrow__amount--income" : null)" data-testid="bill-amount">@Model.AmountText</span>
+            <span class="ft-billrow__time" data-testid="bill-time">@Model.TimeText</span>
+        </span>
+    </Trailing>
+</ListCell>
+
+@code {
+    /// <summary>要显示的账单行</summary>
+    [Parameter, EditorRequired] public BillRowModel Model { get; set; } = null!;
+
+    /// <summary>点按整行，参数是账单 Id</summary>
+    [Parameter] public EventCallback<Guid> OnClick { get; set; }
+
+    /// <summary>批量选择模式：行首显示圆形勾选框，整行是复选框</summary>
+    [Parameter] public bool Selectable { get; set; }
+
+    /// <summary>已被勾选（仅 Selectable 时有意义）</summary>
+    [Parameter] public bool Selected { get; set; }
+
+    /// <summary>置灰且不可点</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "bill-row";
+
+    private string CssClass => Selectable ? "ft-billrow ft-billrow--select" : "ft-billrow";
+
+    private Task HandleClick() => OnClick.InvokeAsync(Model.Id);
+}

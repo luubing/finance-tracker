@@ -1,0 +1,112 @@
+@namespace FinanceTracker.Web.Components.Bills
+
+@*
+    批量「归属账本」Sheet（设计稿 05 · 半屏 Sheet / 多选模式的底部操作栏进入）：从自己的账本里单选一个目标账本，
+    底部固定的主按钮「归属 N 笔账单」确认。账本必选：没有选账本时按钮置灰，也不支持「移出账本」（那会制造新的未归属账单）。
+    - 只列自己的账本：共享账本不能作为归属目标（BillService 同样拒绝），由页面传入。
+    - 只有一个自己的账本时打开即预选，省一次点按；多个账本时让用户明确选择（避免手滑把一批账单归错账本）。
+    - 真正的写库、成功 / 失败提示、通知其他页面刷新都在页面（OnConfirm）；成功后页面把 Visible 置 false。
+      进行中（Busy）按钮转圈、Sheet 不可被收起，防止重复提交或中途放弃。
+    - 观察属性（E2E）：assign-sheet(-host)、assign-hint、assign-ledger-option（data-id、data-selected）、assign-confirm、assign-no-ledger。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             OnClosed="OnClosed"
+             Title="@BillListPresentation.AssignTitle"
+             Dismissible="@(!Busy)"
+             TestId="assign-sheet">
+    <ChildContent>
+        <p class="ft-sheet-hint" data-testid="assign-hint">@BillListPresentation.AssignHint(_shownCount)</p>
+
+        @if (Ledgers.Count == 0)
+        {
+            <p class="ft-filtersec__empty" role="status" data-testid="assign-no-ledger">@BillListPresentation.AssignNoLedgerText</p>
+        }
+        else
+        {
+            <GroupedList TestId="assign-ledger-list" role="radiogroup" aria-label="目标账本" Footer="@BillListPresentation.AssignNote">
+                @foreach (var ledger in Ledgers)
+                {
+                    var current = ledger;
+                    var selected = _selected == current.Id;
+                    <ListCell Icon="@LedgerPresentation.NormalizeIcon(current.Icon)"
+                              Tone="@LedgerPresentation.ToneFor(current.Id)"
+                              Title="@current.Name"
+                              TestId="assign-ledger-option"
+                              role="radio"
+                              aria-checked="@(selected ? "true" : "false")"
+                              data-id="@current.Id"
+                              data-selected="@(selected ? "true" : "false")"
+                              OnClick="() => Choose(current.Id)">
+                        <Trailing>
+                            <span class="ft-check @(selected ? "ft-check--on" : null)" aria-hidden="true"><i class="mdi mdi-check"></i></span>
+                        </Trailing>
+                    </ListCell>
+                }
+            </GroupedList>
+        }
+    </ChildContent>
+    <Footer>
+        <GlassButton Kind="ButtonKind.Brand"
+                     Large
+                     Block
+                     Busy="Busy"
+                     Disabled="@(_selected is null || SelectedCount == 0)"
+                     TestId="assign-confirm"
+                     OnClick="ConfirmAsync">@BillListPresentation.AssignConfirmText(_shownCount)</GlassButton>
+    </Footer>
+</BottomSheet>
+
+@code {
+    private Guid? _selected;
+    private bool _wasVisible;
+
+    // 文案里展示的笔数：提交成功后页面会立刻清空选择，Sheet 退场动画期间不能跳成「0 笔」，所以保留最后一次非零的值
+    private int _shownCount;
+
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>已选中的账单数（只用于文案与按钮可用性）</summary>
+    [Parameter] public int SelectedCount { get; set; }
+
+    /// <summary>可选的目标账本：只能是当前用户自己的账本</summary>
+    [Parameter] public IReadOnlyList<LedgerModel> Ledgers { get; set; } = [];
+
+    /// <summary>页面正在提交：按钮转圈，Sheet 不能被收起</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>点「归属 N 笔账单」：参数是选中的目标账本</summary>
+    [Parameter] public EventCallback<Guid> OnConfirm { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (SelectedCount > 0)
+        {
+            _shownCount = SelectedCount;
+        }
+
+        // 只在「从隐藏变为显示」的那一刻初始化选择；之后页面重绘（例如后台刷新）不能冲掉用户已做的选择
+        if (Visible && !_wasVisible)
+        {
+            _selected = Ledgers.Count == 1 ? Ledgers[0].Id : null;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void Choose(Guid ledgerId) => _selected = ledgerId;
+
+    private async Task ConfirmAsync()
+    {
+        if (_selected is { } ledgerId && !Busy)
+        {
+            await OnConfirm.InvokeAsync(ledgerId);
+        }
+    }
+}

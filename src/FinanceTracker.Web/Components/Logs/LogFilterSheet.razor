@@ -1,0 +1,163 @@
+@namespace FinanceTracker.Web.Components.Logs
+
+@*
+    错误日志的筛选 Sheet（设计稿 05 · 半屏 Sheet）：级别（多选）+ 起止日期（含当天），
+    左上「重置」、右上关闭、底部固定的主按钮「查看日志」。
+    - 编辑的是草稿：打开时复制页面当前生效的条件（Applied），点「查看日志」才交给页面（OnApply）；
+      点遮罩 / ✕ / Esc / 下拉把手收起 = 放弃改动。搜索关键字不在这里（它有自己的搜索框）。
+    - 级别：Fatal、Error 一定有，其它级别只在日志里出现过（或已选中）时才列出（见 LogViewerPresentation.FilterLevels）；
+      再点一次已选中的级别 = 取消；一个都不选 = 不限。
+    - 起止日期是原生日期框，含当天；结束早于开始时在下方给提示，「查看日志」置灰（与旧页面不同：旧页面不校验，
+      结果是一片空白却不说为什么）。
+    - 观察属性（E2E）：log-filter-sheet(-host)、log-filter-reset、log-filter-level（data-level、data-selected）、
+      log-filter-start / log-filter-end、log-filter-error、log-filter-apply。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             OnClosed="OnClosed"
+             Title="@LogViewerPresentation.FilterTitle"
+             TestId="log-filter-sheet">
+    <HeaderStart>
+        <GlassButton Kind="ButtonKind.Neutral"
+                     Disabled="@(!_draft.HasConditions)"
+                     TestId="log-filter-reset"
+                     OnClick="Reset">重置</GlassButton>
+    </HeaderStart>
+    <ChildContent>
+        @* ───────── 级别 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@_levelTitleId" data-testid="log-filter-section-level">
+            <h3 class="ft-filtersec__title" id="@_levelTitleId">@LogViewerPresentation.LevelDimension</h3>
+            <div class="ft-chips" role="group" aria-labelledby="@_levelTitleId">
+                @foreach (var level in OfferedLevels)
+                {
+                    var current = level;
+                    var style = LogViewerPresentation.StyleOf(current);
+                    <ChoiceChip Label="@current"
+                                Icon="@style.Icon"
+                                Tone="@style.Tone"
+                                Selected="@_draft.Levels.Contains(current)"
+                                TestId="log-filter-level"
+                                data-level="@current"
+                                OnClick="() => ToggleLevel(current)" />
+                }
+            </div>
+        </section>
+
+        @* ───────── 时间 ───────── *@
+        <section class="ft-filtersec" aria-labelledby="@_timeTitleId" data-testid="log-filter-section-time">
+            <h3 class="ft-filtersec__title" id="@_timeTitleId">@LogViewerPresentation.TimeDimension</h3>
+            <GroupedList Class="ft-filtersec__custom" TestId="log-filter-range">
+                <label class="ft-field">
+                    <span class="ft-field__label">开始日期</span>
+                    <input class="ft-field__input ft-field__input--end"
+                           type="date"
+                           data-testid="log-filter-start"
+                           value="@DateText(_draft.Start)"
+                           @onchange="OnStartChanged" />
+                </label>
+                <label class="ft-field">
+                    <span class="ft-field__label">结束日期</span>
+                    <input class="ft-field__input ft-field__input--end"
+                           type="date"
+                           data-testid="log-filter-end"
+                           value="@DateText(_draft.End)"
+                           @onchange="OnEndChanged" />
+                </label>
+            </GroupedList>
+            @if (RangeError is not null)
+            {
+                <p class="ft-form-error" role="alert" data-testid="log-filter-error">@RangeError</p>
+            }
+        </section>
+    </ChildContent>
+    <Footer>
+        <GlassButton Kind="ButtonKind.Brand"
+                     Large
+                     Block
+                     Disabled="@(RangeError is not null)"
+                     TestId="log-filter-apply"
+                     OnClick="ApplyAsync">@LogViewerPresentation.FilterApplyText</GlassButton>
+    </Footer>
+</BottomSheet>
+
+@code {
+    private const string DateFormat = "yyyy-MM-dd";
+
+    private readonly string _idPrefix = $"ft-logfilter-{Guid.NewGuid():N}";
+
+    private LogFilter _draft = LogFilter.None;
+    private bool _wasVisible;
+
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>页面当前生效的条件：打开时复制成草稿，之后不再读它（草稿与页面状态互不影响，直到点「查看日志」）</summary>
+    [Parameter, EditorRequired] public LogFilter Applied { get; set; } = LogFilter.None;
+
+    /// <summary>日志里出现过的级别（概览里的级别分布）：决定除 Fatal / Error 之外还列出哪些级别</summary>
+    [Parameter] public IReadOnlyList<string> PresentLevels { get; set; } = [];
+
+    /// <summary>点「查看日志」：把草稿交给页面生效（Sheet 先收起，再触发这个回调）</summary>
+    [Parameter] public EventCallback<LogFilter> OnApply { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private string _levelTitleId => $"{_idPrefix}-level";
+
+    private string _timeTitleId => $"{_idPrefix}-time";
+
+    /// <summary>可选的级别：Fatal、Error 一定有；其它只在出现过 / 已选中时才有</summary>
+    private IReadOnlyList<string> OfferedLevels => LogViewerPresentation.FilterLevels(PresentLevels, _draft.Levels);
+
+    private string? RangeError => LogViewerPresentation.ValidateRange(_draft.Start, _draft.End);
+
+    protected override void OnParametersSet()
+    {
+        // 只在「从隐藏变为显示」的那一刻复制页面的条件作为草稿；之后页面重绘（例如后台刷新了概览）不能冲掉用户正在调的条件
+        if (Visible && !_wasVisible)
+        {
+            _draft = Applied;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void ToggleLevel(string level)
+    {
+        var selected = _draft.Levels.Contains(level)
+            ? _draft.Levels.Where(l => l != level)
+            : _draft.Levels.Append(level);
+        _draft = _draft.WithLevels(selected);
+    }
+
+    private void OnStartChanged(ChangeEventArgs e) => _draft = _draft.WithRange(ParseDate(e), _draft.End);
+
+    private void OnEndChanged(ChangeEventArgs e) => _draft = _draft.WithRange(_draft.Start, ParseDate(e));
+
+    private void Reset() => _draft = _draft.ClearConditions();
+
+    private async Task ApplyAsync()
+    {
+        if (RangeError is not null)
+        {
+            return;
+        }
+
+        // 先收起 Sheet 再让页面重新查询：不要让用户盯着 Sheet 等一次读文件
+        var applied = _draft;
+        await VisibleChanged.InvokeAsync(false);
+        await OnApply.InvokeAsync(applied);
+    }
+
+    /// <summary>日期框的值：yyyy-MM-dd；日期框清空时浏览器给 ""，当作没填</summary>
+    private static DateTime? ParseDate(ChangeEventArgs e) =>
+        DateTime.TryParseExact(e.Value?.ToString(), DateFormat, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date)
+            ? date
+            : null;
+
+    private static string? DateText(DateTime? date) =>
+        date?.ToString(DateFormat, System.Globalization.CultureInfo.InvariantCulture);
+}

@@ -1,0 +1,445 @@
+@page "/statistics"
+@using Masa.Blazor.Presets.PageStack.NavController
+@implements IDisposable
+@inject ILedgerService LedgerService
+@inject AuthenticationService AuthStateService
+@inject PageDataGate DataGate
+@inject PageStackNavController NavController
+@inject NavigationManager Navigation
+@inject StatisticsSegmentRequest SegmentRequest
+@inject ILogger<Statistics> Logger
+
+@*
+    统计 Tab（设计稿 01 · 四个 Tab 根页面 / screens 03-stats）：
+      大标题「统计」（滚动后折叠为居中小标题）+ 右侧「自定义报表」按钮
+      → 月度 / 趋势 / 年度 分段
+      → 左边是当前分段的时间控件（月度：月份胶囊；趋势：时间范围胶囊，点按弹出最近 7 天 / 30 天 / 90 天 / 12 个月菜单；年度：年份胶囊），
+        右边是三个分段共用的账本胶囊（点按弹出账本菜单）
+      → 当前分段的内容：月度视图（Components/Statistics/MonthlyStatisticsView）、趋势视图（TrendAnalysisView）、年度视图（AnnualReportView）。
+    外壳持有「切换分段时要保持的状态」：分段、账本筛选（三个分段共用）、月度的年月、趋势的时间范围与时间维度、年度的年份；视图只管取数与摆放。
+    账本选项只有用户自己的账本（统计只算自己记的账单，与以前一致）；选中的账本被删除 / 换了账号以后回到「全部账本」。
+    落在哪个分段有两个来源：① 创建页面时地址里的 ?segment=trend|annual（宿主把旧地址 /trend、/annual-report 302 到 /statistics?segment=…，只读这一次）；
+    ② 应用内旧地址的跳转页（StatisticsRedirect）登记的一次性请求（StatisticsSegmentRequest）——页面常驻、可能早已存在，所以不靠地址传递：
+    带参数的地址会留在历史里，用户切了分段、进二级页面再返回时地址又回到带参数的形态，按地址切就会冲掉用户的选择。
+    点 Tab 栏回到统计页没有请求，保持用户停留的分段。
+    刷新：只有下拉手势，没有按钮形式的刷新入口（ADR 0007）——重新读账本列表 + 重新加载当前视图，只读本页数据，不触发云端同步（同步只在「我的」里手动触发）。
+    二级页面（预算 / 账本 / 分类 / 导入……）关闭后同样重新加载：它们都可能改了这里展示的数据（记一笔 / 编辑账单已经通过 BillChanged 刷新，不重复）。
+    右上角的「自定义报表」压栈 /custom-report（二级页面，21 号 ticket 重做；只读本机库、不改任何数据，返回后回到统计 Tab 停留的分段）。
+    读库都经过 PageDataGate 与首页 / 账单页排队（Tab 根页面常驻，共用一个 DbContext）。
+    观察属性（E2E）：根 stats-page；分段 stats-segment（data-value）；月份胶囊 stats-period、年份胶囊 stats-year（-prev / -next / -label）；
+    时间范围胶囊 stats-range-pill（data-value = 当前文字）、菜单 stats-range-sheet、选项 stats-range-option（data-value、aria-current）；
+    账本胶囊 stats-ledger-pill（data-value = 当前文字）；账本菜单 stats-ledger-sheet、选项 stats-ledger-all / stats-ledger-option（data-ledger-id）；
+    导航栏 stats-report；下拉刷新 stats-ptr。
+*@
+
+@if (_isLoading || _userId != Guid.Empty)
+{
+    <LargeTitlePage Title="统计"
+                    Class="ft-stats"
+                    TestId="stats-page"
+                    Busy="@_isLoading"
+                    OnRefresh="PullRefreshAsync"
+                    RefreshTestId="stats-ptr">
+        <Actions>
+            <GlassButton Kind="ButtonKind.Glass"
+                         Round
+                         Icon="mdi-file-chart-outline"
+                         AriaLabel="@StatisticsPresentation.ReportButtonLabel"
+                         TestId="stats-report"
+                         OnClick="OpenCustomReport" />
+        </Actions>
+        <ChildContent>
+            <SegmentedControl Options="SegmentOptions"
+                              Value="@_segment"
+                              ValueChanged="OnSegmentChanged"
+                              AriaLabel="@StatisticsPresentation.SegmentAriaLabel"
+                              TestId="stats-segment" />
+
+            @if (_userId != Guid.Empty)
+            {
+                <div class="ft-stats__filters" data-testid="stats-filters">
+                    @* 左边是当前分段的时间控件（月度：月份胶囊；趋势：时间范围胶囊；年度：年份胶囊），右边是三个分段共用的账本胶囊 *@
+                    @switch (_segment)
+                    {
+                        case StatisticsPresentation.SegmentTrend:
+                            <FilterPill Text="@TrendRangeText"
+                                        Icon="mdi-calendar-range"
+                                        AriaLabel="@StatisticsPresentation.TrendRangeAriaLabel(TrendRangeText)"
+                                        Class="ft-stats__range"
+                                        TestId="stats-range-pill"
+                                        OnClick="OpenRangeSheet" />
+                            break;
+                        case StatisticsPresentation.SegmentAnnual:
+                            <PeriodSwitcher Label="@StatisticsPresentation.YearLabel(_annualYear)"
+                                            PreviousLabel="@StatisticsPresentation.PreviousYearLabel(_annualYear)"
+                                            NextLabel="@StatisticsPresentation.NextYearLabel(_annualYear)"
+                                            CanPrevious="@StatisticsPresentation.CanShiftYear(_annualYear, -1)"
+                                            CanNext="@StatisticsPresentation.CanShiftYear(_annualYear, 1)"
+                                            OnPrevious="PreviousYear"
+                                            OnNext="NextYear"
+                                            AriaLabel="@StatisticsPresentation.YearAriaLabel"
+                                            TestId="stats-year" />
+                            break;
+                        default:
+                            <PeriodSwitcher Label="@StatisticsPresentation.MonthLabel(_year, _month)"
+                                            PreviousLabel="@StatisticsPresentation.PreviousMonthLabel(_year, _month)"
+                                            NextLabel="@StatisticsPresentation.NextMonthLabel(_year, _month)"
+                                            CanPrevious="@StatisticsPresentation.CanShiftMonthUpTo(_year, _month, -1, LatestMonth)"
+                                            CanNext="@StatisticsPresentation.CanShiftMonthUpTo(_year, _month, 1, LatestMonth)"
+                                            OnPrevious="PreviousMonth"
+                                            OnNext="NextMonth"
+                                            AriaLabel="月份"
+                                            TestId="stats-period" />
+                            break;
+                    }
+                    @if (_ledgers.Count > 0)
+                    {
+                        <FilterPill Text="@LedgerPillText"
+                                    Icon="mdi-book-outline"
+                                    AriaLabel="@StatisticsPresentation.LedgerPillAriaLabel(LedgerPillText)"
+                                    Class="ft-stats__ledger"
+                                    TestId="stats-ledger-pill"
+                                    OnClick="OpenLedgerSheet" />
+                    }
+                </div>
+
+                @switch (_segment)
+                {
+                    case StatisticsPresentation.SegmentTrend:
+                        <TrendAnalysisView @key="_userId"
+                                           @ref="_trendView"
+                                           UserId="_userId"
+                                           LedgerId="_ledgerId"
+                                           Range="@_trendRange"
+                                           @bind-Dimension="_trendDimension" />
+                        break;
+                    case StatisticsPresentation.SegmentAnnual:
+                        <AnnualReportView @key="_userId"
+                                          @ref="_annualView"
+                                          UserId="_userId"
+                                          LedgerId="_ledgerId"
+                                          Year="_annualYear" />
+                        break;
+                    default:
+                        <MonthlyStatisticsView @key="_userId"
+                                               @ref="_monthlyView"
+                                               UserId="_userId"
+                                               Year="_year"
+                                               Month="_month"
+                                               LedgerId="_ledgerId"
+                                               LedgerCount="_ledgers.Count" />
+                        break;
+                }
+            }
+        </ChildContent>
+    </LargeTitlePage>
+
+    @* 时间范围菜单（趋势）：四个范围；选中项带对勾 *@
+    <ActionSheet @bind-Visible="_rangeSheet" Title="@StatisticsPresentation.TrendRangeSheetTitle" TestId="stats-range-sheet">
+        @foreach (var (value, label) in StatisticsPresentation.TrendRanges)
+        {
+            var range = value;
+            <ActionSheetItem @key="range"
+                             Icon="@(_trendRange == range ? "mdi-check" : null)"
+                             TestId="stats-range-option"
+                             data-value="@range"
+                             aria-current="@(_trendRange == range ? "true" : null)"
+                             OnClick="() => SelectRange(range)">@label</ActionSheetItem>
+        }
+    </ActionSheet>
+
+    @* 账本菜单：全部账本 + 用户自己的账本；选中项带对勾 *@
+    <ActionSheet @bind-Visible="_ledgerSheet" Title="选择账本" TestId="stats-ledger-sheet">
+        <ActionSheetItem Icon="@(_ledgerId is null ? "mdi-check" : null)"
+                         TestId="stats-ledger-all"
+                         aria-current="@(_ledgerId is null ? "true" : null)"
+                         OnClick="() => SelectLedger(null)">@StatisticsPresentation.AllLedgersText</ActionSheetItem>
+        @foreach (var ledger in _ledgers)
+        {
+            var id = ledger.Id;
+            <ActionSheetItem @key="id"
+                             Icon="@(_ledgerId == id ? "mdi-check" : null)"
+                             TestId="stats-ledger-option"
+                             data-ledger-id="@id"
+                             aria-current="@(_ledgerId == id ? "true" : null)"
+                             OnClick="() => SelectLedger(id)">@ledger.Name</ActionSheetItem>
+        }
+    </ActionSheet>
+}
+
+@code {
+    private static readonly IReadOnlyList<SegmentOption> SegmentOptions =
+        StatisticsPresentation.Segments.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
+
+    private bool _disposed;
+    private bool _isLoading = true;
+    private Guid _userId;
+
+    // 切换分段时保持的状态：分段、账本筛选（三个分段共用）、月度的年月（应用时区的当前月）、
+    // 趋势的时间范围与时间维度、年度的年份（应用时区的当年）
+    private string _segment = StatisticsPresentation.SegmentMonthly;
+    private Guid? _ledgerId;
+    private int _year;
+    private int _month;
+    private string _trendRange = StatisticsPresentation.DefaultTrendRange;
+    private string _trendDimension = StatisticsPresentation.DefaultTrendDimension;
+    private int _annualYear;
+
+    private List<LedgerModel> _ledgers = new();
+    private bool _ledgerSheet;
+    private bool _rangeSheet;
+
+    private MonthlyStatisticsView? _monthlyView;
+    private TrendAnalysisView? _trendView;
+    private AnnualReportView? _annualView;
+
+    private string LedgerPillText => StatisticsPresentation.LedgerPillText(_ledgerId, _ledgers);
+
+    private string TrendRangeText => StatisticsPresentation.TrendRangeText(_trendRange);
+
+    protected override void OnInitialized()
+    {
+        var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+        (_year, _month, _annualYear) = (now.Year, now.Month, now.Year);
+
+        // 初始分段：应用内旧地址的跳转页登记的请求（统计 Tab 是这次才首次创建）优先，其次是地址里的 ?segment=（宿主 302 过来的直接访问）。
+        // 无论有没有用上都要取走请求，免得它留到以后；地址只在这里读一次——之后地址里的参数不再影响分段（见页面注释）
+        _segment = SegmentRequest.Take() ?? StatisticsPresentation.SegmentFromUri(Navigation.Uri) ?? _segment;
+
+        AuthStateService.AuthStateChanged += OnAuthStateChanged;
+        NavController.PageClosed += OnPageClosed;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与 Index.razor / Bills.razor 相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadUserAsync();
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+        NavController.PageClosed -= OnPageClosed;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    // ------------------------------------------------------------------ 事件
+
+    private void OnAuthStateChanged() => _ = RunOnUiAsync(LoadUserAsync, "认证状态变化后刷新统计失败");
+
+    /// <summary>
+    /// 统计页常驻在页面栈里，旧地址的跳转页（<c>StatisticsRedirect</c>）把用户带回来时它已经存在：
+    /// 在地址变到统计页的这一刻认领跳转页登记的请求，切到对应分段。
+    /// 没有请求（点 Tab 栏回来、从二级页面返回）就保持用户停留的分段——不看地址里的参数，
+    /// 否则返回时地址里残留的 ?segment= 会把用户切换后的分段冲掉。
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!StatisticsPresentation.IsStatisticsUri(e.Location))
+        {
+            return;
+        }
+
+        var segment = SegmentRequest.Take();
+        if (segment is null || segment == _segment)
+        {
+            return;
+        }
+
+        _ = RunOnUiAsync(
+            () =>
+            {
+                _segment = segment;
+                return Task.CompletedTask;
+            },
+            "按地址切换统计分段失败");
+    }
+
+    private void OnPageClosed(object? sender, PageStackPageClosedEventArgs e)
+    {
+        // 二级页面关闭后重新加载（预算 / 账本 / 分类 / 导入……都可能改了这里展示的数据）。
+        // 记一笔 / 编辑账单是布局级的 Sheet，不经过页面栈；它保存时已经通过 BillChanged 刷新（视图自己订阅）
+        _ = RunOnUiAsync(
+            async () =>
+            {
+                if (_userId != Guid.Empty)
+                {
+                    await RefreshCoreAsync();
+                }
+            },
+            "二级页面关闭后刷新统计失败");
+    }
+
+    /// <summary>
+    /// 在渲染线程上执行并重绘；失败只记日志（电路可能已关闭），不能把异常抛到事件源
+    /// </summary>
+    private async Task RunOnUiAsync(Func<Task> work, string failureMessage)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                await work();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "{Message}", failureMessage);
+        }
+    }
+
+    // ------------------------------------------------------------------ 加载
+
+    private async Task LoadUserAsync()
+    {
+        Guid userId;
+        try
+        {
+            userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取登录状态失败");
+            userId = Guid.Empty;
+        }
+
+        if (userId == Guid.Empty)
+        {
+            // 未登录（退出登录后 Tab 根页面还留在页面栈里）：不显示任何统计
+            ResetData();
+            _userId = Guid.Empty;
+            _isLoading = false;
+            return;
+        }
+
+        if (userId != _userId && _userId != Guid.Empty)
+        {
+            // 换了账号：清掉上一个用户的状态；三个视图按 @key 重建，不让上一个用户的数据闪一下。
+            // 首次进入（_userId 还是空）不用清：组件刚创建，状态都是初始值，而且分段可能已经由地址（?segment=）指定，重置会把它冲掉
+            ResetData();
+            _userId = Guid.Empty;
+        }
+
+        try
+        {
+            // 先读账本，再让视图出现：视图的加载依赖「有没有账本」，先后颠倒会白加载一次
+            await LoadLedgersAsync(userId);
+            _userId = userId;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+
+        // 已经在显示的视图（再次进入 / 认证状态刷新）重新读一遍
+        await ReloadActiveViewAsync();
+    }
+
+    private void ResetData()
+    {
+        _ledgers = new List<LedgerModel>();
+        _ledgerId = null;
+        _ledgerSheet = false;
+        _rangeSheet = false;
+        _segment = StatisticsPresentation.SegmentMonthly;
+        _trendRange = StatisticsPresentation.DefaultTrendRange;
+        _trendDimension = StatisticsPresentation.DefaultTrendDimension;
+        var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+        (_year, _month, _annualYear) = (now.Year, now.Month, now.Year);
+    }
+
+    /// <summary>
+    /// 读取用户自己的账本（账本筛选的选项）。失败不影响统计展示（只是没有账本筛选）；选中的账本已经不存在时回到全部账本。
+    /// </summary>
+    private async Task LoadLedgersAsync(Guid userId)
+    {
+        await DataGate.RunAsync(async () =>
+        {
+            try
+            {
+                var ledgers = await LedgerService.GetLedgersAsync(userId);
+                _ledgers = ledgers.Select(l => LedgerModel.FromEntity(l)).ToList();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "加载账本列表失败");
+                _ledgers = new List<LedgerModel>();
+            }
+        });
+
+        _ledgerId = StatisticsPresentation.ValidLedgerId(_ledgerId, _ledgers);
+    }
+
+    /// <summary>刷新：账本列表 + 当前视图（下拉刷新、二级页面关闭共用）</summary>
+    private async Task RefreshCoreAsync()
+    {
+        await LoadLedgersAsync(_userId);
+        await ReloadActiveViewAsync();
+    }
+
+    private Task ReloadActiveViewAsync() => _segment switch
+    {
+        StatisticsPresentation.SegmentTrend => _trendView?.ReloadAsync() ?? Task.CompletedTask,
+        StatisticsPresentation.SegmentAnnual => _annualView?.ReloadAsync() ?? Task.CompletedTask,
+        _ => _monthlyView?.ReloadAsync() ?? Task.CompletedTask,
+    };
+
+    /// <summary>下拉刷新（唯一的刷新入口）：转圈由 PullToRefresh 负责</summary>
+    private async Task PullRefreshAsync()
+    {
+        if (_userId != Guid.Empty)
+        {
+            await RefreshCoreAsync();
+        }
+    }
+
+    // ------------------------------------------------------------------ 交互
+
+    private void OnSegmentChanged(string value) => _segment = StatisticsPresentation.NormalizeSegment(value);
+
+    /// <summary>月度能切到的最晚月份：应用时区的当月（未来没有账单；预算页才允许给未来的月份设预算）</summary>
+    private static (int Year, int Month) LatestMonth
+    {
+        get
+        {
+            var now = AppTimeZone.ToLocal(DateTime.UtcNow);
+            return (now.Year, now.Month);
+        }
+    }
+
+    private void PreviousMonth() => (_year, _month) = StatisticsPresentation.ShiftMonthUpTo(_year, _month, -1, LatestMonth);
+
+    private void NextMonth() => (_year, _month) = StatisticsPresentation.ShiftMonthUpTo(_year, _month, 1, LatestMonth);
+
+    private void PreviousYear() => _annualYear = StatisticsPresentation.ShiftYear(_annualYear, -1);
+
+    private void NextYear() => _annualYear = StatisticsPresentation.ShiftYear(_annualYear, 1);
+
+    private void OpenRangeSheet() => _rangeSheet = true;
+
+    private void SelectRange(string range) => _trendRange = StatisticsPresentation.NormalizeTrendRange(range);
+
+    private void OpenLedgerSheet() => _ledgerSheet = true;
+
+    private void SelectLedger(Guid? ledgerId) => _ledgerId = ledgerId;
+
+    private void OpenCustomReport() => NavController.Push("/custom-report");
+}

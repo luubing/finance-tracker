@@ -1,0 +1,6415 @@
+/* ============================================================
+   复用组件层样式（iOS UI 重构）
+   只引用 tokens.css 里的令牌；Web.Server 与 MAUI App 共用同一份（加载顺序：masa → tokens → app → ui）。
+   各 ticket 往这里追加自己的组件：应用壳与玻璃材质（03）、Tab 栏（03，滑块效果 04）、二级页面模板（05）……
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   应用壳
+   ------------------------------------------------------------ */
+html {
+    background: var(--ft-bg-outside);
+}
+
+body {
+    font-family: var(--ft-font);
+    -webkit-font-smoothing: antialiased;
+}
+
+.m-application {
+    font-family: var(--ft-font);
+    background: var(--ft-bg);
+}
+
+/* MASA 的排版重置（.m-application ul / ol { padding-left: 24px }）特异性高于单个类选择器：
+   本应用自己控制间距的列表（带 ft- 类名的 ul / ol）会被它推进 24px，这里把左内边距交还给组件自己的规则 */
+.m-application ol[class*="ft-"],
+.m-application ul[class*="ft-"] {
+    padding-left: 0;
+}
+
+/* 同一类泄漏：MASA 的 .m-application p { margin-bottom: 16px }（0,1,1）压过所有单类名选择器，每个 <p> 的下外边距都被它撑出 16px，
+   本应用的文字块（hero 标签、说明行、空状态……）写的都是「X 0 0」。这里用同样的特异性、更晚的加载顺序把它归零（全局修复，23 号）。
+   组件确实需要下外边距的 <p>（.ft-sheet-hint / .ft-panel__note / .ft-yoy__period / 登录页错误行）一律写成 p.类名——同权重、写在这条之后的胜出 */
+.m-application p {
+    margin-bottom: 0;
+}
+
+/* 网页端宽屏（桌面浏览器）：应用壳限制最大宽度并居中，保持手机比例。
+   transform 让 position: fixed 的后代（页面栈二级页、悬浮 Tab 栏、对话框）以应用壳而不是整个视口为定位参照，
+   这样它们都收在这条「手机」里，不会拉伸到整个窗口。手机宽度下不启用，行为与改造前完全一致。 */
+@media (min-width: 521px) {
+    .m-application {
+        width: 100%;
+        max-width: var(--ft-shell-max-width);
+        margin-inline: auto;
+        transform: translateZ(0);
+        /* 页面栈推入二级页面时，下面那一页会向左错开一截；手机上它移到屏幕外，宽屏上则要在壳的边缘裁掉，不能露在壳外 */
+        overflow-x: clip;
+        box-shadow: 0 0 0 1px rgba(60, 60, 67, .08), 0 0 48px rgba(20, 20, 60, .08);
+    }
+}
+
+/* ------------------------------------------------------------
+   材质：玻璃（取值全部来自令牌；23 号 ticket 的「降低透明度」回退在 tokens.css 一处切换）
+   ------------------------------------------------------------ */
+.ft-glass {
+    position: relative;
+    background: var(--ft-glass-bg);
+    -webkit-backdrop-filter: var(--ft-glass-filter);
+    backdrop-filter: var(--ft-glass-filter);
+    box-shadow: var(--ft-glass-shadow);
+}
+
+.ft-glass-dark {
+    position: relative;
+    background: var(--ft-glass-dark-bg);
+    -webkit-backdrop-filter: var(--ft-glass-dark-filter);
+    backdrop-filter: var(--ft-glass-dark-filter);
+    box-shadow: var(--ft-glass-dark-shadow);
+}
+
+/* ------------------------------------------------------------
+   悬浮玻璃 Tab 栏 + 「记一笔」圆钮（GlassTabBar.razor，滑块动效由 tabBar.js 驱动）
+   结构：.ft-tabwrap > nav.ft-tabbar.ft-glass(> .ft-tabbar__thumb + .ft-tab × 4) + button.ft-capsule + button.ft-fab
+   尺寸：高 62、左右边距 16、距底 21 + 安全区（均为令牌）。每屏玻璃层 ≤ 3：Tab 栏只占 1 层，圆钮是实色渐变。
+   由脚本维护的状态（Blazor 不渲染这些属性，重绘不会冲掉它们）：
+     .ft-tabwrap[data-collapsed="true"]      Tab 栏收缩成「当前页胶囊」（向下滚动超过 --ft-collapse-threshold）
+     .ft-tabwrap[data-pressed="true"]        正在按住某个 Tab：高光「抬起」
+     [data-pressing="true"]                  被按住的那个按钮（Tab 图标缩小、圆钮缩放）
+     .ft-tabbar__thumb[data-state]           idle | moving：高光是否还在弹簧运动中
+     .ft-tabbar__thumb 的内联 translate / scale   脚本接管后高光的位置（始终保留）与拉伸 / 抬起（静止时清掉）；
+                                             下面由 --ft-tab-x 决定的静态位置只是脚本接管之前（预渲染）/ 脚本加载失败时的回退
+   ------------------------------------------------------------ */
+.ft-tabwrap {
+    position: fixed;
+    z-index: var(--ft-z-tabbar);
+    left: calc(var(--ft-tabbar-side) + var(--ft-safe-left, 0px));
+    right: calc(var(--ft-tabbar-side) + var(--ft-safe-right, 0px));
+    bottom: calc(var(--ft-tabbar-bottom) + var(--ft-safe-bottom, 0px));
+    height: var(--ft-tabbar-height);
+    display: flex;
+    gap: var(--ft-tabbar-gap);
+    pointer-events: none; /* 外框不拦截点击；只有 Tab 栏与圆钮自己响应 */
+    transition: transform var(--ft-dur-tabbar) var(--ft-ease-out), opacity var(--ft-dur-tabbar) var(--ft-ease-out), visibility 0s linear 0s;
+}
+
+.ft-tabwrap > * {
+    pointer-events: auto;
+}
+
+/* 二级页面与登录页：Tab 栏滑出并隐藏（元素保留在 DOM，回到根页面时再滑回） */
+.ft-tabwrap--hidden {
+    transform: translateY(calc(100% + var(--ft-tabbar-bottom) + var(--ft-safe-bottom, 0px) + 12px));
+    opacity: 0;
+    visibility: hidden;
+    transition: transform var(--ft-dur-tabbar) var(--ft-ease-out), opacity var(--ft-dur-tabbar) var(--ft-ease-out), visibility 0s linear var(--ft-dur-tabbar);
+}
+
+.ft-tabwrap--hidden > * {
+    pointer-events: none;
+}
+
+.ft-tabbar {
+    flex: none;
+    width: calc(100% - var(--ft-fab-size) - var(--ft-tabbar-gap));
+    min-width: 0;
+    height: var(--ft-tabbar-height);
+    padding: 4px;
+    display: flex;
+    border-radius: calc(var(--ft-tabbar-height) / 2);
+    transition: width var(--ft-dur-tabbar) var(--ft-ease-out);
+}
+
+/* 选中项的高光块。脚本接管之前（预渲染）/ 脚本加载失败时，位置由 --ft-tab-x（选中项序号，Blazor 渲染在 nav 上）决定；
+   tabBar.js 接管后用弹簧积分的内联 translate / scale 决定位置、水平拉伸与按下抬起（translate 始终保留，scale 静止时清掉），
+   这样 Blazor 先更新 --ft-tab-x、脚本后收到 sync 的代码触发跳转，高光也不会先瞬移再被拉回。
+   位置用 translate / scale 这两个独立属性，而不是 transform：scale 绕自身中心，translate 在最外层，两者互不干扰。
+   这两个属性上不加 CSS transition，否则会和脚本每帧写入的值相互拖拽。 */
+.ft-tabbar__thumb {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    width: calc((100% - 8px) / 4);
+    border-radius: calc(var(--ft-tabbar-height) / 2 - 4px);
+    translate: calc(4px + var(--ft-tab-x, 0) * 100%) 0;
+    background: var(--ft-glass-thumb-bg);
+    box-shadow: var(--ft-glass-thumb-shadow);
+    transition: box-shadow var(--ft-dur-press) var(--ft-ease-out), opacity var(--ft-dur-icon) var(--ft-ease-in-out);
+}
+
+/* 按下：投影加深、高光更亮（放大 1.08 由脚本写入 scale） */
+.ft-tabwrap[data-pressed="true"] .ft-tabbar__thumb {
+    box-shadow: var(--ft-glass-thumb-shadow-lifted);
+}
+
+.ft-tab {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    min-width: 0;
+    height: 54px;
+    padding: 0;
+    border: 0;
+    background: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: rgba(60, 60, 67, .74);
+    font: var(--ft-type-footnote);
+    letter-spacing: .1px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--ft-dur-icon) var(--ft-ease-in-out), opacity var(--ft-dur-icon) var(--ft-ease-in-out);
+}
+
+.ft-tab--on {
+    color: var(--ft-brand);
+}
+
+/* 图标：线框与实心叠放，选中时交叉淡入 */
+.ft-tab__glyph {
+    position: relative;
+    width: 26px;
+    height: 26px;
+    transition: scale var(--ft-dur-press) var(--ft-ease-out);
+}
+
+/* 按下：被按住的那个 Tab 的图标缩小到 0.9 */
+.ft-tab[data-pressing="true"] .ft-tab__glyph {
+    scale: var(--ft-lift-icon-scale);
+}
+
+.ft-tab__glyph > i {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 25px;
+    line-height: 1;
+    transition: opacity var(--ft-dur-icon) var(--ft-ease-in-out);
+}
+
+.ft-tab__glyph > i::before {
+    display: block;
+    line-height: 1;
+}
+
+.ft-tab__glyph > .ft-tab__f {
+    opacity: 0;
+}
+
+.ft-tab--on .ft-tab__glyph > .ft-tab__o {
+    opacity: 0;
+}
+
+.ft-tab--on .ft-tab__glyph > .ft-tab__f {
+    opacity: 1;
+}
+
+.ft-tab__label {
+    display: block;
+    font: var(--ft-type-footnote);
+    letter-spacing: .1px;
+    white-space: nowrap;
+}
+
+.ft-fab {
+    flex: none;
+    margin-left: auto; /* Tab 栏收缩成胶囊时圆钮仍靠右（展开时没有剩余空间，不起作用） */
+    width: var(--ft-fab-size);
+    height: var(--ft-fab-size);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: 30px;
+    cursor: pointer;
+    background: var(--ft-brand-button-gradient);
+    box-shadow:
+        0 10px 26px rgba(var(--ft-brand-rgb), .45),
+        0 2px 6px rgba(var(--ft-brand-rgb), .3),
+        inset 0 0 0 .75px rgba(255, 255, 255, .35),
+        inset 0 1.8px .8px rgba(255, 255, 255, .7),
+        inset 0 -2px 1px rgba(20, 0, 120, .35);
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-fab > i {
+    line-height: 1;
+}
+
+/* 按下「记一笔」圆钮：缩放 0.92，松手后进入记账页（:active 之外再认脚本写的 data-pressing，WKWebView 对 :active 不可靠） */
+.ft-fab[data-pressing="true"],
+.ft-fab:active {
+    transform: scale(var(--ft-fab-press-scale));
+}
+
+/* 收缩态的「当前页胶囊」：向下滚动后 Tab 栏缩成一颗显示当前页的胶囊，向上滚动或点按展开。
+   胶囊自己不画背景（Tab 栏的玻璃就是它的底），只叠在上面显示当前 Tab 的实心图标与名称；
+   它是 nav 之外的兄弟元素，避免在 role="tablist" 里放按钮。「记一笔」圆钮始终在右侧 */
+.ft-capsule {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: var(--ft-tabbar-capsule-width);
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: calc(var(--ft-tabbar-height) / 2);
+    background: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    color: var(--ft-brand);
+    font: var(--ft-type-nav-title);
+    white-space: nowrap;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    opacity: 0;
+    transition: opacity var(--ft-dur-icon) var(--ft-ease-in-out);
+}
+
+.ft-capsule > i {
+    font-size: 24px;
+    line-height: 1;
+}
+
+.ft-tabwrap > .ft-capsule {
+    pointer-events: none;
+}
+
+.ft-tabwrap[data-collapsed="true"] .ft-tabbar {
+    width: var(--ft-tabbar-capsule-width);
+}
+
+.ft-tabwrap[data-collapsed="true"] .ft-tab,
+.ft-tabwrap[data-collapsed="true"] .ft-tabbar__thumb {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ft-tabwrap[data-collapsed="true"] > .ft-capsule {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.ft-tab:focus-visible,
+.ft-fab:focus-visible,
+.ft-capsule:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------
+   Tab 页面切换：目标页交叉淡入（0.985 → 1，约 180ms）
+   Tab 根页面常驻 DOM、切走时加 d-none；display 从 none 变回可见时 CSS 动画会自动重新播放，不需要脚本。
+   注意：动画期间根页面会短暂成为 transform 的包含块——放在根页面里的 position: fixed 元素会跟着错位 180ms，
+   需要固定在屏幕上的元素（悬浮栏等）应放在页面栈之外，或用 position: sticky。
+   ------------------------------------------------------------ */
+@keyframes ft-page-enter {
+    from {
+        opacity: 0;
+        transform: scale(var(--ft-page-enter-scale));
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+@keyframes ft-page-fade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.p-page-container__item:not(.d-none) {
+    animation: ft-page-enter var(--ft-dur-page) var(--ft-ease-out);
+}
+
+/* 系统开启「减弱动态效果」：Tab 栏只做短暂淡入淡出，不滑动、不缩放、不拉伸（脚本侧同样跳过弹簧与拉伸，高光只淡入） */
+@media (prefers-reduced-motion: reduce) {
+    .ft-tabwrap,
+    .ft-tabwrap--hidden {
+        transition-property: opacity, visibility;
+        transition-duration: var(--ft-dur-reduced), 0s;
+    }
+
+    .ft-tabwrap--hidden {
+        transform: none;
+        transition-delay: 0s, var(--ft-dur-reduced);
+    }
+
+    .ft-tabbar {
+        transition: none;
+    }
+
+    .ft-tab,
+    .ft-tab__glyph > i,
+    .ft-capsule {
+        transition-duration: var(--ft-dur-reduced);
+    }
+
+    .ft-tab__glyph {
+        transition: none;
+    }
+
+    .ft-tab[data-pressing="true"] .ft-tab__glyph {
+        scale: 1;
+    }
+
+    .ft-fab {
+        transition: none;
+    }
+
+    .ft-fab[data-pressing="true"],
+    .ft-fab:active {
+        transform: none;
+    }
+
+    .p-page-container__item:not(.d-none) {
+        animation: ft-page-fade var(--ft-dur-reduced) linear;
+    }
+}
+
+/* ============================================================
+   二级页面模板与弹层组件（05 号 ticket）
+   标记在 Components/Ui/*.razor；手势行为（左滑行、Sheet 拖拽收起）在 wwwroot/js/ui.js（文档级事件委托），这里只有样式。
+   规则：只引用令牌；每屏玻璃层 ≤ 3（导航栏本身是纯色渐隐、不占玻璃层；玻璃圆按钮、Alert / 操作面板、Toast 各占 1 层）；
+   不使用 :has() / aspect-ratio / color-mix（最低支持 iOS 14）。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   按钮（GlassButton）：玻璃圆按钮 / 主要 / 次要 / 取消 / 删除 / 文字
+   ------------------------------------------------------------ */
+.ft-btn {
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0 20px;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font: var(--ft-type-button);
+    color: var(--ft-label);
+    white-space: nowrap;
+    text-decoration: none;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out), opacity var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-btn > i {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ft-btn:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-btn:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+.ft-btn:disabled {
+    opacity: .45;
+    cursor: default;
+    pointer-events: none;
+}
+
+.ft-btn--busy {
+    opacity: .6;
+}
+
+.ft-btn--round {
+    width: var(--ft-hit);
+    padding: 0;
+    border-radius: 50%;
+}
+
+.ft-btn--lg {
+    height: 52px;
+    padding: 0 28px;
+    font-size: 17px;
+}
+
+.ft-btn--block {
+    display: flex;
+    width: 100%;
+}
+
+.ft-btn--brand {
+    color: #fff;
+    background: var(--ft-brand-button-gradient);
+    box-shadow: var(--ft-brand-button-shadow);
+}
+
+.ft-btn--soft {
+    color: var(--ft-brand);
+    background: var(--ft-brand-soft-2);
+}
+
+.ft-btn--neutral {
+    color: var(--ft-label);
+    background: var(--ft-fill);
+}
+
+.ft-btn--danger {
+    color: var(--ft-danger-text);
+    background: rgba(255, 59, 48, .12);
+}
+
+.ft-btn--text {
+    padding: 0 12px;
+    color: var(--ft-brand);
+    background: none;
+}
+
+.ft-btn-row {
+    display: flex;
+    gap: 10px;
+}
+
+.ft-btn-row > .ft-btn {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ------------------------------------------------------------
+   二级页面（SecondaryPage + GlassNavBar）
+   页面栈把二级页做成全屏对话框：顶栏是 header.m-page-stack-item__bar（position: fixed），内容在 .m-page-stack-item__content。
+   顶栏 = 页面背景色 + 底部渐隐（不是玻璃，不占玻璃层），高度 = 44 + 状态栏安全区。
+   ------------------------------------------------------------ */
+/* MASA 给顶栏的背景是 .m-app-bar.m-toolbar.m-sheet（三个类），这里要用更高的特异性才能换成页面背景色 */
+.m-app-bar.m-toolbar.m-page-stack-item__bar.ft-subbar {
+    height: calc(var(--ft-nav-height) + var(--ft-safe-top, 0px)) !important;
+    padding-top: var(--ft-safe-top, 0px);
+    box-sizing: border-box;
+    background-color: var(--ft-bg);
+    box-shadow: none;
+}
+
+/* 内容区让出顶栏：顶栏是 position: fixed，内容区的上内边距 = 顶栏高度 + 状态栏安全区（与上面的顶栏高度同取 --ft-nav-height）。
+   页面栈自己给内容区写了 !important 的内边距，所以这里也要 !important */
+.m-page-stack-item__content {
+    padding-top: calc(var(--ft-nav-height) + var(--ft-safe-top, 0px)) !important;
+}
+
+.ft-subbar::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: var(--ft-nav-fade);
+    background: linear-gradient(to bottom, var(--ft-bg), rgba(var(--ft-bg-rgb), 0));
+    pointer-events: none;
+}
+
+.ft-subbar .m-toolbar__content {
+    height: var(--ft-nav-height) !important;
+    padding: 0 calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) 0 calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+}
+
+.ft-nav {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ft-nav__side {
+    flex: none;
+    min-width: var(--ft-hit);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ft-nav__side--end {
+    justify-content: flex-end;
+}
+
+.ft-nav__title {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    max-width: calc(100% - 2 * (var(--ft-hit) + 20px));
+    margin: 0;
+    font: var(--ft-type-nav-title);
+    color: var(--ft-label);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+/* 窄屏（320pt 这一档）：标题绝对居中，右侧文字胶囊（「全部忽略」等）再宽就会压到标题，所以左右内边距收小；圆形图标钮不受影响 */
+@media (max-width: 359px) {
+    .ft-nav__side--end .ft-btn:not(.ft-btn--round) {
+        padding: 0 12px;
+    }
+}
+
+.ft-subpage {
+    box-sizing: border-box;
+    min-height: 100%;
+    padding: 8px calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) calc(var(--ft-safe-bottom, 0px) + 32px) calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    background: var(--ft-bg);
+}
+
+.ft-subpage > :first-child {
+    margin-top: 0;
+}
+
+/* ------------------------------------------------------------
+   分组圆角列表（GroupedList）+ 单元格（ListCell）+ 图标块 + 徽标 + 卡片
+   ------------------------------------------------------------ */
+.ft-group {
+    margin-top: var(--ft-space-group);
+}
+
+.ft-group__header {
+    margin: 0;
+    padding: 0 20px 8px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-group__body {
+    position: relative;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+    overflow: hidden;
+}
+
+.ft-group__footer {
+    margin: 0;
+    padding: 8px 20px 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-card {
+    padding: 16px;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-card + .ft-card {
+    margin-top: 12px;
+}
+
+.ft-card__head {
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    margin-bottom: 14px;
+}
+
+.ft-cell {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--ft-cell-height);
+    margin: 0;
+    padding: 0 var(--ft-cell-pad);
+    border: 0;
+    border-radius: 0;
+    background: none;
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    text-align: left;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-cell--two {
+    min-height: var(--ft-cell-height-2);
+}
+
+button.ft-cell {
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+
+.ft-cell--click:active {
+    background: var(--ft-fill-2);
+}
+
+.ft-cell--click:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+.ft-cell:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+/* 分隔线：从标题左缘开始（有图标块时缩进到图标块之后）；每组第一行不画 */
+.ft-cell::before,
+.ft-field::before {
+    content: "";
+    position: absolute;
+    left: var(--ft-cell-pad);
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--ft-separator);
+    transform: scaleY(.5);
+    transform-origin: top;
+    pointer-events: none;
+}
+
+.ft-cell--lead::before {
+    left: var(--ft-cell-inset);
+}
+
+.ft-group__body > :first-child::before,
+.ft-group__body > :first-child .ft-cell::before,
+.ft-group__body > :first-child .ft-field::before {
+    display: none;
+}
+
+/* 邀请卡：图标块 + 两行文字，下面是一排按钮 */
+.ft-card__titles {
+    flex: 1;
+    min-width: 0;
+}
+
+.ft-card__title {
+    margin: 0;
+    font: var(--ft-type-cell-title);
+    color: var(--ft-label);
+}
+
+.ft-card__subtitle {
+    margin: 2px 0 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-cell__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 10px 0;
+}
+
+.ft-cell__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-cell--two .ft-cell__title {
+    font: var(--ft-type-cell-title);
+}
+
+/* 标题后面的备注（账单行：「餐饮美食」加粗 + 「 · 午餐」灰色常规，设计稿 02）。
+   分类名与备注各是标题盒里的一个 flex 子项：分类名按内容宽度（放不下才省略），备注占剩下的宽度并自己省略——
+   两个盒子都不会比标题盒宽（把备注写成行内元素，它的盒子会比标题盒还宽，只是被 overflow 裁掉，系统字号放大时会被「越出视口」体检抓到）。
+   备注框用 white-space: pre 保住「 · 」前面的空格（flex 子项的行首空白会被折叠）；备注里的换行 / 连续空白已在 BillPresentation.NoteText 折成一个空格 */
+.ft-cell__title--noted {
+    display: flex;
+}
+
+.ft-cell__title-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-cell__title-note {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+    font-weight: 400;
+    color: var(--ft-label-2);
+}
+
+.ft-cell__subtitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-cell__trail {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ft-label-2);
+}
+
+.ft-cell__value {
+    font: var(--ft-type-body);
+    color: var(--ft-label-2);
+}
+
+.ft-cell__chevron {
+    margin-right: -4px;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--ft-label-3);
+}
+
+/* 单选行（role="radio"）选中时右侧的对勾 */
+.ft-cell__check {
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ft-brand);
+}
+
+.ft-cell--destructive .ft-cell__title {
+    color: var(--ft-danger-text);
+}
+
+.ft-tile {
+    flex: none;
+    width: var(--ft-tile-size);
+    height: var(--ft-tile-size);
+    border-radius: var(--ft-radius-tile);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: 22px;
+    background: var(--ft-tile-gray);
+}
+
+.ft-tile > i {
+    line-height: 1;
+}
+
+.ft-tile--purple { background: var(--ft-tile-purple); }
+.ft-tile--teal { background: var(--ft-tile-teal); }
+.ft-tile--pink { background: var(--ft-tile-pink); }
+.ft-tile--orange { background: var(--ft-tile-orange); }
+.ft-tile--blue { background: var(--ft-tile-blue); }
+.ft-tile--green { background: var(--ft-tile-green); }
+.ft-tile--red { background: var(--ft-tile-red); }
+.ft-tile--gray { background: var(--ft-tile-gray); }
+
+/* 柔和图标块（账单行、预算行）：浅色底 + 加深的同色图标，让金额与进度条而不是图标抢视线。
+   配合颜色类使用：.ft-tile.ft-tile--soft.ft-tile--orange（两个类的特异性高于实心渐变的单类规则） */
+.ft-tile--soft { color: var(--ft-ink-gray); background: var(--ft-tint-gray); }
+.ft-tile--soft.ft-tile--purple { color: var(--ft-ink-purple); background: var(--ft-tint-purple); }
+.ft-tile--soft.ft-tile--teal { color: var(--ft-ink-teal); background: var(--ft-tint-teal); }
+.ft-tile--soft.ft-tile--pink { color: var(--ft-ink-pink); background: var(--ft-tint-pink); }
+.ft-tile--soft.ft-tile--orange { color: var(--ft-ink-orange); background: var(--ft-tint-orange); }
+.ft-tile--soft.ft-tile--blue { color: var(--ft-ink-blue); background: var(--ft-tint-blue); }
+.ft-tile--soft.ft-tile--green { color: var(--ft-ink-green); background: var(--ft-tint-green); }
+.ft-tile--soft.ft-tile--red { color: var(--ft-ink-red); background: var(--ft-tint-red); }
+.ft-tile--soft.ft-tile--gray { color: var(--ft-ink-gray); background: var(--ft-tint-gray); }
+
+/* 描边图标块（分类管理的「新建分类」行）：白底 + 品牌色描边的加号，表示「这里可以添加」；和 .ft-cell--brand 搭配 */
+.ft-tile--outline {
+    color: var(--ft-brand);
+    background: var(--ft-card);
+    box-shadow: inset 0 0 0 1.5px rgba(var(--ft-brand-rgb), .4);
+}
+
+/* 品牌色标题的单元格：行内的主操作（「新建分类」「新建支付渠道」） */
+.ft-cell--brand .ft-cell__title {
+    color: var(--ft-brand);
+}
+
+.ft-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: var(--ft-radius-pill);
+    font: 600 12px/1 var(--ft-font);
+    white-space: nowrap;
+}
+
+.ft-badge--brand { color: var(--ft-brand); background: var(--ft-brand-soft-2); }
+.ft-badge--neutral { color: var(--ft-label-2); background: var(--ft-fill); }
+.ft-badge--success { color: var(--ft-success-text); background: rgba(52, 199, 89, .16); }
+.ft-badge--warning { color: var(--ft-warning-text); background: rgba(255, 149, 0, .16); }
+.ft-badge--danger { color: var(--ft-danger-text); background: rgba(255, 59, 48, .12); }
+
+/* ------------------------------------------------------------
+   左滑行（SwipeRow + SwipeAction，手势由 ui.js 驱动）
+   状态：.ft-swipe[data-open="true|false"]、[data-dragging="true"]（拖动时关掉过渡动画，位移由脚本逐帧写入 transform）
+   ------------------------------------------------------------ */
+.ft-swipe {
+    position: relative;
+    overflow: hidden;
+    background: var(--ft-card);
+}
+
+.ft-swipe__tray {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+}
+
+.ft-swipe__content {
+    position: relative;
+    z-index: 1;
+    background: var(--ft-card);
+    touch-action: pan-y; /* 纵向滚动交给浏览器，横向手势交给脚本 */
+    transition: transform var(--ft-dur-swipe) var(--ft-ease-out);
+}
+
+.ft-swipe[data-dragging="true"] > .ft-swipe__content {
+    transition: none;
+}
+
+.ft-swipe__action {
+    flex: none;
+    box-sizing: border-box;
+    width: var(--ft-swipe-action-width);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: #fff;
+    font: 600 12px/1 var(--ft-font);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-swipe__action > i {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ft-swipe__action--brand { background: var(--ft-brand); }
+.ft-swipe__action--danger { background: var(--ft-danger); }
+.ft-swipe__action--neutral { background: var(--ft-gray); }
+.ft-swipe__action--warning { background: var(--ft-orange); }
+
+.ft-swipe__action:focus-visible {
+    outline: 2px solid var(--ft-label);
+    outline-offset: -4px;
+}
+
+/* ------------------------------------------------------------
+   遮罩 + 底部 Sheet（BottomSheet）
+   容器 position: fixed 铺满所在的应用壳，z-index 高于 Tab 栏；放在二级页里时盖住该页（含顶栏）。
+   入场用 backwards 填充（结束后不再接管 transform），这样脚本拖拽时写的内联 transform 才生效；
+   退出动画用 forwards 停在屏幕外直到卸载。
+   ------------------------------------------------------------ */
+.ft-scrim {
+    position: absolute;
+    inset: 0;
+    background: var(--ft-scrim);
+    opacity: var(--ft-sheet-scrim-opacity, 1);
+    animation: ft-page-fade var(--ft-dur-fade) linear backwards;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-sheet-host {
+    position: fixed;
+    inset: 0;
+    z-index: var(--ft-z-sheet);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    outline: none;
+}
+
+.ft-sheet {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-height: calc(100% - var(--ft-safe-top, 0px) - 12px);
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--ft-radius-sheet) var(--ft-radius-sheet) 0 0;
+    background: var(--ft-bg);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, .16);
+    animation: ft-sheet-in var(--ft-dur-sheet) var(--ft-ease-sheet) backwards;
+}
+
+.ft-sheet__handle {
+    flex: none;
+    height: 14px;
+    display: grid;
+    place-items: center;
+    touch-action: none; /* 把手与标题栏用于向下拖拽收起，不让浏览器当成滚动 */
+    cursor: grab;
+}
+
+.ft-sheet__grabber {
+    width: 36px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--ft-label-3);
+}
+
+.ft-sheet__header {
+    flex: none;
+    min-height: 52px;
+    padding: 0 16px 8px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    touch-action: none;
+}
+
+.ft-sheet__side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ft-sheet__side--end {
+    justify-content: flex-end;
+}
+
+.ft-sheet__title {
+    margin: 0;
+    font: var(--ft-type-nav-title);
+    color: var(--ft-label);
+    text-align: center;
+    white-space: nowrap;
+}
+
+.ft-sheet__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px var(--ft-space-page) calc(var(--ft-safe-bottom, 0px) + 20px);
+}
+
+.ft-sheet__body > :first-child {
+    margin-top: 0;
+}
+
+@keyframes ft-sheet-in {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes ft-sheet-out {
+    from {
+        transform: translateY(0);
+    }
+
+    to {
+        transform: translateY(100%);
+    }
+}
+
+@keyframes ft-fade-out {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+.ft-sheet-host--closing .ft-sheet {
+    animation: ft-sheet-out var(--ft-dur-sheet-out) cubic-bezier(.4, 0, 1, 1) forwards;
+}
+
+.ft-sheet-host--closing .ft-scrim,
+.ft-alert-host--closing .ft-scrim,
+.ft-actionsheet-host--closing .ft-scrim {
+    animation: ft-fade-out var(--ft-dur-sheet-out) linear forwards;
+}
+
+/* 拖拽收起：Sheet 已被脚本滑出屏幕，跳过退出动画（否则会先跳回原位再滑出） */
+.ft-sheet-host[data-dragged="true"] .ft-sheet {
+    animation: none;
+}
+
+/* 表单行（Sheet 里的输入）：左标签 + 右输入，字号 16 以防 iOS 聚焦时放大页面 */
+.ft-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    min-height: var(--ft-cell-height);
+    padding: 0 var(--ft-cell-pad);
+}
+
+.ft-field__label {
+    flex: none;
+    width: 76px;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+}
+
+.ft-field__input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.ft-field__input::placeholder {
+    color: var(--ft-label-2);
+}
+
+.ft-field__input--end {
+    text-align: right;
+}
+
+.ft-form-error {
+    margin: 8px 20px 0;
+    font: var(--ft-type-caption);
+    /* 文字用加深的红：--ft-expense 是图形 / 大字号的红，在白底与页面底色上只有约 4.2:1，小字号文字不够 AA */
+    color: var(--ft-danger-text);
+}
+
+.ft-sheet-actions {
+    margin-top: 20px;
+}
+
+.ft-sheet-preview {
+    display: flex;
+    justify-content: center;
+    padding: 4px 0 12px;
+}
+
+.ft-sheet-preview > .ft-tile {
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    font-size: 34px;
+}
+
+/* 图标选择器（IconPicker） */
+.ft-iconpick {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    padding: 12px;
+}
+
+.ft-iconpick__item {
+    box-sizing: border-box;
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ft-radius-tile);
+    display: grid;
+    place-items: center;
+    font-size: 24px;
+    color: var(--ft-label-2);
+    background: var(--ft-fill-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-iconpick__item > i {
+    line-height: 1;
+}
+
+.ft-iconpick__item:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-iconpick__item[aria-pressed="true"] {
+    color: var(--ft-brand);
+    background: var(--ft-brand-soft-2);
+    box-shadow: inset 0 0 0 2px var(--ft-brand);
+}
+
+.ft-iconpick__item:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------
+   Alert（GlassAlert）与操作菜单（ActionSheet）：玻璃，比普通玻璃更不透明——压在遮罩上仍要保证文字对比
+   ------------------------------------------------------------ */
+.ft-glass-alert,
+.ft-alert {
+    position: relative;
+    background: var(--ft-glass-alert-bg);
+    -webkit-backdrop-filter: var(--ft-glass-filter);
+    backdrop-filter: var(--ft-glass-filter);
+    box-shadow: var(--ft-glass-shadow);
+}
+
+.ft-alert-host {
+    position: fixed;
+    inset: 0;
+    z-index: var(--ft-z-alert);
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    outline: none;
+}
+
+.ft-alert {
+    width: var(--ft-alert-width);
+    max-width: 100%;
+    border-radius: var(--ft-alert-radius);
+    overflow: hidden;
+    text-align: center;
+    animation: ft-alert-in 220ms var(--ft-ease-out) backwards;
+}
+
+@keyframes ft-alert-in {
+    from {
+        opacity: 0;
+        transform: scale(.94);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.ft-alert-host--closing .ft-alert {
+    opacity: 0;
+    transform: scale(.96);
+    transition: opacity var(--ft-dur-fade) linear, transform var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+.ft-alert__body {
+    padding: 20px 18px 18px;
+}
+
+.ft-alert__title {
+    margin: 0;
+    font: 700 17px/22px var(--ft-font);
+    color: var(--ft-label);
+}
+
+.ft-alert__message {
+    margin: 6px 0 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-alert__actions {
+    display: flex;
+    border-top: .5px solid var(--ft-separator);
+}
+
+.ft-alert__btn {
+    flex: 1;
+    min-width: 0;
+    height: 48px;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    background: none;
+    font: 500 17px/1 var(--ft-font);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-alert__btn + .ft-alert__btn {
+    border-left: .5px solid var(--ft-separator);
+}
+
+.ft-alert__btn--strong {
+    font-weight: 700;
+}
+
+.ft-alert__btn--danger {
+    color: var(--ft-danger-text);
+}
+
+.ft-alert__btn:active {
+    background: var(--ft-fill);
+}
+
+.ft-alert__btn:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+.ft-actionsheet-host {
+    position: fixed;
+    inset: 0;
+    z-index: var(--ft-z-alert);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    outline: none;
+}
+
+.ft-actionsheet {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 8px calc(var(--ft-safe-bottom, 0px) + 8px);
+    animation: ft-sheet-in var(--ft-dur-sheet) var(--ft-ease-sheet) backwards;
+}
+
+.ft-actionsheet-host--closing .ft-actionsheet {
+    animation: ft-sheet-out var(--ft-dur-sheet-out) cubic-bezier(.4, 0, 1, 1) forwards;
+}
+
+.ft-actionsheet__group {
+    border-radius: var(--ft-alert-radius);
+    overflow: hidden;
+    text-align: center;
+    /* 选项很多时（例如十几个账本）在面板内滚动，不顶出屏幕；留出「取消」按钮、间距与顶部呼吸空间 */
+    max-height: calc(100vh - var(--ft-safe-top, 0px) - var(--ft-safe-bottom, 0px) - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.ft-actionsheet__head {
+    padding: 14px 16px 12px;
+}
+
+.ft-actionsheet__title {
+    margin: 0;
+    font: 600 13px/18px var(--ft-font);
+    color: var(--ft-label-2);
+}
+
+.ft-actionsheet__message {
+    margin: 2px 0 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-actionsheet__item {
+    width: 100%;
+    height: 56px;
+    margin: 0;
+    padding: 0 16px;
+    border: 0;
+    border-top: .5px solid var(--ft-separator);
+    background: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font: 400 17px/1 var(--ft-font);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-actionsheet__group > :first-child {
+    border-top: 0;
+}
+
+.ft-actionsheet__item > i {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ft-actionsheet__item--danger {
+    color: var(--ft-danger-text);
+}
+
+.ft-actionsheet__item:active {
+    background: var(--ft-fill);
+}
+
+.ft-actionsheet__item:disabled {
+    opacity: .45;
+}
+
+.ft-actionsheet__cancel {
+    height: 56px;
+    margin: 0;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--ft-alert-radius);
+    background: var(--ft-card);
+    font: 600 17px/1 var(--ft-font);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-actionsheet__cancel:active {
+    background: var(--ft-fill);
+}
+
+.ft-actionsheet__item:focus-visible,
+.ft-actionsheet__cancel:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------
+   Toast：不改调用方式（PopupService.EnqueueSnackbarAsync），用全局样式把 MASA 的排队消息条改成玻璃胶囊
+   DOM：.m-enqueued-snackbars > .m-snack > .m-snack__wrapper.m-sheet.{success|error|warning|info} > .m-snack__content > .m-alert__wrapper > i.m-alert__icon + 文本
+   MASA 容器带内联的 bottom: 0 / max-width，颜色类带 !important，所以这里同样需要 !important。
+   ------------------------------------------------------------ */
+.m-enqueued-snackbars {
+    z-index: var(--ft-z-toast);
+    bottom: calc(var(--ft-toast-bottom) + var(--ft-safe-bottom, 0px)) !important;
+    pointer-events: none; /* 容器横跨整屏，只有消息条本身响应点击 */
+}
+
+.m-enqueued-snackbars .m-snack {
+    justify-content: center;
+}
+
+.m-enqueued-snackbars .m-snack__wrapper.m-sheet {
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: calc(100% - 2 * var(--ft-space-page)) !important;
+    margin: 0 auto !important;
+    border-radius: var(--ft-radius-pill) !important;
+    color: var(--ft-label) !important;
+    background: var(--ft-glass-alert-bg) !important;
+    -webkit-backdrop-filter: var(--ft-glass-filter);
+    backdrop-filter: var(--ft-glass-filter);
+    box-shadow: var(--ft-glass-shadow) !important;
+    pointer-events: auto;
+}
+
+.m-enqueued-snackbars .m-snack__content {
+    padding: 12px 18px !important;
+    font: 600 15px/20px var(--ft-font);
+    color: var(--ft-label) !important;
+}
+
+.m-enqueued-snackbars .m-alert__wrapper {
+    align-items: center;
+    gap: 8px;
+}
+
+.m-enqueued-snackbars .m-alert__icon {
+    margin: 0 !important;
+    font-size: 22px;
+}
+
+.m-enqueued-snackbars .success .m-alert__icon { color: var(--ft-success) !important; }
+.m-enqueued-snackbars .error .m-alert__icon { color: var(--ft-danger) !important; }
+.m-enqueued-snackbars .warning .m-alert__icon { color: var(--ft-warning) !important; }
+.m-enqueued-snackbars .info .m-alert__icon { color: var(--ft-info) !important; }
+
+/* ------------------------------------------------------------
+   开关（ToggleSwitch）· 空状态（EmptyState）· 加载骨架
+   ------------------------------------------------------------ */
+.ft-switch {
+    position: relative;
+    flex: none;
+    width: 51px;
+    height: 31px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    background: rgba(120, 120, 128, .32);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 220ms var(--ft-ease-out);
+}
+
+/* 可点区域向外扩展到 ≥ 44 × 44 */
+.ft-switch::before {
+    content: "";
+    position: absolute;
+    inset: -8px -6px;
+}
+
+.ft-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 27px;
+    height: 27px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, .15), 0 1px 1px rgba(0, 0, 0, .16);
+    transition: transform 260ms var(--ft-ease-spring);
+}
+
+.ft-switch[aria-checked="true"] {
+    background: var(--ft-success);
+}
+
+.ft-switch[aria-checked="true"]::after {
+    transform: translateX(20px);
+}
+
+.ft-switch:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+.ft-switch:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 3px;
+}
+
+.ft-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 56px 32px;
+    text-align: center;
+}
+
+.ft-empty__icon {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 16px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 36px;
+    color: var(--ft-brand);
+    background: var(--ft-brand-soft);
+}
+
+.ft-empty__icon > i {
+    line-height: 1;
+}
+
+.ft-empty__title {
+    margin: 0;
+    font: var(--ft-type-nav-title);
+    color: var(--ft-label);
+}
+
+.ft-empty__text {
+    margin: 6px 0 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-empty .ft-btn {
+    margin-top: 20px;
+}
+
+.ft-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    min-height: var(--ft-cell-height-2);
+    padding: 0 var(--ft-cell-pad);
+}
+
+.ft-skeleton-row__main {
+    flex: 1;
+    display: grid;
+    gap: 8px;
+}
+
+.ft-skeleton--tile {
+    flex: none;
+    width: var(--ft-tile-size);
+    height: var(--ft-tile-size);
+    border-radius: var(--ft-radius-tile);
+}
+
+.ft-skeleton--title {
+    width: 42%;
+    height: 14px;
+}
+
+.ft-skeleton--sub {
+    width: 26%;
+    height: 12px;
+}
+
+.ft-skeleton {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--ft-fill);
+}
+
+.ft-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .6), transparent);
+    animation: ft-shimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes ft-shimmer {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+/* 系统开启「减弱动态效果」：Sheet / 操作面板 / Alert 只淡入淡出，不位移不缩放；开关、左滑、骨架不做动画 */
+@media (prefers-reduced-motion: reduce) {
+    .ft-sheet,
+    .ft-actionsheet,
+    .ft-alert {
+        animation: ft-page-fade var(--ft-dur-reduced) linear backwards;
+    }
+
+    .ft-sheet-host--closing .ft-sheet,
+    .ft-actionsheet-host--closing .ft-actionsheet {
+        animation: ft-fade-out var(--ft-dur-reduced) linear forwards;
+    }
+
+    .ft-alert-host--closing .ft-alert {
+        transform: none;
+        transition: opacity var(--ft-dur-reduced) linear;
+    }
+
+    .ft-swipe__content,
+    .ft-switch,
+    .ft-switch::after,
+    .ft-btn,
+    .ft-iconpick__item {
+        transition-duration: .01ms;
+    }
+
+    .ft-btn:active,
+    .ft-iconpick__item:active {
+        transform: none;
+    }
+
+    .ft-skeleton::after {
+        animation: none;
+    }
+}
+
+/* ============================================================
+   一级页面通用件与首页（07 号 ticket）
+   标记在 Components/Ui/{AmountDisplay,ProgressBar,SectionHeader,BillRow,BudgetRow,PullToRefresh}.razor 与 Pages/Index.razor；
+   下拉刷新的手势在 wwwroot/js/pullRefresh.js，这里只有样式。
+   规则：只引用令牌；Hero 之上的小卡 / 按钮是「扁平半透明」（不用 backdrop-filter）——Hero 背景是平滑渐变，模糊前后几乎看不出区别，
+   省下玻璃层预算（每屏 ≤ 3 层，Tab 栏已占 1 层，见 ADR 0007）；不使用 :has() / aspect-ratio / color-mix（最低支持 iOS 14）。
+   ============================================================ */
+
+/* 仅给读屏看的文字（视觉隐藏，但仍在无障碍树里） */
+.ft-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@keyframes ft-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.ft-spin {
+    animation: ft-spin 1s linear infinite;
+}
+
+/* ------------------------------------------------------------
+   Tab 根页面的滚动容器：占满整屏高度（内容铺到状态栏之下、底部让出悬浮 Tab 栏），自己滚动。
+   页面把它标记为 data-scroll-root——「再点一次 Tab 回到顶部」、Tab 栏滚动收缩、下拉刷新都认这个标记。
+   ------------------------------------------------------------ */
+.ft-tabpage {
+    box-sizing: border-box;
+    height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    background: var(--ft-bg);
+    padding-bottom: var(--ft-tabbar-clearance);
+}
+
+.ft-tabpage__body {
+    padding: 0 calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) 0 calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+}
+
+/* ------------------------------------------------------------
+   金额展示（AmountDisplay）
+   ------------------------------------------------------------ */
+.ft-amount {
+    display: inline-flex;
+    align-items: baseline;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-amount--xl {
+    font: var(--ft-type-amount-xl);
+    letter-spacing: -.5px;
+}
+
+/* 特大档：符号与小数缩小，小数略淡；整数是视线焦点 */
+.ft-amount--xl .ft-amount__sign,
+.ft-amount--xl .ft-amount__cur,
+.ft-amount--xl .ft-amount__dec {
+    font-size: .54em;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.ft-amount--xl .ft-amount__cur {
+    margin-right: 3px;
+}
+
+.ft-amount--xl .ft-amount__dec {
+    opacity: .72;
+}
+
+.ft-amount--lg {
+    font: var(--ft-type-amount-card);
+}
+
+.ft-amount--md {
+    font: var(--ft-type-amount-list);
+}
+
+/* ------------------------------------------------------------
+   进度条（ProgressBar）
+   ------------------------------------------------------------ */
+.ft-progress {
+    position: relative;
+    height: var(--ft-progress-height);
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-fill);
+    overflow: hidden;
+}
+
+.ft-progress__fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: inherit;
+    background: var(--ft-brand);
+    transition: width var(--ft-dur-number) var(--ft-ease-out);
+}
+
+.ft-progress--warning .ft-progress__fill { background: var(--ft-warning); }
+.ft-progress--danger .ft-progress__fill { background: var(--ft-danger); }
+
+/* ------------------------------------------------------------
+   节标题（SectionHeader）：标题 22px 粗体 + 右侧文字操作（点击区域 ≥ 44 高，靠负外边距不撑高版面）
+   ------------------------------------------------------------ */
+.ft-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: var(--ft-hit);
+    margin: calc(var(--ft-space-section-top) - 8px) 0 calc(var(--ft-space-section-bottom) - 8px);
+    padding: 0 4px;
+}
+
+.ft-section__title {
+    min-width: 0;
+    margin: 0;
+    font: var(--ft-type-section);
+    color: var(--ft-label);
+}
+
+.ft-section__action {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    min-height: var(--ft-hit);
+    margin: 0 -8px 0 0;
+    padding: 0 8px;
+    border: 0;
+    background: none;
+    font: var(--ft-type-body);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-section__action > i {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ft-section__action:active {
+    opacity: .6;
+}
+
+.ft-section__action:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+    border-radius: var(--ft-radius-tile);
+}
+
+/* ------------------------------------------------------------
+   账单行（BillRow，复用 ListCell）：右侧金额 + 时间两行
+   ------------------------------------------------------------ */
+.ft-billrow__side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-billrow__amount {
+    font: var(--ft-type-amount-list);
+    color: var(--ft-label);
+    white-space: nowrap;
+}
+
+.ft-billrow__amount--income {
+    color: var(--ft-income-text);
+}
+
+.ft-billrow__time {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------
+   预算行（BudgetRow）：图标块 + 名称 / 文字说明 / 进度条
+   ------------------------------------------------------------ */
+.ft-budgetrow {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    padding: 14px var(--ft-cell-pad);
+}
+
+.ft-budgetrow + .ft-budgetrow::before {
+    content: "";
+    position: absolute;
+    left: var(--ft-cell-inset);
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--ft-separator);
+    transform: scaleY(.5);
+    transform-origin: top;
+    pointer-events: none;
+}
+
+.ft-budgetrow__main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.ft-budgetrow__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+/* 名称优先：灰色小字（范围 / 已用 ÷ 额度）一行放不下时折到名称下面，而不是把名称挤成「购…」 */
+.ft-budgetrow__title {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 6px;
+}
+
+.ft-budgetrow__name {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: var(--ft-type-cell-title);
+    color: var(--ft-label);
+}
+
+.ft-budgetrow__tag {
+    flex: none;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+.ft-budgetrow__remain {
+    flex: none;
+    font: 500 15px/20px var(--ft-font);
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+.ft-budgetrow[data-state="warning"] .ft-budgetrow__remain {
+    font-weight: 600;
+    color: var(--ft-warning-text);
+}
+
+.ft-budgetrow[data-state="over"] .ft-budgetrow__remain {
+    font-weight: 700;
+    color: var(--ft-danger-text);
+}
+
+/* ------------------------------------------------------------
+   下拉刷新区（PullToRefresh）：高度由脚本通过 --ft-ptr-offset 驱动（0 → 手指位移阻尼后的值 → 刷新中保持 --ft-ptr-hold）。
+   手指跟随时不做高度过渡，松手 / 收起时用 --ft-dur-ptr 过渡。
+   转圈用文字色（currentColor）：Hero 里是白色，浅色页面里是主文字色。
+   ------------------------------------------------------------ */
+.ft-ptr {
+    position: relative;
+    height: var(--ft-ptr-offset, 0px);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: height var(--ft-dur-ptr) var(--ft-ease-out);
+}
+
+.ft-ptr[data-state="pulling"],
+.ft-ptr[data-state="ready"] {
+    transition: none;
+}
+
+.ft-ptr__spinner {
+    position: relative;
+    box-sizing: border-box;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border: 2.5px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    opacity: var(--ft-ptr-progress, 0);
+    transform: rotate(calc(var(--ft-ptr-progress, 0) * 270deg));
+}
+
+.ft-ptr__spinner::before {
+    content: "";
+    position: absolute;
+    inset: -2.5px;
+    border: 2.5px solid currentColor;
+    border-radius: 50%;
+    opacity: .25;
+}
+
+.ft-ptr[data-state="refreshing"] .ft-ptr__spinner {
+    opacity: 1;
+    animation: ft-spin .8s linear infinite;
+}
+
+.ft-ptr__text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------
+   首页（Pages/Index.razor）：Hero + 待确认横幅 + 本月预算 + 最近账单
+   ------------------------------------------------------------ */
+.ft-hero {
+    position: relative;
+    box-sizing: border-box;
+    padding: calc(var(--ft-safe-top, 0px) + 14px) calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) var(--ft-hero-pad-bottom) calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    border-radius: 0 0 var(--ft-radius-hero) var(--ft-radius-hero);
+    background: var(--ft-hero-gradient);
+    color: #fff;
+}
+
+.ft-hero__bar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.ft-hero__titles {
+    min-width: 0;
+    padding-top: 2px;
+}
+
+.ft-hero__title {
+    margin: 0;
+    font: 800 26px/32px var(--ft-font);
+}
+
+.ft-hero__date {
+    margin: 2px 0 0;
+    font: var(--ft-type-caption);
+    color: rgba(255, 255, 255, .86);
+}
+
+.ft-hero__actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Hero 上的圆按钮：扁平半透明（不占玻璃层） */
+.ft-hero__btn {
+    position: relative;
+    box-sizing: border-box;
+    flex: none;
+    width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+    color: #fff;
+    background: var(--ft-glass-dark-bg);
+    box-shadow: var(--ft-glass-dark-shadow);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out), opacity var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-hero__btn > i {
+    line-height: 1;
+}
+
+.ft-hero__btn:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-hero__btn:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.ft-hero__badge {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    box-sizing: border-box;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-badge-solid);
+    box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .85);
+    font: 700 11px/18px var(--ft-font);
+    text-align: center;
+    color: #fff;
+}
+
+.ft-hero__metric {
+    margin-top: 16px;
+}
+
+.ft-hero__label {
+    margin: 0 0 2px;
+    font: var(--ft-type-body);
+    color: rgba(255, 255, 255, .88);
+}
+
+.ft-hero__cards {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.ft-herocard {
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 12px 14px 13px;
+    border-radius: var(--ft-radius-hero-card);
+    /* 深色玻璃 + 一层暗纱（--ft-herocard-scrim）：最后一层才能是颜色，所以暗纱写成同色渐变图层；实色降级（--ft-glass-dark-bg 变实色）时同样适用 */
+    background: linear-gradient(var(--ft-herocard-scrim), var(--ft-herocard-scrim)), var(--ft-glass-dark-bg);
+    box-shadow: var(--ft-glass-dark-shadow);
+}
+
+.ft-herocard__label {
+    margin: 0 0 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-caption);
+    color: #fff;
+}
+
+.ft-herocard__label > i {
+    font-size: 16px;
+    line-height: 1;
+}
+
+/* Hero 里的金额按版心宽度收缩（AmountDisplay 的 FitWidth 把字符数写在 --ft-amount-chars 上）：
+   字号 = min(档位字号, 可用宽度 ÷ (字符数 × 每字符宽度 × 放大余量))。位数少时就是设计字号；位数多、屏幕窄、系统字体放大时一起收缩——
+   单笔上限 ¥99,999,999.99（14 个字符）在 320pt 屏上、字体放大到 130% 时也不越出版心（Hero 的金额不换行、不省略，必须完整放得下）。
+   上限 52px / 20px 与 --ft-type-amount-xl / --ft-type-amount-card 的字号一致（DesignTokensTests 核对）；行高仍取令牌的固定值，数字位数变化时 Hero 不跳动。
+   可用宽度 = 屏宽 − 两侧版心边距（含安全区）；小卡再减去两卡之间的 12px 间距、均分、减去左右各 14px 内边距。 */
+.ft-hero .ft-amount--xl {
+    font-size: min(52px, calc((100vw - 2 * var(--ft-space-page) - var(--ft-safe-left, 0px) - var(--ft-safe-right, 0px)) / (var(--ft-amount-chars, 1) * var(--ft-amount-fit-xl))));
+}
+
+.ft-herocard .ft-amount--lg {
+    font-size: min(20px, calc(((100vw - 2 * var(--ft-space-page) - var(--ft-safe-left, 0px) - var(--ft-safe-right, 0px) - 12px) / 2 - 28px) / (var(--ft-amount-chars, 1) * var(--ft-amount-fit-card))));
+}
+
+/* Hero 里的骨架：白色半透明（页面默认的灰色骨架在紫色上看不见） */
+.ft-hero .ft-skeleton {
+    background: rgba(255, 255, 255, .2);
+}
+
+.ft-skeleton--hero-amount {
+    width: 62%;
+    height: 52px;
+    margin-top: 6px;
+    border-radius: 12px;
+}
+
+.ft-skeleton--hero-card {
+    width: 70%;
+    height: 22px;
+    margin-top: 2px;
+}
+
+/* 首页内容区 */
+.ft-home__banner {
+    margin-top: 16px;
+}
+
+/* 节标题已经带了自己的上下间距：紧跟其后的分组卡片不再叠加分组间距 */
+.ft-home .ft-section + .ft-group {
+    margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* 下拉区高度不做过渡；刷新转圈与其它加载转圈（.ft-spin）放慢并保留（它是「正在刷新 / 同步」的唯一视觉反馈）；进度条宽度不做过渡 */
+    .ft-ptr {
+        transition: none;
+    }
+
+    .ft-ptr[data-state="refreshing"] .ft-ptr__spinner,
+    .ft-spin {
+        animation-duration: 2.4s;
+    }
+
+    .ft-progress__fill {
+        transition: none;
+    }
+
+    .ft-hero__btn {
+        transition-duration: .01ms;
+    }
+
+    .ft-hero__btn:active {
+        transform: none;
+    }
+}
+
+/* ============================================================
+   大标题页 / 分段控件 / 账单 Tab（08 号 ticket）
+   标记在 Components/Ui/{LargeTitlePage,SegmentedControl,BillRow}.razor 与 Pages/Bills.razor；
+   大标题折叠状态由 wwwroot/js/ui.js 写在滚动容器的 data-title-collapsed 上，这里只有样式。
+   规则：只引用令牌；折叠后的导航栏是不透明的页面背景色（不是玻璃，不占玻璃层预算），导航栏右侧的玻璃圆按钮每个算一层，
+   账单页放两个（筛选、多选），加上 Tab 栏正好 3 层，见 ADR 0007；不使用 :has() / aspect-ratio / color-mix / 单独的 translate 属性（最低支持 iOS 14）。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   大标题页（LargeTitlePage）：吸顶的导航栏 + 34px 大标题；滚过之后导航栏填色、居中浮现小标题
+   ------------------------------------------------------------ */
+.ft-lnav {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    box-sizing: border-box;
+    height: calc(var(--ft-nav-height) + var(--ft-safe-top, 0px));
+    padding: var(--ft-safe-top, 0px) calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) 0 calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    background-color: rgba(var(--ft-bg-rgb), 0);
+    transition: background-color var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+/* 折叠后内容从导航栏下滚过：底部渐隐，不和按钮、小标题糊在一起 */
+.ft-lnav::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: var(--ft-nav-fade);
+    background: linear-gradient(to bottom, var(--ft-bg), rgba(var(--ft-bg-rgb), 0));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+[data-title-collapsed="true"] > .ft-lnav {
+    background-color: var(--ft-bg);
+}
+
+[data-title-collapsed="true"] > .ft-lnav::after {
+    opacity: 1;
+}
+
+.ft-lnav__bar {
+    position: relative;
+    height: var(--ft-nav-height);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+/* 折叠后的小标题：居中；装饰用（读屏读下面的 h1），所以不拦截点按 */
+.ft-lnav__title {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    max-width: var(--ft-lnav-title-max);
+    margin: 0;
+    font: var(--ft-type-nav-title);
+    color: var(--ft-label);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 6px));
+    transition: opacity var(--ft-dur-fade) var(--ft-ease-out), transform var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+[data-title-collapsed="true"] > .ft-lnav .ft-lnav__title {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+}
+
+.ft-lnav__actions {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 导航栏按钮上的角标（例如筛选条件数）：只是图形，读屏名称写在按钮的 aria-label 里 */
+.ft-lnav__btnwrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.ft-lnav__badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    box-sizing: border-box;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--ft-radius-pill);
+    font: var(--ft-type-footnote);
+    line-height: 20px;
+    text-align: center;
+    color: #fff;
+    background: var(--ft-brand);
+    box-shadow: 0 0 0 2px var(--ft-bg);
+    pointer-events: none;
+}
+
+.ft-large-title {
+    margin: 0;
+    padding: 4px calc(var(--ft-space-page) + var(--ft-safe-right, 0px) + 4px) 12px calc(var(--ft-space-page) + var(--ft-safe-left, 0px) + 4px);
+    font: var(--ft-type-large-title);
+    color: var(--ft-label);
+}
+
+/* ------------------------------------------------------------
+   分段控件（SegmentedControl）：灰色胶囊轨道 + 白色滑块；滑块位置由 --ft-seg-index / --ft-seg-count 决定
+   ------------------------------------------------------------ */
+.ft-seg {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    height: var(--ft-seg-height);
+    /* 左右留出滑块与轨道之间的留白：每一段与滑块等宽，文字才与滑块居中对齐；上下不留，每段点击区域仍是整条轨道的高度 */
+    padding: 0 var(--ft-seg-pad);
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-fill);
+}
+
+.ft-seg__thumb {
+    position: absolute;
+    top: var(--ft-seg-pad);
+    bottom: var(--ft-seg-pad);
+    left: 0;
+    width: calc((100% - 2 * var(--ft-seg-pad)) / var(--ft-seg-count, 1));
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-card);
+    box-shadow: var(--ft-seg-thumb-shadow);
+    transform: translateX(calc(var(--ft-seg-pad) + var(--ft-seg-index, 0) * 100%));
+    transition: transform var(--ft-dur-segment) var(--ft-ease-out);
+}
+
+.ft-seg__item {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    background: none;
+    font: var(--ft-type-segment);
+    color: var(--ft-label);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-seg__item--on {
+    font: var(--ft-type-segment-on);
+}
+
+.ft-seg__item:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------
+   账单 Tab
+   ------------------------------------------------------------ */
+.ft-bills .ft-seg {
+    margin-top: 2px;
+}
+
+/* ------------------------------------------------------------
+   搜索框（SearchField · 10 号）：灰色填充的圆角输入框，左侧放大镜，有内容时右侧出现清除按钮。
+   整条 44 高都是点击区域；输入框字号 16px（iOS Safari 小于 16px 会在聚焦时自动放大页面）。
+   清除按钮靠 :placeholder-shown 判断有没有内容——不依赖脚本，也不依赖服务端状态。
+   ------------------------------------------------------------ */
+.ft-search {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: var(--ft-hit);
+    margin: 0 0 10px;
+    padding: 0 0 0 12px;
+    border-radius: var(--ft-radius-input);
+    background: var(--ft-fill);
+}
+
+.ft-search:focus-within {
+    box-shadow: 0 0 0 2px rgba(var(--ft-brand-rgb), .5);
+}
+
+.ft-search__icon {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+.ft-search__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.ft-search__input::placeholder {
+    color: var(--ft-label-2);
+    opacity: 1;
+}
+
+/* 浏览器自带的清除按钮 / 搜索图标不要：自己的清除按钮在各平台外观与行为一致 */
+.ft-search__input::-webkit-search-cancel-button,
+.ft-search__input::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+}
+
+.ft-search__clear {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--ft-hit);
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 18px;
+    color: var(--ft-label-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-search__clear:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -6px;
+    border-radius: var(--ft-radius-input);
+}
+
+/* 没有内容（占位文字正显示着）时不出现清除按钮 */
+.ft-search__input:placeholder-shown ~ .ft-search__clear {
+    display: none;
+}
+
+/* 汇总卡：支出 / 收入 / 笔数三栏，栏间细分隔线；金额栏比笔数栏宽，七位数的金额也放得下 */
+.ft-summary {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, .8fr);
+    margin-top: 12px;
+    padding: 14px 0;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-summary__cell {
+    position: relative;
+    min-width: 0;
+    padding: 0 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.ft-summary__cell + .ft-summary__cell::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--ft-separator);
+    transform: scaleX(.5);
+    transform-origin: left;
+}
+
+.ft-summary__label {
+    margin: 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-summary .ft-amount,
+.ft-summary__count {
+    font: var(--ft-type-amount-summary);
+}
+
+/* 位数太多（≥ 12 个字符，例如 ¥1,234,567.89）时缩小，不挤出单元格 */
+.ft-summary .ft-amount--long {
+    font: var(--ft-type-amount-summary-long);
+}
+
+.ft-summary__expense {
+    color: var(--ft-danger-text);
+}
+
+.ft-summary__income {
+    color: var(--ft-income-text);
+}
+
+.ft-summary__count {
+    color: var(--ft-label);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-skeleton--summary {
+    width: 70%;
+    height: 22px;
+}
+
+/* 按天分组：组头（标题 / 日期 / 当日合计）+ 一张分组卡片 */
+.ft-day {
+    margin-top: var(--ft-space-group);
+}
+
+.ft-day__head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 4px 8px;
+}
+
+.ft-day__title {
+    flex: none;
+    margin: 0;
+    font: var(--ft-type-day-title);
+    color: var(--ft-label);
+}
+
+.ft-day__date {
+    min-width: 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+.ft-day__totals {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    font: var(--ft-type-caption);
+    font-weight: 600;
+    color: var(--ft-label-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ft-day > .ft-group {
+    margin-top: 0;
+}
+
+/* 批量选择：行首的圆形勾选框；整行带勾选框时分隔线缩进到图标块之后（勾选框 24 + 间距 12） */
+.ft-check {
+    flex: none;
+    box-sizing: border-box;
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--ft-label-2);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    color: transparent;
+    transition: background-color var(--ft-dur-icon) var(--ft-ease-out), border-color var(--ft-dur-icon) var(--ft-ease-out);
+}
+
+.ft-check > i {
+    line-height: 1;
+}
+
+.ft-check--on {
+    border-color: var(--ft-brand);
+    color: #fff;
+    background: var(--ft-brand);
+}
+
+.ft-billrow--select::before {
+    left: calc(var(--ft-cell-inset) + 36px);
+}
+
+/* ------------------------------------------------------------
+   标签（Chip）：账单 Tab 的条件条（FilterChip）与筛选 Sheet 里的选项（ChoiceChip）共用（09 号 ticket）
+   按钮本体高 --ft-hit（44，命中区域），视觉胶囊高 --ft-chip-height（36）用伪元素画在按钮中间：
+   这样读屏 / 键盘 / 命中审计看到的都是 44，而眼睛看到的是 36 的紧凑标签；上下各 4px 的透明边也就是行与行之间的留白。
+   ------------------------------------------------------------ */
+.ft-chip {
+    position: relative;
+    isolation: isolate;
+    flex: none;
+    box-sizing: border-box;
+    min-height: var(--ft-hit);
+    margin: 0;
+    padding: 0 var(--ft-chip-pad);
+    border: 0;
+    background: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-chip);
+    color: var(--ft-label);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-chip::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    right: 0;
+    top: calc((var(--ft-hit) - var(--ft-chip-height)) / 2);
+    height: var(--ft-chip-height);
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-chip-bg);
+    box-shadow: inset 0 0 0 1px var(--ft-chip-border);
+    transition: background-color var(--ft-dur-icon) var(--ft-ease-out), box-shadow var(--ft-dur-icon) var(--ft-ease-out), opacity var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-chip--on {
+    color: var(--ft-brand);
+}
+
+.ft-chip--on::before {
+    background: var(--ft-chip-on-bg);
+    box-shadow: inset 0 0 0 1px var(--ft-chip-on-border);
+}
+
+.ft-chip:active::before {
+    opacity: .6;
+}
+
+.ft-chip:focus-visible {
+    outline: none;
+}
+
+.ft-chip:focus-visible::before {
+    box-shadow: inset 0 0 0 2px var(--ft-brand);
+}
+
+.ft-chip:disabled {
+    opacity: .45;
+    cursor: default;
+    pointer-events: none;
+}
+
+.ft-chip__icon {
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+.ft-chip--on .ft-chip__icon {
+    color: var(--ft-brand);
+}
+
+/* 分类标签前的实心配色小图标块（沿用 .ft-tile--* 的配色，只改尺寸） */
+.ft-chip__tile {
+    width: 22px;
+    height: 22px;
+    margin-left: -6px;
+    border-radius: 7px;
+    font-size: 14px;
+    color: #fff;
+}
+
+.ft-chip__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 条件条上还没设置条件的标签：文字 + 下拉箭头 */
+.ft-chip__chevron {
+    margin: 0 -6px 0 -2px;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+/* 条件条上已设置条件的标签：整颗胶囊由两个按钮组成（点文字 = 调整，点 × = 移除），容器自己不是按钮 */
+.ft-chip--split {
+    padding: 0;
+    gap: 0;
+    cursor: default;
+}
+
+.ft-chip__main,
+.ft-chip__remove {
+    box-sizing: border-box;
+    min-height: var(--ft-hit);
+    margin: 0;
+    border: 0;
+    background: none;
+    display: inline-flex;
+    align-items: center;
+    font: inherit;
+    color: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-chip__main {
+    min-width: 0;
+    padding: 0 2px 0 var(--ft-chip-pad);
+    gap: 6px;
+    border-radius: var(--ft-radius-pill) 0 0 var(--ft-radius-pill);
+}
+
+.ft-chip__remove {
+    flex: none;
+    min-width: var(--ft-hit);
+    justify-content: center;
+    padding: 0;
+    border-radius: 0 var(--ft-radius-pill) var(--ft-radius-pill) 0;
+}
+
+.ft-chip__remove > i {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.ft-chip__main:focus-visible,
+.ft-chip__remove:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -8px;
+}
+
+.ft-chip--split:active::before {
+    opacity: 1;
+}
+
+/* 账单 Tab 的条件条：一行可横向滑动，不换行；左右与页面边距抵消后首尾各补回一份，滑动时标签能贴着屏幕边缘出入 */
+.ft-chiprow {
+    display: flex;
+    gap: var(--ft-chip-gap);
+    margin: 0 calc(-1 * (var(--ft-space-page) + var(--ft-safe-right, 0px))) 0 calc(-1 * (var(--ft-space-page) + var(--ft-safe-left, 0px)));
+    padding: 0 calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) 0 calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.ft-chiprow::-webkit-scrollbar {
+    display: none;
+}
+
+/* 已设置的条件标签带着用户起的账本 / 分类名：最宽 85%，留出下一个标签的边，提示还能横向滑 */
+.ft-chiprow > .ft-chip {
+    max-width: 85%;
+}
+
+.ft-bills .ft-chiprow {
+    margin-top: 4px;
+}
+
+.ft-bills .ft-chiprow + .ft-summary {
+    margin-top: 4px;
+}
+
+/* ------------------------------------------------------------
+   筛选 Sheet（BillFilterSheet）：四组标签 + 底部固定的「查看 N 笔账单」
+   ------------------------------------------------------------ */
+.ft-filtersec {
+    margin-top: 14px;
+}
+
+.ft-filtersec:first-child {
+    margin-top: 0;
+}
+
+.ft-filtersec__title {
+    margin: 0;
+    padding: 0 4px 2px;
+    font: var(--ft-type-caption);
+    font-weight: 600;
+    color: var(--ft-label-2);
+    outline: none;
+}
+
+.ft-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px var(--ft-chip-gap);
+}
+
+/* 账本 / 分类 / 支付渠道的名字是用户自己起的，长度不可控：标签最宽不超过所在行，放不下的文字用省略号（.ft-chip__label） */
+.ft-chips > .ft-chip {
+    max-width: 100%;
+}
+
+.ft-filtersec__custom {
+    margin-top: 6px;
+}
+
+.ft-filtersec__empty {
+    margin: 4px 4px 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 带底部操作区的 Sheet：底部安全区的留白由操作区负责，内容区只留一点呼吸空间；
+   操作区是实色底，内容滚到它下面时顶部渐隐，提示还能继续滚 */
+.ft-sheet--footer .ft-sheet__body {
+    padding-bottom: 14px;
+}
+
+.ft-sheet__footer {
+    position: relative;
+    flex: none;
+    padding: 10px var(--ft-space-page) calc(var(--ft-safe-bottom, 0px) + 12px);
+    background: var(--ft-bg);
+}
+
+.ft-sheet__footer::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 16px;
+    background: linear-gradient(to top, var(--ft-bg), rgba(var(--ft-bg-rgb), 0));
+    pointer-events: none;
+}
+
+/* 批量归属账本 Sheet 里的说明（<p>：要下外边距，写成 p.类名，见文件开头的 MASA 段落外边距重置） */
+p.ft-sheet-hint {
+    margin: 0 4px 10px;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+}
+
+/* ------------------------------------------------------------
+   多选模式的底部操作栏：悬浮在 Tab 栏之上。不是玻璃——玻璃层预算已被 Tab 栏与导航栏两个按钮用完（ADR 0007 §3）
+   ------------------------------------------------------------ */
+.ft-actionbar {
+    position: fixed;
+    z-index: var(--ft-z-actionbar);
+    left: calc(var(--ft-tabbar-side) + var(--ft-safe-left, 0px));
+    right: calc(var(--ft-tabbar-side) + var(--ft-safe-right, 0px));
+    bottom: calc(var(--ft-tabbar-bottom) + var(--ft-tabbar-height) + var(--ft-safe-bottom, 0px) + var(--ft-actionbar-gap));
+    box-sizing: border-box;
+    height: var(--ft-actionbar-height);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px 0 4px;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+    box-shadow: var(--ft-shadow-bar);
+    animation: ft-actionbar-in var(--ft-dur-fade) var(--ft-ease-out) backwards;
+}
+
+@keyframes ft-actionbar-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ft-actionbar__count {
+    flex: 1;
+    min-width: 0;
+    padding: 0 4px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 多选模式下页面底部多留出操作栏的位置：最后一笔账单能滚到操作栏之上 */
+.ft-bills--selecting {
+    padding-bottom: calc(var(--ft-tabbar-clearance) + var(--ft-actionbar-height) + var(--ft-actionbar-gap));
+}
+
+.ft-bills__more {
+    display: flex;
+    justify-content: center;
+    margin-top: var(--ft-space-group);
+}
+
+/* ------------------------------------------------------------
+   统计 Tab（11 号 ticket）：月份胶囊 / 账本胶囊 / KPI 单卡 / 图表容器 / 构成圆环 + 图例（设计稿 screens 03-stats）
+   胶囊与卡片都是不透明的白色，不用玻璃（玻璃层预算每屏最多三层，见 ADR 0007）。
+   ------------------------------------------------------------ */
+.ft-stats .ft-seg {
+    margin-top: 2px;
+}
+
+.ft-stats__filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+/* 趋势分段的时间范围胶囊在左边（.ft-pill 默认 margin-left:auto 是给右边的账本胶囊用的，而且定义在后面，所以这里用两层选择器压过它）；
+   两颗胶囊并排时各让出一半 */
+.ft-stats__filters .ft-stats__range {
+    margin: 0;
+    max-width: calc(50% - 5px);
+}
+
+.ft-stats__filters .ft-stats__range + .ft-stats__ledger {
+    max-width: calc(50% - 5px);
+}
+
+/* 趋势视图顶部的时间维度分段（按日 / 按周 / 按月）：与上面的筛选行隔开；覆盖上面页面级分段的 2px 间距 */
+.ft-stats .ft-stats-view__dimension {
+    margin-top: 12px;
+}
+
+/* 一项彩色：小圆点、圆环段、图例行都读 --ft-hue；
+   KPI 的圆点由 .ft-dot--*（支出 / 收入 / 结余）决定，图例行与圆环段由 .ft-hue--N（调色盘第 N 种，按金额排名轮转）决定 */
+.ft-dot {
+    flex: none;
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ft-hue);
+}
+
+/* 支出 / 收入的红绿与图表（折线、热力图）同一套：--ft-expense / --ft-income，白底上对比度都 ≥ 3:1（iOS 系统绿 #34C759 只有约 2.2:1） */
+.ft-dot--expense {
+    --ft-hue: var(--ft-expense);
+}
+
+.ft-dot--income {
+    --ft-hue: var(--ft-income);
+}
+
+.ft-dot--balance {
+    --ft-hue: var(--ft-brand);
+}
+
+.ft-hue--0 {
+    --ft-hue: var(--ft-brand);
+}
+
+.ft-hue--1 {
+    --ft-hue: var(--ft-orange);
+}
+
+.ft-hue--2 {
+    --ft-hue: var(--ft-green);
+}
+
+.ft-hue--3 {
+    --ft-hue: var(--ft-blue);
+}
+
+.ft-hue--4 {
+    --ft-hue: var(--ft-pink);
+}
+
+.ft-hue--5 {
+    --ft-hue: var(--ft-teal);
+}
+
+.ft-hue--6 {
+    --ft-hue: var(--ft-purple);
+}
+
+.ft-hue--7 {
+    --ft-hue: var(--ft-yellow);
+}
+
+.ft-hue--8 {
+    --ft-hue: var(--ft-indigo);
+}
+
+.ft-hue--9 {
+    --ft-hue: var(--ft-gray);
+}
+
+/* 月份 / 年份胶囊：白色，左右两个 44 × 44 的箭头 + 居中的文字 */
+.ft-period {
+    flex: none;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    height: var(--ft-hit);
+    padding: 0 2px;
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-card);
+    box-shadow: var(--ft-shadow-capsule);
+}
+
+.ft-period__btn {
+    flex: none;
+    box-sizing: border-box;
+    width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: none;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
+    color: var(--ft-label-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-period__btn > i {
+    line-height: 1;
+}
+
+.ft-period__btn:active {
+    background: var(--ft-fill);
+}
+
+.ft-period__btn:disabled {
+    opacity: .3;
+    cursor: default;
+    pointer-events: none;
+}
+
+.ft-period__btn:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+.ft-period__label {
+    min-width: 104px;
+    padding: 0 2px;
+    text-align: center;
+    font: var(--ft-type-body);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label);
+    white-space: nowrap;
+}
+
+/* 筛选胶囊（账本）：白色，图标 + 当前选择 + 下拉箭头，整颗是一个 44 高的按钮 */
+.ft-pill {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 56%;
+    box-sizing: border-box;
+    height: var(--ft-hit);
+    margin: 0 0 0 auto;
+    padding: 0 12px 0 14px;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-card);
+    box-shadow: var(--ft-shadow-capsule);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-chip);
+    color: var(--ft-label);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-pill__icon,
+.ft-pill__chevron {
+    flex: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+.ft-pill__text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-pill:active {
+    opacity: .6;
+}
+
+.ft-pill:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+/* 节标题左边：标题 + 紧跟着的小按钮（支出构成 ⇄ 看收入） */
+.ft-section__lead {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* KPI 单卡：三栏并排，栏间细分隔线；彩色只出现在小圆点上，金额统一中性色加粗 */
+.ft-kpi {
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 12px;
+    padding: 14px 0;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-kpi__cell {
+    position: relative;
+    min-width: 0;
+    padding: 0 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+}
+
+.ft-kpi__cell + .ft-kpi__cell::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--ft-separator);
+    transform: scaleX(.5);
+    transform-origin: left;
+}
+
+.ft-kpi__label {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-kpi .ft-kpi__amount {
+    font: var(--ft-type-amount-summary);
+    color: var(--ft-label);
+}
+
+/* 位数太多（≥ 12 个字符，例如 ¥1,234,567.89）时缩小，不挤出栏 */
+.ft-kpi .ft-kpi__amount.ft-amount--long {
+    font: var(--ft-type-amount-summary-long);
+}
+
+/* 窄屏（320pt 这一档）：每栏只有 96pt 宽，14 个字符的金额（¥98,765,432.10）在 14px 下比栏还宽，再缩一档 */
+@media (max-width: 359px) {
+    .ft-kpi .ft-kpi__amount.ft-amount--long {
+        font: var(--ft-type-amount-summary-xlong);
+    }
+}
+
+/* 图表容器：每一节标题下面的白色圆角卡；加载中是骨架块，没有数据是图标 + 说明 */
+.ft-panel {
+    box-sizing: border-box;
+    padding: 16px;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+    overflow: hidden;
+}
+
+.ft-panel__skeleton {
+    width: 100%;
+    border-radius: var(--ft-radius-input);
+}
+
+.ft-panel__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 26px 0;
+    color: var(--ft-label-2);
+    text-align: center;
+}
+
+.ft-panel__empty > i {
+    font-size: 44px;
+    line-height: 1;
+    color: var(--ft-label-3);
+}
+
+.ft-panel__empty > p {
+    margin: 0;
+    font: var(--ft-type-caption);
+}
+
+/* 圆环下面「这个月还没有支出」的说明（<p>：要下外边距，写成 p.类名） */
+p.ft-panel__note {
+    margin: 4px 0 2px;
+    text-align: center;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 构成圆环：SVG 画环，中心叠一层文字（环的孔直径 = 外径的 68%，文字左右留 16% 不贴环） */
+.ft-donut {
+    position: relative;
+    width: min(100%, var(--ft-donut-size));
+    margin: 4px auto 0;
+}
+
+.ft-donut__svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.ft-donut__track {
+    stroke: var(--ft-fill);
+}
+
+.ft-donut__arc {
+    stroke: var(--ft-hue);
+}
+
+.ft-donut__center {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 0 16%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.ft-donut__caption {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-donut .ft-donut__total {
+    max-width: 100%;
+    font: var(--ft-type-amount-donut);
+    color: var(--ft-label);
+}
+
+.ft-donut .ft-donut__total.ft-amount--long {
+    font: var(--ft-type-amount-donut-long);
+}
+
+/* 图例：每行 圆点 · 名称（占满剩余宽度，过长省略）· 占比 · 金额，行间细分隔线 */
+.ft-legend {
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ft-legend__row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+}
+
+.ft-legend__row + .ft-legend__row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--ft-separator);
+    transform: scaleY(.5);
+    transform-origin: top;
+}
+
+.ft-legend .ft-dot {
+    width: 12px;
+    height: 12px;
+}
+
+.ft-legend__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+}
+
+.ft-legend__pct {
+    flex: none;
+    min-width: 52px;
+    text-align: right;
+    font: var(--ft-type-caption);
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label-2);
+}
+
+.ft-legend .ft-legend__amount {
+    flex: none;
+    min-width: 84px;
+    justify-content: flex-end;
+    color: var(--ft-label);
+}
+
+/* ------------------------------------------------------------
+   统计 Tab · 趋势 / 年度（12 号 ticket）：同比卡 / 明细表 / 旧地址跳转页
+   ------------------------------------------------------------ */
+
+/* 同比分析：一张白卡——上面两行口径说明（对比的口径、对比的两个期间），下面并排两栏（支出同比 / 收入同比），栏间细分隔线。
+   变化率用语义色：好事（支出降 / 收入涨）绿，坏事红，没有变化 / 没有对比基数是中性色 */
+.ft-yoy {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ft-yoy__scope,
+.ft-yoy__period {
+    grid-column: 1 / -1;
+    margin: 0;
+    text-align: center;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-yoy__scope {
+    font-weight: 600;
+    color: var(--ft-label);
+}
+
+p.ft-yoy__period {
+    margin-bottom: 14px;
+    font-size: 12px;
+}
+
+.ft-yoy__cell {
+    position: relative;
+    min-width: 0;
+    padding: 0 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+}
+
+.ft-yoy__cell + .ft-yoy__cell::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--ft-separator);
+    transform: scaleX(.5);
+    transform-origin: left;
+}
+
+.ft-yoy__label {
+    margin: 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-yoy__rate {
+    max-width: 100%;
+    margin: 0;
+    font: 800 26px/32px var(--ft-font);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--ft-label);
+}
+
+.ft-yoy__rate--good {
+    color: var(--ft-income-text);
+}
+
+.ft-yoy__rate--bad {
+    color: var(--ft-danger-text);
+}
+
+/* 变化率文字太长（去年同期基数很小）时逐级缩小，不挤出半张卡的宽度；档位由 StatisticsPresentation.RateSize 决定 */
+.ft-yoy__rate--long {
+    font-size: 20px;
+    line-height: 28px;
+}
+
+.ft-yoy__rate--xlong {
+    font-size: 15px;
+    line-height: 24px;
+}
+
+.ft-yoy__base {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: baseline;
+    gap: 0 4px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-yoy__base .ft-amount {
+    font: var(--ft-type-caption);
+    font-weight: 600;
+    color: var(--ft-label);
+}
+
+.ft-yoy__nobase {
+    margin: 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 趋势明细表：白卡里的四列表格（日期靠左、三列金额靠右），表头是排序按钮；列太宽（大额）时卡内横向滚动，不撑破页面 */
+.ft-panel--table {
+    padding: 6px 16px 10px;
+}
+
+.ft-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ft-table {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--ft-type-caption);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-table th,
+.ft-table td {
+    height: var(--ft-hit);
+    padding: 0 0 0 10px;
+    text-align: right;
+    white-space: nowrap;
+    color: var(--ft-label);
+}
+
+.ft-table th:first-child,
+.ft-table td:first-child {
+    padding-left: 0;
+    text-align: left;
+}
+
+.ft-table tbody th {
+    font-weight: 500;
+}
+
+.ft-table tbody tr + tr > * {
+    border-top: 1px solid var(--ft-separator);
+}
+
+/* 表头按钮撑满整个表头格（命中区域不只是两个字宽）；文字与下面的数字同一侧对齐，
+   排序箭头不占位置：数字列画在文字左边、日期列画在文字右边（那里本来就是空的），点排序时列宽不会跳 */
+.ft-table__sort {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    font: inherit;
+    font-weight: 600;
+    color: var(--ft-label-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-table th:first-child .ft-table__sort {
+    justify-content: flex-start;
+}
+
+.ft-table__sort-label {
+    position: relative;
+}
+
+.ft-table__sort-label > i {
+    position: absolute;
+    top: 50%;
+    right: 100%;
+    width: 14px;
+    margin-top: -7px;
+    font-size: 14px;
+    line-height: 14px;
+    text-align: center;
+}
+
+.ft-table th:first-child .ft-table__sort-label > i {
+    right: auto;
+    left: 100%;
+}
+
+.ft-table__sort--on {
+    color: var(--ft-brand);
+}
+
+.ft-table__sort:active {
+    opacity: .6;
+}
+
+.ft-table__sort:focus-visible,
+.ft-table__more:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+.ft-table__more {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--ft-hit);
+    margin: 4px 0 0;
+    padding: 0;
+    border: 0;
+    border-top: 1px solid var(--ft-separator);
+    background: none;
+    font: var(--ft-type-chip);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-table__more:active {
+    opacity: .6;
+}
+
+/* 旧地址（/trend、/annual-report）在应用内被压栈打开时，跳到统计 Tab 之前的一瞬间显示的占位 */
+.ft-redirect {
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-redirect__spinner {
+    font-size: 28px;
+    line-height: 1;
+    color: var(--ft-brand);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* 分段滑块直接就位，不滑动；大标题折叠只保留颜色淡入淡出，小标题不位移 */
+    .ft-seg__thumb,
+    .ft-lnav,
+    .ft-lnav::after,
+    .ft-check,
+    .ft-chip::before {
+        transition-duration: .01ms;
+    }
+
+    /* 多选操作栏直接出现，不上滑淡入 */
+    .ft-actionbar {
+        animation: none;
+    }
+
+    .ft-lnav__title,
+    [data-title-collapsed="true"] > .ft-lnav .ft-lnav__title {
+        transform: translate(-50%, -50%);
+        transition: opacity var(--ft-dur-reduced) linear;
+    }
+}
+
+/* ------------------------------------------------------------
+   我的 Tab（13 号 ticket）：资料卡 / 云端同步行 / 待确认角标 / 退出登录（设计稿 screens 04-me）
+   标记在 Pages/Profile.razor 与 Components/SyncStatus.razor；分组、单元格、图标块沿用 GroupedList / ListCell。
+   规则：只引用令牌；这一页没有玻璃层，加上 Tab 栏每屏 1 层。
+   ------------------------------------------------------------ */
+
+/* 资料卡紧跟在大标题下面：大标题自带下内边距，第一组只留一点点间距 */
+.ft-profile__top {
+    margin-top: 4px;
+}
+
+/* 云端同步行是一张独立的卡片，贴着资料卡（比分组间距小） */
+.ft-profile__sync {
+    margin-top: 12px;
+}
+
+.ft-profile__card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px var(--ft-cell-pad);
+}
+
+.ft-profile__avatar {
+    flex: none;
+    width: var(--ft-avatar-size);
+    height: var(--ft-avatar-size);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 30px;
+    color: #fff;
+    background: var(--ft-brand-gradient);
+    box-shadow: 0 6px 14px rgba(var(--ft-brand-rgb), .28);
+}
+
+.ft-profile__avatar > i {
+    line-height: 1;
+}
+
+.ft-profile__who {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ft-profile__phone {
+    margin: 0;
+    font: var(--ft-type-profile-phone);
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-profile__since {
+    margin: 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 云端同步行：有待同步 / 状态未知时副标题用加深的橙色（橙色在白底上对比度不足，文字改用 --ft-warning-text） */
+.ft-sync--pending .ft-cell__subtitle,
+.ft-sync--unknown .ft-cell__subtitle {
+    font-weight: 600;
+    color: var(--ft-warning-text);
+}
+
+/* 「立即同步」：按钮本体 44 高保证点击热区，里面的胶囊视觉高度 34 */
+.ft-sync__btn {
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out), opacity var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-sync__btn:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-sync__btn:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+    border-radius: var(--ft-radius-pill);
+}
+
+.ft-sync__btn:disabled {
+    opacity: .6;
+    cursor: default;
+    pointer-events: none;
+}
+
+.ft-sync__pill {
+    box-sizing: border-box;
+    height: var(--ft-sync-pill-height);
+    padding: 0 14px;
+    border-radius: var(--ft-radius-pill);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font: 600 14px/20px var(--ft-font);
+    white-space: nowrap;
+    color: var(--ft-brand);
+    background: var(--ft-brand-soft-2);
+}
+
+.ft-sync__pill > i {
+    font-size: 18px;
+    line-height: 1;
+}
+
+/* 待确认账单行右侧的红色计数角标（只是图形，读屏名称写在整行的 aria-label 里） */
+.ft-profile__count {
+    box-sizing: border-box;
+    min-width: var(--ft-count-size);
+    height: var(--ft-count-size);
+    padding: 0 6px;
+    border-radius: var(--ft-radius-pill);
+    font: 700 13px/var(--ft-count-size) var(--ft-font);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    color: #fff;
+    background: var(--ft-badge-solid);
+}
+
+/* 退出登录：独立的一张卡，红色文字居中（文字用加深的红，白底上 ≥ 4.5:1） */
+.ft-profile__logout {
+    justify-content: center;
+}
+
+.ft-profile__logout .ft-cell__main {
+    flex: none;
+}
+
+.ft-profile__logout .ft-cell__title {
+    font-weight: 600;
+    color: var(--ft-danger-text);
+}
+
+/* ============================================================
+   记一笔 Sheet（15 号 ticket）
+   标记在 Components/Bills/{AddBillSheet,CategoryGrid}.razor、Components/Ui/{AmountKeypad,PopoverMenu,PopoverMenuItem}.razor、
+   Components/Pickers/LedgerMenu.razor；行为在 wwwroot/js/ui.js（长按退格、分类网格页码、弹出菜单定位、聚焦备注时让出键盘）。
+   规则：只引用令牌；弹出菜单是纯白卡片（不是玻璃）——玻璃层预算（每屏 ≤ 3）：Sheet 打开时被盖住的页面与 Tab 栏关掉毛玻璃，只剩 Sheet 标题栏的两个玻璃圆钮；
+   不使用 :has() / aspect-ratio / color-mix（最低支持 iOS 14）。
+   脚本自有的状态（Blazor 重绘不会冲掉）：.ft-sheet[data-typing]（备注聚焦中）、.ft-catgrid[data-page]、.ft-popover[data-positioned / data-placement]。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   全高 Sheet + 升起时背景页面缩小
+   背景缩放靠「同级后继」选择器：.ft-sheet-host--scale 必须渲染在页面栈（.m-page-stack）之前、与它同级（MainLayout 里就是这样放的）。
+   页面栈以顶边中点为原点缩小：顶边不动，状态栏下仍露出页面的 Hero；圆角 + 裁剪让它像一张被推远的卡片。
+   transform 会让页面栈成为其中 fixed 元素的包含块——页面栈本就铺满整屏，几何位置不变，Sheet 关闭后恢复。
+   Tab 栏在页面栈之外，不跟着缩，被遮罩盖住（z-index 低于 Sheet）。
+   ------------------------------------------------------------ */
+.ft-sheet--tall {
+    height: calc(100% - var(--ft-safe-top, 0px) - 12px);
+    max-height: none;
+}
+
+.m-page-stack {
+    transform-origin: 50% 0;
+    transition: transform var(--ft-dur-sheet) var(--ft-ease-sheet), border-radius var(--ft-dur-sheet) var(--ft-ease-sheet);
+}
+
+.ft-sheet-host--scale ~ .m-page-stack {
+    overflow: hidden;
+    border-radius: var(--ft-sheet-bg-radius);
+    transform: scale(var(--ft-sheet-bg-scale));
+    will-change: transform;
+}
+
+/* 收起时页面随退出动画一起复位 */
+.ft-sheet-host--scale.ft-sheet-host--closing ~ .m-page-stack {
+    border-radius: 0;
+    transform: none;
+}
+
+/* 玻璃层预算（每屏 ≤ 3）：任何 Sheet 升起后，被遮罩盖住的页面与 Tab 栏不再需要毛玻璃——关掉它们的 backdrop-filter，
+   屏幕上只剩 Sheet 自己的玻璃圆钮（账单页导航栏的两个圆钮、统计页的报表钮、Tab 栏原本都会叠上来）。
+   「有 Sheet 升起」由 ui.js 的 UiRuntime 写在 <html data-ft-sheet-open> 上（Sheet 可能渲染在页面栈之外、也可能在某个页面里面，
+   样式没法用同级选择器表达「页面里有 Sheet」；也不用 :has()）：Sheet 开始收起（.ft-sheet-host--closing）的瞬间属性就撤掉，
+   页面的玻璃赶在页面复位之前恢复。Sheet 自己里面的玻璃（标题栏圆钮）不受影响：下面第二组选择器的特异性更高，把它们重新打开 */
+html[data-ft-sheet-open] .ft-glass,
+html[data-ft-sheet-open] .ft-glass-dark {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+html[data-ft-sheet-open] .ft-sheet-host .ft-glass {
+    -webkit-backdrop-filter: var(--ft-glass-filter);
+    backdrop-filter: var(--ft-glass-filter);
+}
+
+html[data-ft-sheet-open] .ft-sheet-host .ft-glass-dark {
+    -webkit-backdrop-filter: var(--ft-glass-dark-filter);
+    backdrop-filter: var(--ft-glass-dark-filter);
+}
+
+/* 聚焦备注（系统键盘升起）时，自定义数字键盘让位 */
+.ft-sheet[data-typing="true"] .ft-sheet__footer {
+    display: none;
+}
+
+/* 记一笔的标题栏更紧凑（设计稿 05：关闭钮顶边距 Sheet 顶 15、类型分段顶边距 Sheet 顶 66）：为整屏放得下四行设置省出空间 */
+.ft-sheet[data-variant="addbill"] .ft-sheet__header {
+    min-height: 48px;
+    padding-bottom: 4px;
+}
+
+/* 键盘底边与手势条上沿对齐（设计稿 05：键盘底 = 屏高 − 34）；没有手势条的设备（底部安全区 0）仍留 12 的呼吸空间 */
+.ft-sheet[data-variant="addbill"] .ft-sheet__footer {
+    padding-bottom: max(12px, var(--ft-safe-bottom, 0px));
+}
+
+/* ------------------------------------------------------------
+   内容区：语音状态行 / 吸顶的类型 + 金额 / 分类网格 / 四行设置
+   ------------------------------------------------------------ */
+.ft-addbill {
+    display: flex;
+    flex-direction: column;
+}
+
+.ft-addbill__voice {
+    margin: 0 0 8px;
+    padding: 8px 14px;
+    border-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font: var(--ft-type-caption);
+    color: var(--ft-brand);
+    background: var(--ft-brand-soft);
+}
+
+.ft-addbill__voice-text {
+    font-weight: 600;
+}
+
+.ft-addbill__voice-hint {
+    color: var(--ft-label-2);
+}
+
+/* 吸顶：分类网格与设置行滚动时，类型与金额始终可见；底部渐隐提示下面还有内容 */
+.ft-addbill__head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 calc(-1 * var(--ft-space-page));
+    padding: 2px var(--ft-space-page) 4px;
+    background: var(--ft-bg);
+}
+
+.ft-addbill__head::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 10px;
+    background: linear-gradient(to bottom, var(--ft-bg), rgba(var(--ft-bg-rgb), 0));
+    pointer-events: none;
+}
+
+.ft-addbill__amount {
+    box-sizing: border-box;
+    min-height: 56px;
+    margin-top: 2px;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    overflow: hidden;
+    font: var(--ft-type-amount-input);
+    line-height: 56px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.5px;
+    white-space: nowrap;
+    color: var(--ft-danger-text);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ft-addbill__amount[data-type="income"] {
+    color: var(--ft-income-text);
+}
+
+/* 位数多了逐级缩小，13 个字符（99,999,999.99）仍放得进一行 */
+.ft-addbill__amount[data-size="lg"] {
+    font-size: 46px;
+    line-height: 56px;
+}
+
+.ft-addbill__amount[data-size="md"] {
+    font-size: 36px;
+    line-height: 48px;
+}
+
+.ft-addbill__amount[data-empty="true"] .ft-addbill__num {
+    color: var(--ft-label-2);
+}
+
+/* ¥ 符号：行高归一，否则继承金额的 64px 行高、与大数字基线对齐后整行会被撑高 */
+.ft-addbill__sym {
+    font-size: .54em;
+    font-weight: 800;
+    line-height: 1;
+}
+
+/* 类型分段：选中项的文字随类型着色（支出红 / 收入绿），与金额、分类网格的颜色呼应（设计稿 04 ②） */
+.ft-sheet[data-variant="addbill"][data-type="expense"] .ft-seg__item--on {
+    color: var(--ft-danger-text);
+}
+
+.ft-sheet[data-variant="addbill"][data-type="income"] .ft-seg__item--on {
+    color: var(--ft-income-text);
+}
+
+.ft-addbill__caret {
+    flex: none;
+    align-self: center;
+    width: 3px;
+    height: .78em;
+    margin-left: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    animation: ft-caret var(--ft-dur-caret) steps(1, end) infinite;
+}
+
+@keyframes ft-caret {
+    0%,
+    49.9% {
+        opacity: 1;
+    }
+
+    50%,
+    100% {
+        opacity: 0;
+    }
+}
+
+/* 引导抖动：缺账本 / 缺金额 / 缺分类时点按置灰的保存键（data-shake 由 Blazor 短暂置位） */
+.ft-addbill__amount[data-shake="true"],
+.ft-amountentry[data-shake="true"],
+.ft-addbill__cats[data-shake="true"],
+.ft-addbill__anchor[data-shake="true"] {
+    animation: ft-shake var(--ft-dur-shake) ease-in-out;
+}
+
+@keyframes ft-shake {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    18% {
+        transform: translateX(-8px);
+    }
+
+    36% {
+        transform: translateX(7px);
+    }
+
+    54% {
+        transform: translateX(-5px);
+    }
+
+    72% {
+        transform: translateX(3px);
+    }
+}
+
+.ft-addbill__cats {
+    margin-top: 4px;
+}
+
+/* 数据读取期间的占位：与真实网格等高（两行 + 分页点），读完不跳 */
+.ft-addbill__cats--loading {
+    min-height: calc(2 * var(--ft-cat-row-height) + 18px);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-auto-rows: var(--ft-cat-row-height);
+    padding-top: 4px;
+}
+
+.ft-addbill__sk {
+    width: var(--ft-cat-size);
+    height: var(--ft-cat-size);
+    margin: 0 auto;
+    border-radius: 50%;
+}
+
+/* 麦克风：与左侧关闭钮同尺寸的玻璃圆钮；按住 / 聆听时变成品牌色并外扩光圈；环境不支持时置灰（仍可点，给一句说明） */
+.ft-addbill__mic {
+    touch-action: none;
+    -webkit-touch-callout: none;
+}
+
+.ft-addbill__mic--on {
+    color: #fff;
+    background: var(--ft-brand-button-gradient);
+    box-shadow: var(--ft-brand-button-shadow);
+    animation: ft-mic-pulse 1.2s ease-out infinite;
+}
+
+@keyframes ft-mic-pulse {
+    from {
+        box-shadow: 0 0 0 0 rgba(var(--ft-brand-rgb), .42);
+    }
+
+    to {
+        box-shadow: 0 0 0 14px rgba(var(--ft-brand-rgb), 0);
+    }
+}
+
+.ft-addbill__mic--off {
+    opacity: .45;
+}
+
+/* 编辑模式的「删除账单」：内容最底部自成一组的红字行（标题色由 .ft-cell--destructive 给，加深的危险红），
+   与上面的设置行隔开一点，行高与设置行一致；保存 / 删除进行中置灰且不响应（ListCell 的 disabled） */
+.ft-addbill .ft-addbill__danger {
+    margin-top: 12px;
+}
+
+.ft-addbill__danger .ft-cell {
+    min-height: var(--ft-cell-height-compact);
+}
+
+/* ------------------------------------------------------------
+   分类网格（CategoryGrid）：5 列 × 2 行一页，横向吸附翻页，末尾「新建分类」
+   选中的分类：实心渐变图标圆 + 同色外环 + 加粗名称；未选中：柔和图标圆
+   ------------------------------------------------------------ */
+.ft-catgrid-wrap {
+    position: relative;
+    margin: 0 calc(-1 * var(--ft-space-page));
+}
+
+.ft-catgrid {
+    display: flex;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.ft-catgrid::-webkit-scrollbar {
+    display: none;
+}
+
+.ft-catgrid__page {
+    flex: 0 0 100%;
+    box-sizing: border-box;
+    padding: 0 var(--ft-space-page);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    /* 一行至少是令牌高度（设计稿行距 77）；系统字号放大后名称行变高，行跟着长（固定行高会把名称下沿裁掉） */
+    grid-auto-rows: minmax(var(--ft-cat-row-height), auto);
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+}
+
+.ft-cat {
+    box-sizing: border-box;
+    min-width: 0;
+    margin: 0;
+    padding: 6px 0 0;
+    border: 0;
+    border-radius: 14px;
+    background: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-cat-label);
+    color: var(--ft-label-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-cat:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-cat:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+.ft-cat__tile {
+    width: var(--ft-cat-size);
+    height: var(--ft-cat-size);
+    border-radius: 50%;
+    font-size: 26px;
+    transition: box-shadow var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-cat__label {
+    flex: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-cat--on {
+    font: var(--ft-type-cat-label-on);
+    color: var(--ft-label);
+}
+
+/* 选中外环：页面底色一圈留白 + 与图标同色的一圈 */
+.ft-cat--on .ft-tile--purple { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-indigo); }
+.ft-cat--on .ft-tile--teal { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-teal); }
+.ft-cat--on .ft-tile--pink { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-pink); }
+.ft-cat--on .ft-tile--orange { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-orange); }
+.ft-cat--on .ft-tile--blue { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-blue); }
+.ft-cat--on .ft-tile--green { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-green); }
+.ft-cat--on .ft-tile--red { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-red); }
+.ft-cat--on .ft-tile--gray { box-shadow: 0 0 0 2px var(--ft-bg), 0 0 0 4px var(--ft-gray); }
+
+/* 「新建分类」：虚线圆 + 加号 */
+.ft-cat__tile--new {
+    flex: none;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    border: 1.5px dashed var(--ft-label-3);
+    color: var(--ft-label-2);
+    background: none;
+}
+
+.ft-cat__tile--new > i {
+    line-height: 1;
+}
+
+.ft-catgrid__dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 0 4px;
+}
+
+.ft-catgrid__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ft-label-3);
+}
+
+/* 当前页的点：页码由 ui.js 写在 .ft-catgrid[data-page]（分页点是它的后继兄弟） */
+.ft-catgrid[data-page="0"] ~ .ft-catgrid__dots > :nth-child(1),
+.ft-catgrid[data-page="1"] ~ .ft-catgrid__dots > :nth-child(2),
+.ft-catgrid[data-page="2"] ~ .ft-catgrid__dots > :nth-child(3),
+.ft-catgrid[data-page="3"] ~ .ft-catgrid__dots > :nth-child(4),
+.ft-catgrid[data-page="4"] ~ .ft-catgrid__dots > :nth-child(5),
+.ft-catgrid[data-page="5"] ~ .ft-catgrid__dots > :nth-child(6) {
+    background: var(--ft-label-2);
+}
+
+/* ------------------------------------------------------------
+   四行设置：紧凑单元格（账本 / 支付渠道 / 时间 / 备注）
+   ------------------------------------------------------------ */
+.ft-addbill .ft-addbill__rows {
+    margin-top: 6px;
+}
+
+.ft-addbill__rows .ft-cell {
+    min-height: var(--ft-cell-height-compact);
+}
+
+.ft-addbill__rows .ft-cell__main {
+    padding: 6px 0;
+}
+
+.ft-addbill__rows .ft-tile {
+    width: var(--ft-tile-size-compact);
+    height: var(--ft-tile-size-compact);
+    border-radius: 9px;
+    font-size: 17px;
+}
+
+.ft-addbill__rows .ft-cell--lead::before {
+    left: calc(var(--ft-cell-pad) + var(--ft-tile-size-compact) + var(--ft-cell-gap));
+}
+
+/* 右值过长时省略，不把标题挤掉 */
+.ft-addbill__field .ft-cell__trail {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.ft-addbill__field .ft-cell__value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* 没选账本：右值用加深的红提示「还差这一项」（红色在浅底上 ≥ 4.5:1） */
+.ft-addbill__field--missing .ft-cell__value {
+    font-weight: 600;
+    color: var(--ft-danger-text);
+}
+
+/* 时间：透明的 datetime-local 盖满整行，点按即唤起系统的日期时间选择器；键盘聚焦时才显形 */
+.ft-addbill__picker {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0 var(--ft-cell-pad);
+    border: 0;
+    opacity: 0;
+    font: var(--ft-type-body);
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+
+.ft-addbill__picker:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+    background: var(--ft-card);
+}
+
+/* 备注：行内输入，字号 16（iOS 小于 16 聚焦时会放大页面），文字右对齐 */
+.ft-addbill__field--input .ft-cell__main {
+    flex: none;
+}
+
+.ft-addbill__field--input .ft-cell__trail {
+    flex: 1 1 auto;
+}
+
+.ft-addbill__note {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    text-align: right;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.ft-addbill__note::placeholder {
+    color: var(--ft-label-2);
+}
+
+.ft-addbill__note:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+    border-radius: 8px;
+}
+
+/* ------------------------------------------------------------
+   数字键盘（AmountKeypad）：4 列 × 4 行，右侧一个跨三行的高大「保存」键
+   ------------------------------------------------------------ */
+.ft-keypad {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: var(--ft-key-height);
+    gap: var(--ft-key-gap);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.ft-key {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ft-radius-key);
+    display: grid;
+    place-items: center;
+    font: var(--ft-type-key);
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label);
+    background: var(--ft-card);
+    box-shadow: var(--ft-key-shadow);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out), background-color var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-key:active {
+    transform: scale(var(--ft-press-scale));
+    background: var(--ft-fill);
+}
+
+.ft-key:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+.ft-key > i {
+    font-size: 26px;
+    line-height: 1;
+}
+
+.ft-key--fn {
+    background: var(--ft-key-fn-bg);
+    box-shadow: none;
+}
+
+.ft-key--fn:active {
+    background: var(--ft-fill);
+}
+
+.ft-key--save {
+    grid-column: 4;
+    grid-row: 2 / span 3;
+    font: var(--ft-type-key-save);
+    color: #fff;
+    background: var(--ft-brand-button-gradient);
+    box-shadow: var(--ft-brand-button-shadow);
+}
+
+.ft-key--save:active {
+    background: var(--ft-brand-button-gradient);
+    filter: brightness(.92);
+}
+
+/* 置灰：条件没凑齐（设计稿 04：浅灰键面 + 灰色文字）。仍可点按，用来引导补全，所以文字取次级文字色而不是更淡的占位色：
+   20px 粗体属于大号文字，在浅灰键面上 ≥ 3:1（DesignTokensTests 校验） */
+.ft-key--save-off,
+.ft-key--save-off:active {
+    color: var(--ft-label-2);
+    background: var(--ft-key-save-off-bg);
+    box-shadow: none;
+    filter: none;
+}
+
+.ft-key--save:disabled {
+    opacity: .6;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* ------------------------------------------------------------
+   弹出菜单（PopoverMenu）：账本 / 支付渠道菜单。纯白卡片 + 投影，位置由 ui.js 写成 fixed 坐标
+   ------------------------------------------------------------ */
+.ft-popover-layer {
+    position: fixed;
+    inset: 0;
+    z-index: var(--ft-z-popover);
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-popover {
+    position: fixed;
+    box-sizing: border-box;
+    min-width: var(--ft-popover-min-width);
+    max-width: calc(100vw - 24px);
+    overflow-y: auto;
+    padding: 0;
+    border-radius: var(--ft-radius-popover);
+    background: var(--ft-card);
+    box-shadow: var(--ft-shadow-popover);
+    outline: none;
+    /* 定位前不显示（避免在原点闪一下）；ui.js 写完位置后标记 data-positioned */
+    visibility: hidden;
+}
+
+.ft-popover[data-positioned="true"] {
+    visibility: visible;
+    animation: ft-popover-in 160ms var(--ft-ease-out) backwards;
+}
+
+@keyframes ft-popover-in {
+    from {
+        opacity: 0;
+        transform: scale(.92);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* 降级：没有触发行 / 脚本加载失败时，贴着屏幕底部展开成一张列表 */
+.ft-popover[data-fallback="true"] {
+    top: auto;
+    right: 12px;
+    bottom: calc(var(--ft-safe-bottom, 0px) + 12px);
+    left: 12px;
+    max-width: none;
+    max-height: 60%;
+    visibility: visible;
+}
+
+/* 菜单项：整行通栏（按下时高亮铺满卡片宽度），行与行之间一道发丝线（设计稿 04：iOS 上下文菜单的样子） */
+.ft-popover__item {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--ft-popover-item-height);
+    margin: 0;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-popover__item + .ft-popover__item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--ft-separator);
+    transform: scaleY(.5);
+    transform-origin: 50% 0;
+    pointer-events: none;
+}
+
+.ft-popover__item:active {
+    background: var(--ft-fill);
+}
+
+.ft-popover__item:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+.ft-popover__item--on {
+    font-weight: 600;
+}
+
+/* 末尾的「新建…」：品牌色 */
+.ft-popover__item--accent {
+    color: var(--ft-brand);
+}
+
+.ft-popover__icon {
+    flex: none;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+.ft-popover__item--accent .ft-popover__icon {
+    color: var(--ft-brand);
+}
+
+/* 破坏性操作（「清除日志」）：红色。文字用加深的红（--ft-danger-text，白底上 ≥ 4.5:1），图标沿用同色 */
+.ft-popover__item--danger,
+.ft-popover__item--danger .ft-popover__icon {
+    color: var(--ft-danger-text);
+}
+
+.ft-popover__item:disabled {
+    opacity: .4;
+    cursor: default;
+}
+
+.ft-popover__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-popover__check {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--ft-brand);
+}
+
+/* 系统开启「减弱动态效果」：背景页面不缩放、光标不闪、抖动与光圈换成静态提示，弹出菜单只淡入 */
+@media (prefers-reduced-motion: reduce) {
+    .m-page-stack {
+        transition: none;
+    }
+
+    .ft-sheet-host--scale ~ .m-page-stack {
+        transform: none;
+        border-radius: 0;
+        will-change: auto;
+    }
+
+    .ft-addbill__caret {
+        animation: none;
+    }
+
+    .ft-addbill__amount[data-shake="true"],
+    .ft-amountentry[data-shake="true"],
+    .ft-addbill__cats[data-shake="true"],
+    .ft-addbill__anchor[data-shake="true"] {
+        animation: none;
+        outline: 2px solid var(--ft-danger);
+        outline-offset: -2px;
+    }
+
+    .ft-addbill__mic--on {
+        animation: none;
+    }
+
+    .ft-popover[data-positioned="true"] {
+        animation: ft-page-fade var(--ft-dur-reduced) linear backwards;
+    }
+
+    .ft-cat,
+    .ft-key {
+        transition-duration: .01ms;
+    }
+
+    .ft-cat:active,
+    .ft-key:active {
+        transform: none;
+    }
+}
+
+/* ------------------------------------------------------------------
+   语音记账覆盖层（VoiceOverlay，设计稿 screens 06-add-voice）
+   盖满屏幕的浅色磨砂（第 2 轮评审：贴近设计稿的灰紫，不再是深靛紫）+ 白字；整屏只占 1 个玻璃层（Sheet 打开时已有 2 颗标题栏玻璃钮，加上它恰好 3 个，不超上限），
+   已识别芯片只是深色半透明填充、不模糊。自上而下：状态 → 实时转写 → 波形 → 已识别芯片；底部：手势提示 → 大麦克风 → 说明。
+   转写区与芯片区都固定高度，文字从 1 行长到 3 行、芯片一枚枚出现时，其余内容不跟着跳。
+   对比度：浅磨砂上白字只有约 4:1，所以直接压在覆盖层上的小字（状态 / 占位 / 提示 / 说明 / 取消）一律用 --ft-type-voice-status / -note 这两档
+   大号粗体（≥ 18.66px 且 ≥ 700，要求 3:1）；芯片压在深色芯片底上，仍是 15px。新增文字时沿用这两档，DesignTokensTests 会核对。
+   ------------------------------------------------------------------ */
+.ft-voice {
+    position: fixed;
+    inset: 0;
+    z-index: var(--ft-z-voice);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    color: var(--ft-voice-text);
+    background: var(--ft-voice-bg);
+    -webkit-backdrop-filter: var(--ft-voice-filter);
+    backdrop-filter: var(--ft-voice-filter);
+    outline: none;
+    transition: background-color var(--ft-dur-fade) linear;
+    animation: ft-voice-in var(--ft-dur-fade) linear backwards;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* 手指滑进取消区：整层泛红，提示「松手即放弃」 */
+.ft-voice[data-cancelling="true"] {
+    background: var(--ft-voice-bg-cancel);
+}
+
+/* 按住形态：手指一直按在标题栏的麦克风上，覆盖层只是反馈，点按与手势仍由那颗按钮接收 */
+.ft-voice[data-mode="hold"] {
+    pointer-events: none;
+}
+
+/* 淡出：保持最后一帧，不再响应 */
+.ft-voice[data-leaving="true"] {
+    pointer-events: none;
+    animation: ft-voice-out var(--ft-dur-fade) linear forwards;
+}
+
+@keyframes ft-voice-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes ft-voice-out {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+.ft-voice__body {
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: var(--ft-voice-max-width);
+    margin: 0 auto;
+    padding: calc(var(--ft-safe-top, 0px) + 24px) 20px calc(var(--ft-safe-bottom, 0px) + 20px);
+    animation: ft-voice-rise var(--ft-dur-sheet-out) var(--ft-ease-out) backwards;
+}
+
+@keyframes ft-voice-rise {
+    from {
+        transform: translateY(16px) scale(.98);
+    }
+
+    to {
+        transform: none;
+    }
+}
+
+/* 内容区：上下居中，自己撑满剩余高度，底部区贴底 */
+.ft-voice__main {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+
+.ft-voice__status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: var(--ft-type-voice-status);
+}
+
+.ft-voice__dot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--ft-voice-rec);
+    animation: ft-voice-dot var(--ft-dur-voice-dot) ease-in-out infinite;
+}
+
+@keyframes ft-voice-dot {
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: .45;
+        transform: scale(.8);
+    }
+}
+
+/* 转写区：固定 3 行高，文字在其中垂直居中；更长的文字由 VoicePresentation.Segments 截成末尾 30 个字 */
+.ft-voice__transcript {
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--ft-voice-transcript-height);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    text-align: center;
+}
+
+.ft-voice__text {
+    display: block;
+    max-width: 100%;
+    font: var(--ft-type-voice-transcript);
+    overflow-wrap: break-word;
+}
+
+.ft-voice__placeholder {
+    display: block;
+    max-width: 280px;
+    font: var(--ft-type-voice-status);
+    color: var(--ft-voice-text-2);
+}
+
+/* 解析认出的金额 / 分类 / 支付渠道 / 时间：淡紫色 + 下划线（颜色之外还有下划线，不只靠颜色区分） */
+.ft-voice__mark {
+    padding: 0;
+    background: none;
+    color: var(--ft-voice-mark);
+    text-decoration: underline;
+    text-decoration-color: var(--ft-voice-mark);
+    text-decoration-thickness: 3px;
+    text-decoration-skip-ink: none;
+    text-underline-offset: 6px;
+}
+
+/* 波形：条的高度比例与动画偏移由内联的 --ft-wave-h / --ft-wave-delay 提供（VoicePresentation.WaveStyle） */
+.ft-voice__wave {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ft-voice-bar-gap);
+    height: var(--ft-voice-wave-height);
+}
+
+.ft-voice__bar {
+    flex: none;
+    width: var(--ft-voice-bar-width);
+    height: 100%;
+    border-radius: var(--ft-radius-pill);
+    background: linear-gradient(180deg, var(--ft-voice-wave), var(--ft-voice-wave-fade));
+    transform: scaleY(var(--ft-wave-h, .5));
+    animation: ft-voice-bar var(--ft-dur-voice-bar) ease-in-out var(--ft-wave-delay, 0ms) infinite alternate;
+}
+
+@keyframes ft-voice-bar {
+    from {
+        transform: scaleY(calc(var(--ft-wave-h, .5) * .4));
+    }
+
+    to {
+        transform: scaleY(var(--ft-wave-h, .5));
+    }
+}
+
+/* 已经说完、在等结果：红点与波形停住 */
+.ft-voice[data-phase="parsing"] .ft-voice__dot,
+.ft-voice[data-phase="parsing"] .ft-voice__bar {
+    animation-play-state: paused;
+}
+
+/* 已识别芯片：固定留出 2 行，识别到一项出现一枚（不模糊，只是半透明填充 + 描边） */
+.ft-voice__chips {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--ft-voice-chips-height);
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    justify-content: center;
+    gap: 10px;
+}
+
+.ft-voice__chip {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    height: var(--ft-voice-chip-height);
+    padding: 0 16px;
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-voice-chip-bg);
+    box-shadow: inset 0 0 0 1px var(--ft-voice-chip-border);
+    font: var(--ft-type-voice-chip);
+    white-space: nowrap;
+    animation: ft-voice-chip-in var(--ft-dur-fade) var(--ft-ease-spring) backwards;
+}
+
+.ft-voice__chip > i {
+    flex: none;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.ft-voice__chip > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@keyframes ft-voice-chip-in {
+    from {
+        opacity: 0;
+        transform: scale(.86);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.ft-voice__bottom {
+    flex: none;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+/* 手势提示（按住形态「上滑取消」/ 点按形态「说完后点一下麦克风结束」）：始终占一行，出现 / 消失不挪动下面的麦克风 */
+.ft-voice__hint {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font: var(--ft-type-voice-note);
+    color: var(--ft-voice-text-2);
+}
+
+.ft-voice__hint > i {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.ft-voice[data-cancelling="true"] .ft-voice__hint {
+    color: var(--ft-voice-text);
+}
+
+/* 大麦克风：品牌渐变圆钮 + 向外扩散的两圈光圈（上下留出光圈的位置，不压住提示与说明） */
+.ft-voice__mic {
+    position: relative;
+    box-sizing: border-box;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--ft-voice-mic-size);
+    height: var(--ft-voice-mic-size);
+    margin: calc(var(--ft-voice-ring-gap) * 2 - 8px) 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--ft-brand-button-gradient);
+    box-shadow: var(--ft-brand-button-shadow);
+    color: var(--ft-voice-text);
+    font-size: 44px;
+    line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-voice__mic::before,
+.ft-voice__mic::after {
+    content: "";
+    position: absolute;
+    top: calc(var(--ft-voice-ring-gap) * -1);
+    right: calc(var(--ft-voice-ring-gap) * -1);
+    bottom: calc(var(--ft-voice-ring-gap) * -1);
+    left: calc(var(--ft-voice-ring-gap) * -1);
+    border: 1px solid var(--ft-voice-ring);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: ft-voice-ring var(--ft-dur-voice-ring) ease-out infinite;
+}
+
+.ft-voice__mic::after {
+    top: calc(var(--ft-voice-ring-gap) * -2);
+    right: calc(var(--ft-voice-ring-gap) * -2);
+    bottom: calc(var(--ft-voice-ring-gap) * -2);
+    left: calc(var(--ft-voice-ring-gap) * -2);
+    animation-delay: calc(var(--ft-dur-voice-ring) / -2);
+}
+
+@keyframes ft-voice-ring {
+    from {
+        opacity: 1;
+        transform: scale(.9);
+    }
+
+    to {
+        opacity: 0;
+        transform: scale(1.1);
+    }
+}
+
+/* 点按形态的大麦克风是「说完了」按钮 */
+.ft-voice__mic--button {
+    cursor: pointer;
+    transition: transform var(--ft-dur-press) var(--ft-ease-out), opacity var(--ft-dur-fade) linear;
+}
+
+.ft-voice__mic--button:active {
+    transform: scale(var(--ft-press-scale));
+}
+
+.ft-voice__mic--button[aria-disabled="true"] {
+    opacity: .5;
+    cursor: default;
+}
+
+/* 底部说明放大成大号文字之后，「识别结果将预填到表单，确认后才会保存」一行放不下：balance 让两行均分，不留一行只剩三个字（不支持的 WebView 退回普通折行） */
+.ft-voice__foot {
+    max-width: 340px;
+    font: var(--ft-type-voice-note);
+    color: var(--ft-voice-text-2);
+    text-align: center;
+    text-wrap: balance;
+}
+
+/* 点按形态的「取消」：文字按钮，热区 ≥ 44 */
+.ft-voice__cancel {
+    min-width: var(--ft-hit);
+    min-height: var(--ft-hit);
+    margin: 0;
+    padding: 0 24px;
+    border: 0;
+    background: none;
+    font: var(--ft-type-voice-note);
+    color: var(--ft-voice-text);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* 系统开启「减弱动态效果」：红点 / 波形 / 光圈换成静态，覆盖层与芯片只淡入、不位移不缩放 */
+@media (prefers-reduced-motion: reduce) {
+    .ft-voice {
+        animation-duration: var(--ft-dur-reduced);
+    }
+
+    .ft-voice[data-leaving="true"] {
+        animation-duration: var(--ft-dur-reduced);
+    }
+
+    .ft-voice__body,
+    .ft-voice__chip {
+        animation: none;
+    }
+
+    .ft-voice__dot,
+    .ft-voice__bar,
+    .ft-voice__mic::before,
+    .ft-voice__mic::after {
+        animation: none;
+    }
+
+    .ft-voice__mic::after {
+        opacity: .5;
+    }
+
+    .ft-voice__mic--button {
+        transition: none;
+    }
+
+    .ft-voice__mic--button:active {
+        transform: none;
+    }
+}
+
+/* ============================================================
+   预算页（18 号 ticket）
+   标记在 Components/Ui/{ProgressRing,BudgetRow}.razor、Components/Budgets/*.razor 与 Pages/Budgets.razor。
+   规则：只引用令牌；整页只有导航栏两颗玻璃圆钮是玻璃（总览卡、提示条、预算行、Sheet 里的表单都是不透明的白色 / 浅橙），
+   Sheet 升起后页面上的玻璃由「背景缩放」规则关掉，所以屏幕上同时最多 3 层；不使用 :has() / aspect-ratio / color-mix / dvh。
+   ============================================================ */
+
+/* 筛选行：月份胶囊在左、账本胶囊在右；账本胶囊自己会在放不下时省略文字 */
+.ft-budgets__filters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+/* ------------------------------------------------------------
+   进度环（ProgressRing）：粗环 + 中心内容；弧长用 stroke-dasharray，变化时有过渡
+   ------------------------------------------------------------ */
+.ft-ring {
+    position: relative;
+    flex: none;
+    width: var(--ft-ring-size);
+    height: var(--ft-ring-size);
+}
+
+.ft-ring__svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.ft-ring__track {
+    stroke: var(--ft-fill);
+}
+
+.ft-ring__arc {
+    stroke: var(--ft-brand);
+    transition: stroke-dasharray var(--ft-dur-ring) var(--ft-ease-out), stroke var(--ft-dur-fade) linear;
+}
+
+.ft-ring--warning .ft-ring__arc {
+    stroke: var(--ft-warning);
+}
+
+.ft-ring--danger .ft-ring__arc {
+    stroke: var(--ft-danger);
+}
+
+/* 环的孔直径 = 外径的 76%：文字左右各留 12%（环宽），不贴环 */
+.ft-ring__center {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    padding: 0 12%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+}
+
+/* ------------------------------------------------------------
+   总览卡（BudgetOverviewCard）：左边进度环，右边标题 / 额度 / 已用 / 剩余
+   ------------------------------------------------------------ */
+.ft-budgetcard {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-top: 14px;
+    padding: 20px;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-budgetcard__pct {
+    max-width: 100%;
+    font: var(--ft-type-ring-percent);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--ft-label);
+}
+
+.ft-budgetcard__pct[data-long="true"] {
+    font: var(--ft-type-ring-percent-long);
+}
+
+.ft-budgetcard__caption {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+.ft-budgetcard__info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.ft-budgetcard__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 20px;
+}
+
+.ft-budgetcard__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 500 15px/20px var(--ft-font);
+    color: var(--ft-label-2);
+}
+
+/* 「编辑」：文字只有 15px，点击区域是 44 × 44（负外边距把多出来的热区让回去，不撑高标题行）。
+   relative + z-index：多出来的 12px 热区压在下一行（金额）的行框上，不抬层的话点在那 12px 上命中的是金额而不是按钮（23 号热区扫描量出实际只有 32px 高） */
+.ft-budgetcard__edit {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: -12px -12px -12px 0;
+    padding: 0 12px;
+    border: 0;
+    background: none;
+    font: 600 15px/20px var(--ft-font);
+    color: var(--ft-brand);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+.ft-budgetcard__edit:active {
+    opacity: .5;
+}
+
+.ft-budgetcard__edit:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -4px;
+    border-radius: 10px;
+}
+
+.ft-budgetcard .ft-budgetcard__amount {
+    font: var(--ft-type-amount-total);
+    color: var(--ft-label);
+}
+
+.ft-budgetcard .ft-budgetcard__amount.ft-amount--long {
+    font: var(--ft-type-amount-total-long);
+}
+
+.ft-budgetcard__lines {
+    display: grid;
+    gap: 1px;
+    margin: 10px 0 0;
+    padding: 0;
+}
+
+/* 标签在左、金额在右；极端长的金额放不下时金额折到下一行（右对齐），不会冲出卡片 */
+.ft-budgetcard__line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: 8px;
+    font: 500 15px/20px var(--ft-font);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-budgetcard__line > dt {
+    margin: 0;
+    color: var(--ft-label-2);
+    white-space: nowrap;
+}
+
+.ft-budgetcard__line > dd {
+    margin: 0 0 0 auto;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+    color: var(--ft-label);
+}
+
+/* 剩余额度用收入的深绿，超支时换成深红（标签也从「剩余」变成「超支」，不只靠颜色） */
+.ft-budgetcard__line--remain > dd {
+    color: var(--ft-income-text);
+}
+
+.ft-budgetcard[data-state="over"] .ft-budgetcard__line--remain > dd {
+    color: var(--ft-danger-text);
+}
+
+/* 加载中的骨架 */
+.ft-budgetcard__sk-ring {
+    flex: none;
+    width: var(--ft-ring-size);
+    height: var(--ft-ring-size);
+    border-radius: 50%;
+}
+
+.ft-budgetcard__sk-lines {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 12px;
+}
+
+.ft-budgetcard__sk-amount {
+    width: 80%;
+    height: 28px;
+    border-radius: 10px;
+}
+
+/* ------------------------------------------------------------
+   提示条（Callout）：只读的一句话提示，浅橙底 + 深橙字（日均可用）
+   ------------------------------------------------------------ */
+.ft-callout {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 11px 18px;
+    border-radius: var(--ft-radius-pill);
+    font: 500 14px/20px var(--ft-font);
+}
+
+.ft-callout--warning {
+    background: var(--ft-callout-warning-bg);
+    color: var(--ft-warning-text);
+}
+
+.ft-callout__icon {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ft-callout__text {
+    min-width: 0;
+}
+
+/* ------------------------------------------------------------
+   预算行可点按：名称是按钮，伪元素把点击区域铺满整行（进度条不被嵌进按钮里）
+   ------------------------------------------------------------ */
+.ft-budgetrow__open {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* z-index 1：盖过同一行里同样是定位元素的进度条，整行（含进度条）都是点击区域，按下的底色也均匀铺满整行 */
+.ft-budgetrow__open::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+}
+
+.ft-budgetrow__open:active::after {
+    background: var(--ft-fill-2);
+}
+
+.ft-budgetrow__open:focus-visible {
+    outline: none;
+}
+
+.ft-budgetrow__open:focus-visible::after {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------
+   新建 / 编辑预算 Sheet 的内容区：分段 / 金额 / 月份 / 账本 / 分类
+   ------------------------------------------------------------ */
+.ft-budgetform {
+    display: flex;
+    flex-direction: column;
+}
+
+.ft-budgetform > .ft-group {
+    margin-top: 10px;
+}
+
+/* 月份一行：左标签、右切换器；切换器去掉白色胶囊的底与阴影（行本身已经是白色卡片） */
+.ft-budgetform__period {
+    justify-content: space-between;
+}
+
+.ft-period.ft-period--flat {
+    background: none;
+    box-shadow: none;
+}
+
+/* 窄屏（iPhone SE 一代 320pt 这一档）：筛选行放不下两颗胶囊，账本胶囊折到下一行；
+   总览卡改成上下排——环在上、额度在下，八位数的金额也放得下 */
+@media (max-width: 359px) {
+    .ft-budgets__filters {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .ft-budgetcard {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 16px;
+    }
+
+    .ft-budgetcard > .ft-ring,
+    .ft-budgetcard > .ft-budgetcard__sk-ring {
+        align-self: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* 进度环弧长直接就位（金额光标不闪烁的规则写在光标的基础规则之后，见下面「金额输入区展示」） */
+    .ft-ring__arc {
+        transition: none;
+    }
+}
+
+/* ------------------------------------------------------------------
+   金额输入区展示（AmountEntry）：「¥」+ 金额 + 闪烁的光标。预算表单与「确认账单」Sheet 共用。
+   金额由自定义数字键盘拼出来，这里只展示；位数多了逐级缩小，13 个字符（99,999,999.99）仍放得进一行
+   ------------------------------------------------------------------ */
+.ft-amountentry {
+    box-sizing: border-box;
+    min-height: 60px;
+    margin: 6px 0 2px;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    overflow: hidden;
+    font: var(--ft-type-amount-entry);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.5px;
+    white-space: nowrap;
+    color: var(--ft-label);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.ft-amountentry[data-size="lg"] {
+    font-size: 34px;
+    line-height: 44px;
+}
+
+.ft-amountentry[data-size="md"] {
+    font-size: 28px;
+    line-height: 38px;
+}
+
+.ft-amountentry[data-empty="true"] .ft-amountentry__num {
+    color: var(--ft-label-2);
+}
+
+.ft-amountentry__sym {
+    font-size: .54em;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.ft-amountentry__caret {
+    flex: none;
+    align-self: center;
+    width: 3px;
+    height: .78em;
+    margin-left: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    animation: ft-caret var(--ft-dur-caret) steps(1, end) infinite;
+}
+
+/* 减弱动态效果：光标常亮不闪烁（必须写在上面的基础规则之后：同优先级时后写的赢；DesignTokensTests 校验所有 reduce 覆盖规则的位置） */
+@media (prefers-reduced-motion: reduce) {
+    .ft-amountentry__caret {
+        animation: none;
+    }
+}
+
+/* ------------------------------------------------------------------
+   待确认账单页（19 号）：自动识别状态、卡片、「确认账单」Sheet、短信识别页
+   这些表面都不用玻璃（backdrop-filter）：整屏的玻璃层只有导航栏的返回钮与「全部忽略」，Sheet 升起时再加它自己的关闭钮。
+   ------------------------------------------------------------------ */
+/* 导航栏里破坏性的文字操作（全部忽略）：玻璃底 + 加深的红字 */
+.ft-btn--glass-danger {
+    color: var(--ft-danger-text);
+}
+
+.ft-pending {
+    display: flex;
+    flex-direction: column;
+}
+
+.ft-pending > :first-child {
+    margin-top: 0;
+}
+
+/* 两项识别都开启：一条细状态条（绿色浅底 + 深绿字），不占地方 */
+.ft-capture {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 2px 6px 2px 16px;
+    border-radius: var(--ft-radius-pill);
+    background: var(--ft-capture-ready-bg);
+    color: var(--ft-capture-ready-text);
+    font: 500 14px/20px var(--ft-font);
+}
+
+.ft-capture__icon {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ft-capture__text {
+    flex: 1;
+    min-width: 0;
+}
+
+.ft-capture__link {
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--ft-hit);
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    background: none;
+    color: inherit;
+    font: 700 14px/20px var(--ft-font);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-capture__link:active {
+    opacity: .6;
+}
+
+.ft-capture__link:focus-visible {
+    outline: 2px solid var(--ft-capture-ready-text);
+    outline-offset: -2px;
+}
+
+/* 权限行：说明文字（授权后的好处）允许折行，行高随内容 */
+.ft-caprow .ft-cell__main {
+    padding: 12px 0;
+}
+
+.ft-caprow .ft-cell__subtitle {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.ft-pending__summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin: var(--ft-space-group) 4px 8px;
+}
+
+.ft-pending__count {
+    font: 700 15px/20px var(--ft-font);
+    color: var(--ft-label);
+}
+
+.ft-pending__note {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    text-align: right;
+}
+
+.ft-pending__list,
+.ft-sms__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 12px;
+}
+
+.ft-pending > .ft-pending__list {
+    margin-top: 12px;
+}
+
+.ft-pending__summary + .ft-pending__list {
+    margin-top: 0;
+}
+
+/* 待确认卡片：来源行 → 主行（分类色块 + 分类 / 备注 + 金额）→ 操作行（账本芯片 + 忽略 + 确认入账） */
+.ft-pcard {
+    position: relative;
+    box-sizing: border-box;
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+    overflow: hidden;
+}
+
+.ft-pcard__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px var(--ft-cell-pad) 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-pcard__source {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ft-label);
+    font-weight: 600;
+}
+
+.ft-pcard__source > i {
+    flex: none;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--ft-brand);
+}
+
+.ft-pcard__sourcetext {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-pcard__time {
+    flex: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 主行沿用单元格；卡片里不画它的分隔线 */
+.ft-pcard .ft-pcard__main::before {
+    display: none;
+}
+
+.ft-pcard__amount {
+    font: var(--ft-type-amount-summary);
+    font-variant-numeric: tabular-nums;
+    color: var(--ft-label);
+    white-space: nowrap;
+}
+
+.ft-pcard__amount[data-long="true"] {
+    font: var(--ft-type-amount-summary-long);
+}
+
+.ft-pcard__amount--income {
+    color: var(--ft-income-text);
+}
+
+.ft-pcard__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 2px var(--ft-cell-pad) 14px;
+}
+
+/* 「忽略」「确认入账」收一点内边距与字号（高度仍是 44 的命中区域）：账本名（常见 4 个字）才放得下，不被挤成「日常…」（设计稿 10） */
+.ft-pcard__foot > .ft-btn {
+    padding: 0 14px;
+    font-size: 15px;
+}
+
+/* 账本芯片：点它换账本；还没有账本时是浅红底的「选择账本」 */
+.ft-pcard__ledger {
+    flex: 1 1 120px;
+    min-width: 0;
+    box-sizing: border-box;
+    height: var(--ft-hit);
+    margin: 0;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--ft-radius-pill);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--ft-fill);
+    color: var(--ft-label);
+    font: var(--ft-type-chip);
+    text-align: left;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.ft-pcard__ledger > i {
+    flex: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--ft-label-2);
+}
+
+.ft-pcard__ledger > i:last-child {
+    margin-left: auto;
+    font-size: 20px;
+}
+
+.ft-pcard__ledgertext {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-pcard__ledger:active {
+    opacity: .7;
+}
+
+.ft-pcard__ledger:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: 2px;
+}
+
+.ft-pcard__ledger:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+.ft-pcard__ledger[data-missing="true"] {
+    background: var(--ft-pcard-missing-bg);
+    color: var(--ft-danger-text);
+}
+
+.ft-pcard__ledger[data-missing="true"] > i {
+    color: inherit;
+}
+
+.ft-pcard--skeleton {
+    display: grid;
+    gap: 14px;
+    padding: 16px var(--ft-cell-pad);
+}
+
+.ft-pcard__sk-main {
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+}
+
+.ft-pcard__sk-foot {
+    height: var(--ft-hit);
+    border-radius: var(--ft-radius-pill);
+}
+
+/* 「确认账单」Sheet：来源与备注原文（只读）→ 提示 → 类型分段 → 金额 → 支付渠道 / 账本两行（沿用记一笔的紧凑单元格） */
+.ft-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ft-confirm__source {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-confirm__note {
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: var(--ft-fill);
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    overflow-wrap: anywhere;
+}
+
+.ft-confirm .ft-confirm__hint,
+.ft-confirm .ft-amountentry,
+.ft-confirm > .ft-group {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* 短信识别页：权限 / 读取范围两组 → 读取结果卡片；主按钮固定在页面底部，内容底部留出它的位置 */
+.ft-sms {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: calc(var(--ft-pagefoot-height) + var(--ft-safe-bottom, 0px));
+}
+
+.ft-sms > :first-child {
+    margin-top: 0;
+}
+
+.ft-sms__header {
+    margin: var(--ft-space-group) 0 8px;
+    padding: 0 20px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-sms > .ft-sms__list {
+    margin-top: var(--ft-space-group);
+}
+
+.ft-sms__header + .ft-sms__list {
+    margin-top: 0;
+}
+
+.ft-sms__idle {
+    margin: 36px 24px 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    text-align: center;
+}
+
+.ft-smscard {
+    box-sizing: border-box;
+    padding: 14px var(--ft-cell-pad);
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-smscard[data-busy="true"] {
+    opacity: .6;
+}
+
+.ft-smscard__body {
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    overflow-wrap: anywhere;
+}
+
+.ft-smscard__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.ft-smscard__meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-smscard--skeleton {
+    display: grid;
+    gap: 12px;
+}
+
+/* 页面底部固定的主操作区（短信识别的「读取短信」）：页面底色渐显，内容从它下面滚过时不会和按钮糊在一起 */
+.ft-pagefoot {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: var(--ft-z-actionbar);
+    box-sizing: border-box;
+    padding: 12px calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) calc(var(--ft-safe-bottom, 0px) + 12px) calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    background: linear-gradient(to top, var(--ft-bg) 70%, rgba(var(--ft-bg-rgb), 0));
+}
+
+/* 窄屏（320pt 这一档）：账本芯片独占一行，「忽略」「确认入账」平分下一行 */
+@media (max-width: 359px) {
+    .ft-pcard__ledger {
+        flex-basis: 100%;
+    }
+
+    .ft-pcard__foot > .ft-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 0 12px;
+    }
+}
+
+/* ------------------------------------------------------------
+   导入账单页（20 号）：来源 → 文件 → 预览 → 账本，后面的步骤在前面完成后才出现；导入完成后换成结果。
+   主按钮固定在页面底部（.ft-pagefoot），内容底部留出它的位置。
+   ------------------------------------------------------------ */
+.ft-import {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: calc(var(--ft-pagefoot-height) + var(--ft-safe-bottom, 0px));
+}
+
+.ft-import > :first-child {
+    margin-top: 0;
+}
+
+/* 「如何导出账单」：点开后在这一行下面展开说明（路径 + 格式提示），右侧箭头随之转向朝下 */
+.ft-import__guide-toggle .ft-cell__chevron {
+    transition: transform var(--ft-dur-press) var(--ft-ease-out);
+}
+
+.ft-import__guide-toggle--open .ft-cell__chevron {
+    transform: rotate(90deg);
+}
+
+.ft-import__guide {
+    position: relative;
+    padding: 12px var(--ft-cell-pad) 14px;
+}
+
+.ft-import__guide-label {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-import__guide-path {
+    margin-top: 2px;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    overflow-wrap: anywhere;
+}
+
+.ft-import__guide-hint {
+    margin-top: 8px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 文件那一组里，文件行下面的「解析中」「解析失败」行：与单元格一样的分隔线（从内容左缘开始） */
+.ft-import__guide::before,
+.ft-import__status::before,
+.ft-import__error::before {
+    content: "";
+    position: absolute;
+    left: var(--ft-cell-pad);
+    right: 0;
+    top: 0;
+    height: 1px;
+    background: var(--ft-separator);
+    transform: scaleY(.5);
+    transform-origin: top;
+    pointer-events: none;
+}
+
+.ft-import__status {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px var(--ft-cell-pad);
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-import__status > i {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--ft-brand);
+}
+
+/* 错误：红色文字在白底上 ≥ 4.5:1（--ft-danger-text）；窄屏时「重试」折到文字下面 */
+.ft-import__error {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 12px var(--ft-cell-pad);
+    font: var(--ft-type-caption);
+    color: var(--ft-danger-text);
+}
+
+.ft-import__error > i {
+    flex: none;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.ft-import__error-text {
+    flex: 1 1 160px;
+    min-width: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.ft-import__error > .ft-btn {
+    flex: none;
+}
+
+/* 导入失败的提示不属于任何一组：自己是一张白卡，放在账本那一组下面 */
+.ft-import__error--card {
+    margin-top: var(--ft-space-group);
+    border-radius: var(--ft-radius-card);
+    background: var(--ft-card);
+}
+
+.ft-import__error--card::before {
+    display: none;
+}
+
+/* 预览：汇总 → 笔数与时间范围 → 账单列表（只列前若干条） */
+.ft-import__kpi {
+    margin-top: 0;
+}
+
+.ft-import__caption {
+    margin: 8px 0 0;
+    padding: 0 20px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-import__caption + .ft-import__caption {
+    margin-top: 2px;
+}
+
+.ft-import__rows {
+    margin-top: 12px;
+}
+
+/* 结果：顶部的状态图标 + 标题不用整屏空状态那么高的留白 */
+.ft-import__result .ft-empty {
+    padding: 24px 32px 4px;
+}
+
+.ft-import__error-item .ft-cell__title {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* 「同步到本机」进行中：图标转圈（减弱动态效果下放慢，仍是「正在同步」的唯一视觉反馈） */
+.ft-import__sync--busy .ft-tile > i {
+    animation: ft-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ft-import__guide-toggle .ft-cell__chevron {
+        transition: none;
+    }
+
+    .ft-import__sync--busy .ft-tile > i {
+        animation-duration: 2.4s;
+    }
+}
+
+/* ------------------------------------------------------------
+   自定义报表页（21 号）：快捷区间 → 报表范围（起止日期 + 账本）→ 结果；主按钮固定在页面底部（.ft-pagefoot），内容底部留出它的位置。
+   结果区：KPI 单卡 → 区间说明 → 分类支出环比 → 分类支出排行 → 支出 / 收入构成 → 导出与分享。
+   ------------------------------------------------------------ */
+.ft-report {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: calc(var(--ft-pagefoot-height) + var(--ft-safe-bottom, 0px));
+}
+
+.ft-report > :first-child {
+    margin-top: 0;
+}
+
+/* 快捷区间：小标题（与分组小标题同一档）+ 一排标签；标签视觉高度 36、命中区域 44，窄屏自动折行 */
+.ft-report__label {
+    margin: 0;
+    padding: 0 20px 2px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 还没生成过报表：居中的一行提示 */
+.ft-report__idle {
+    margin: 36px 24px 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    text-align: center;
+}
+
+/* KPI 卡下面的说明行：区间 · 账本 · 账单数量 */
+.ft-report__caption {
+    margin: 8px 0 0;
+    padding: 0 20px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    overflow-wrap: anywhere;
+}
+
+/* 第一次生成时的骨架：KPI 骨架卡下面再来一块图表骨架 */
+.ft-report__skeleton {
+    margin-top: 12px;
+}
+
+/* 分类环比：副标题（「¥500.00（上期 ¥400.00）」）不省略——上期金额是这一行的要点，窄屏宁可折成两行 */
+.ft-report__compare .ft-cell__subtitle {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* 环比变化：箭头 + 变化率，放在分类行右侧。支出变多是坏事（红）、变少是好事（绿）、持平中性（主文字色，与同比卡一致）；
+   文字色用加深的令牌（白底上 ≥ 4.5:1），颜色之外还有箭头方向和正负号，不靠颜色单独传达 */
+.ft-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font: var(--ft-type-body);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--ft-label);
+}
+
+.ft-delta > i {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.ft-delta--bad {
+    color: var(--ft-danger-text);
+}
+
+.ft-delta--good {
+    color: var(--ft-income-text);
+}
+
+/* ------------------------------------------------------------
+   登录页（22 号，设计稿 screens 12-login）：渐变铺满整屏（含状态栏之下；根节点声明 data-statusbar-bg="dark"，状态栏用白色图标）
+   + 玻璃 Logo + 底部白色圆角面板。整页只有 1 个玻璃层（Logo），圆球是纯渐变（不模糊）。
+   键盘：根节点高度 = 屏幕高度并自己纵向滚动；上方品牌区弹性伸缩、可以被压到 0（超出部分裁掉），面板不收缩——
+   可视高度变小（软键盘弹出）时面板与按钮先保住；极端矮屏（横屏 + 键盘）面板放不下时，整页滚动，浏览器会把聚焦的输入框滚进可视区。
+   真机上软键盘的实际表现属于 WebView 行为，列在 22 号 ticket 的「待人工验收」里。
+   注意：MASA 有 .m-application p { margin-bottom: 16px }（0,1,1），文件开头已经把它全局归零；这里的 <p> 仍写成 p.类名（同权重、后加载者胜），
+   这样不依赖那条重置、也能保住 p.ft-login__error 的下外边距。
+   ------------------------------------------------------------ */
+.ft-login {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: 100%;
+    height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--ft-hero-gradient);
+    color: #fff;
+}
+
+.ft-login__hero {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: calc(var(--ft-safe-top, 0px) + 24px) calc(var(--ft-space-page) + var(--ft-safe-right, 0px)) 24px calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+}
+
+/* 背景圆球：半透明的浅色渐变圆（装饰；不模糊，不占玻璃层预算）。位置、大小按设计稿 12 取值，窄屏被裁掉一部分也无妨 */
+.ft-login__orb {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+.ft-login__orb--a {
+    left: -14%;
+    top: 90px;
+    width: 206px;
+    height: 206px;
+    background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, .26), rgba(255, 255, 255, .06) 72%);
+}
+
+.ft-login__orb--b {
+    right: -9%;
+    top: 245px;
+    width: 125px;
+    height: 125px;
+    background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, .24), rgba(255, 255, 255, .05) 74%);
+}
+
+.ft-login__orb--c {
+    left: 15%;
+    top: 396px;
+    width: 70px;
+    height: 70px;
+    background: radial-gradient(circle at 32% 26%, rgba(255, 255, 255, .24), rgba(255, 255, 255, .06) 74%);
+}
+
+/* 品牌区：auto 外边距把它放在弹性空间的正中；空间不够时外边距归零，从顶部开始排（裁掉的是底部而不是顶部） */
+.ft-login__brand {
+    position: relative;
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.ft-login__logo {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: 96px;
+    height: 96px;
+    border-radius: 30px;
+    font-size: 50px;
+    color: #fff;
+}
+
+.ft-login__logo > i {
+    line-height: 1;
+}
+
+.ft-login .ft-login__name {
+    margin: 22px 0 0;
+    font: 800 38px/46px var(--ft-font);
+    letter-spacing: 1px;
+}
+
+p.ft-login__slogan {
+    margin: 6px 0 0;
+    font: var(--ft-type-body);
+    color: rgba(255, 255, 255, .9);
+}
+
+/* 白色面板：贴底，顶部大圆角；底部留白放得下设计稿里的「用户协议」行的位置，并让出底部安全区 */
+.ft-login__panel {
+    position: relative;
+    flex: none;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 28px calc(24px + var(--ft-safe-right, 0px)) calc(48px + var(--ft-safe-bottom, 0px)) calc(24px + var(--ft-safe-left, 0px));
+    border-radius: var(--ft-radius-sheet) var(--ft-radius-sheet) 0 0;
+    background: var(--ft-card);
+    color: var(--ft-label);
+    box-shadow: 0 -10px 30px rgba(20, 0, 100, .16);
+}
+
+.ft-login .ft-login__title {
+    margin: 0;
+    font: var(--ft-type-section);
+    color: var(--ft-label);
+}
+
+p.ft-login__hint {
+    margin: 4px 0 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+/* 手机号输入：灰色填充的圆角输入条（国家区号 + 分隔线 + 输入）；整条都是点击区域，聚焦 / 出错时描边 */
+.ft-login__field {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    height: var(--ft-cell-height);
+    margin: 20px 0 0;
+    padding: 0 var(--ft-cell-pad);
+    border-radius: var(--ft-radius-input);
+    background: var(--ft-fill);
+    box-shadow: inset 0 0 0 2px transparent;
+    transition: box-shadow var(--ft-dur-fade) var(--ft-ease-out);
+}
+
+.ft-login__field:focus-within {
+    box-shadow: inset 0 0 0 2px rgba(var(--ft-brand-rgb), .55);
+}
+
+.ft-login__field--error,
+.ft-login__field--error:focus-within {
+    box-shadow: inset 0 0 0 2px var(--ft-danger-text);
+}
+
+.ft-login__country {
+    flex: none;
+    padding-right: var(--ft-cell-gap);
+    margin-right: var(--ft-cell-gap);
+    border-right: 1px solid var(--ft-separator);
+    font: 700 18px/24px var(--ft-font);
+    color: var(--ft-label);
+}
+
+/* 字号 ≥ 16px：iOS 聚焦时不会放大页面 */
+.ft-login__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font: 600 18px/24px var(--ft-font);
+    letter-spacing: .5px;
+    color: var(--ft-label);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.ft-login__input::placeholder {
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--ft-label-2);
+}
+
+/* 校验提示：没有提示时也占着一行的高度——输入框失焦（先于点按钮发生）时按钮不能被顶下去 */
+p.ft-login__error {
+    min-height: 18px;
+    margin: 8px 4px 16px;
+    font: var(--ft-type-caption);
+    color: var(--ft-danger-text);
+}
+
+/* ------------------------------------------------------------
+   错误日志页（22 号，设计稿 05 · 二级页面）：概览三栏 → 级别分布 → 搜索 → 条件条 → 按天分组的日志列表 → 加载更多；
+   详情是半屏 Sheet。页面自己的表面都是白色卡片，不用玻璃（整页的玻璃层只来自导航栏的圆钮与 Sheet 自己的关闭钮）。
+   ------------------------------------------------------------ */
+/* 概览三栏均分（汇总卡默认是 1.2 : 1.2 : 0.8，那是给「支出 / 收入 / 笔数」用的） */
+.ft-summary--even {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 按级别分布：小圆点 + 级别 + 条数，一行排不下就折行 */
+ul.ft-logs__levels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 12px 4px 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ft-logs__level {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-logs__level > b {
+    font-weight: 700;
+    color: var(--ft-label);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-logs__dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ft-gray);
+}
+
+.ft-logs__dot--purple { background: var(--ft-indigo); }
+.ft-logs__dot--red { background: var(--ft-red); }
+.ft-logs__dot--orange { background: var(--ft-orange); }
+.ft-logs__dot--blue { background: var(--ft-blue); }
+.ft-logs__dot--green { background: var(--ft-green); }
+
+p.ft-logs__range {
+    margin: 6px 4px 0;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-logs__search {
+    margin-top: 14px;
+}
+
+.ft-logs__chips {
+    margin-bottom: 2px;
+}
+
+/* 列表底部的进度（「已显示 20 / 共 85 条」）与加载更多 */
+p.ft-logs__foot {
+    margin: 14px 4px 0;
+    text-align: center;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-logs__more {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+/* 详情 Sheet：头部（级别图标块 + 级别 + 完整时间）→ 消息 → 来源 / 异常类型 → 完整异常信息 → 上下文 */
+.ft-logdetail__head {
+    display: flex;
+    align-items: center;
+    gap: var(--ft-cell-gap);
+    padding: 0 4px 6px;
+}
+
+.ft-logdetail__titles {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ft-logdetail__level {
+    font: var(--ft-type-section);
+    color: var(--ft-label);
+}
+
+.ft-logdetail__time {
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+    font-variant-numeric: tabular-nums;
+}
+
+.ft-logdetail__text {
+    padding: 12px var(--ft-cell-pad);
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ft-logdetail__row {
+    box-sizing: border-box;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--ft-cell-gap);
+    min-height: var(--ft-hit);
+    padding: 10px var(--ft-cell-pad);
+}
+
+.ft-logdetail__label {
+    flex: none;
+    max-width: 44%;
+    font: var(--ft-type-body);
+    color: var(--ft-label);
+    overflow-wrap: anywhere;
+}
+
+.ft-logdetail__value {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    font: var(--ft-type-body);
+    color: var(--ft-label-2);
+    overflow-wrap: anywhere;
+}
+
+/* 完整异常信息：等宽字体、保留换行，超过一屏时自己滚动（Sheet 的内容区仍可滚动，这里不抢它的手势：只在内容真的超出时才有滚动条） */
+.ft-logdetail__pre {
+    box-sizing: border-box;
+    max-height: 40vh;
+    margin: 0;
+    padding: 12px var(--ft-cell-pad);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    font: 12px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    color: var(--ft-label);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    /* 堆栈是给人复制去排查问题的：豁免 app.css 里全局的「禁止长按选择」（与渲染异常页的详情一致） */
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+
+.ft-logdetail__pre:focus-visible {
+    outline: 2px solid var(--ft-brand);
+    outline-offset: -2px;
+}
+
+/* ============================================================
+   兜底页面（24 号）：「页面未找到」与「组件渲染发生异常」（Main.razor）
+   两者都渲染在页面栈与 Tab 栏之外，是整屏的一层（position: fixed 四边贴齐，不写高度）：
+   · 「页面未找到」套 AuthLayout（拿到应用壳的字体与底色，宽屏上同样收在手机宽度里），内容是通用空状态 + 回首页；
+   · 「渲染异常」连布局都没有（出错的可能就是布局本身），所以自带字体与底色，不依赖 MASA；错误详情允许长按复制。
+   只引用令牌。
+   ============================================================ */
+.ft-fallback,
+.ft-fatal {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    box-sizing: border-box;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--ft-bg);
+}
+
+.ft-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--ft-safe-top, 0px) var(--ft-safe-right, 0px) var(--ft-safe-bottom, 0px) var(--ft-safe-left, 0px);
+}
+
+.ft-fatal {
+    padding: calc(var(--ft-space-page) + var(--ft-safe-top, 0px)) calc(var(--ft-space-page) + var(--ft-safe-right, 0px))
+        calc(var(--ft-space-page) + var(--ft-safe-bottom, 0px)) calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    font-family: var(--ft-font);
+    color: var(--ft-label);
+}
+
+.ft-fatal__title {
+    margin: 0 0 var(--ft-space-section-bottom);
+    font: var(--ft-type-section);
+    color: var(--ft-danger-text);
+}
+
+.ft-fatal__detail {
+    margin: 0;
+    padding: 14px;
+    font: 12px/17px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    color: var(--ft-label);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: var(--ft-card);
+    border-radius: var(--ft-radius-input);
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+
+/* ============================================================
+   动效降级的兜底（23 号）：MASA 组件自带的 0.2–0.3 s 过渡
+   （页面栈顶栏的滑动、对话框的缩放淡入、Toast 的警示图标、图标变色 / 旋转）。
+   我们自己的组件时长取自 --ft-dur-* 令牌（tokens.css 的「动效降级」一处压成 --ft-dur-reduced）；MASA 的时长写死在它自己的样式里，
+   这里按类名前缀统一压到同一个时长：
+   · 只压 transition：MASA 的循环动画（转圈、骨架）是状态指示，压成 100 ms 一圈反而成了频闪，它们的放慢 / 放行见各页 reduce 规则与 E2E 白名单；
+   · 要用 !important：MASA 自己用 `.m-icon.m-icon` 这种叠类名的写法抬高了优先级（图标 0.3 s、::after 0.2 s），普通规则压不过；
+     连我们给 MASA 组件加了自己类名的元素（二级页面的顶栏 header.m-toolbar.ft-…）也一并压到 100 ms；
+   · 不压成 0：MASA 的显隐靠 transitionend 摘除节点，时长为 0 时这个事件可能不再触发。
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+    [class^="m-"],
+    [class*=" m-"],
+    [class^="m-"]::before,
+    [class^="m-"]::after,
+    [class*=" m-"]::before,
+    [class*=" m-"]::after {
+        transition-duration: var(--ft-dur-reduced) !important;
+    }
+}

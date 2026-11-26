@@ -1,9 +1,10 @@
 @namespace FinanceTracker.Web.Components.Charts
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Design
 
 @if (_option != null)
 {
-    <MECharts Option="_option" Height="240" />
+    <EChartsView Option="_option" Height="240" />
 }
 
 @code {
@@ -88,7 +89,7 @@
                 itemWidth = 10,
                 itemHeight = 60,
                 textStyle = new { fontSize = 10 },
-                inRange = new { color = new[] { "#E3F2FD", "#FFB74D", "#E53935" } }
+                inRange = new { color = new[] { DesignTokens.BrandTintColor, DesignTokens.WarningColor, DesignTokens.ExpenseColor } }
             },
             calendar = new
             {
@@ -97,7 +98,7 @@
                 right = 8,
                 cellSize = new object[] { "auto", 16 },
                 range = new[] { rangeStart.ToString("yyyy-MM-dd"), rangeEnd.ToString("yyyy-MM-dd") },
-                itemStyle = new { color = "#FAFAFA", borderColor = "#E0E0E0", borderWidth = 1 },
+                itemStyle = new { color = DesignTokens.ChartEmptyCellColor, borderColor = DesignTokens.ChartEmptyCellBorderColor, borderWidth = 1 },
                 yearLabel = new { show = false },
                 monthLabel = new { show = false },
                 dayLabel = new { firstDay = 1, nameMap = new[] { "日", "一", "二", "三", "四", "五", "六" }, fontSize = 10 }

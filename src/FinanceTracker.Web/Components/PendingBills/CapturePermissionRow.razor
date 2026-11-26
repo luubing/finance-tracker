@@ -1,0 +1,67 @@
+@namespace FinanceTracker.Web.Components.PendingBills
+
+@*
+    自动识别的权限行（待确认账单页的状态区与短信识别页的权限分组共用）：图标块 + 名称 + 说明；
+    已开启：绿色对勾图标块 + 「已开启」徽标；未开启：橙色图标块 + 说明（授权后的好处）+ 右侧「去开启 / 去授权」主操作。
+    - 本组件只展示状态、把「去开启」交给调用方：权限怎么申请、授予后怎么刷新都由页面负责（页面持有权限服务）。
+    - 读屏：整行是一个 group，名称读成「通知栏识别，未开启」；操作按钮的名称带上是哪一项。
+    - 观察属性（E2E）：行 data-testid（调用方给）、data-on（true / false）；已开启徽标 {TestId}-state；操作按钮 ActionTestId。
+*@
+<ListCell Icon="@(Enabled ? "mdi-check" : IconOff)"
+          Tone="@(Enabled ? "green" : "orange")"
+          Title="@Title"
+          Subtitle="@(Enabled ? EnabledSubtitle : Subtitle)"
+          Class="ft-caprow"
+          TestId="@TestId"
+          role="group"
+          aria-label="@PendingBillPresentation.PermissionAriaLabel(Title, Enabled)"
+          data-on="@(Enabled ? "true" : "false")">
+    <Trailing>
+        @if (Enabled)
+        {
+            <span class="ft-badge ft-badge--success" data-testid="@($"{TestId}-state")">@PendingBillPresentation.EnabledText</span>
+        }
+        else
+        {
+            <GlassButton Kind="ButtonKind.Soft"
+                         Busy="Busy"
+                         TestId="@ActionTestId"
+                         AriaLabel="@($"{ActionLabel}：{Title}")"
+                         OnClick="ActionAsync">@ActionLabel</GlassButton>
+        }
+    </Trailing>
+</ListCell>
+
+@code {
+    /// <summary>名称：通知栏识别 / 短信识别</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+
+    /// <summary>是否已开启（权限已授予）</summary>
+    [Parameter] public bool Enabled { get; set; }
+
+    /// <summary>未开启时的说明（授权后的好处）</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>已开启时的副标题；不给就只显示徽标</summary>
+    [Parameter] public string? EnabledSubtitle { get; set; }
+
+    /// <summary>未开启时图标块里的图标</summary>
+    [Parameter] public string IconOff { get; set; } = "mdi-bell-off-outline";
+
+    /// <summary>未开启时的操作文字：「去开启」「去授权」</summary>
+    [Parameter] public string ActionLabel { get; set; } = PendingBillPresentation.EnableLabel;
+
+    /// <summary>操作进行中（正在申请权限）：按钮禁用</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>点「去开启」</summary>
+    [Parameter] public EventCallback OnAction { get; set; }
+
+    /// <summary>行的 E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    /// <summary>操作按钮的 E2E 钩子</summary>
+    [Parameter] public string? ActionTestId { get; set; }
+
+    private Task ActionAsync() => OnAction.InvokeAsync();
+}

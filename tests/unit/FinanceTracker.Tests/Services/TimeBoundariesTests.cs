@@ -45,6 +45,26 @@ public sealed class TimeBoundariesTests
         Assert.Equal(new DateTime(nextYear, nextMonth, 1).AddTicks(-1), end);
     }
 
+    [Theory]
+    [InlineData("2026-11-23", "2026-11-23")]  // 周一就是一周的第一天
+    [InlineData("2026-11-25", "2026-11-23")]  // 周三
+    [InlineData("2026-11-29", "2026-11-23")]  // 周日属于这一周的末尾，不是下一周的开头
+    [InlineData("2026-11-30", "2026-11-30")]  // 下一个周一
+    [InlineData("2026-01-01", "2025-12-29")]  // 周四，一周的起点在上一年
+    public void 一周从周一开始_周日是这一周的最后一天(string day, string expectedMonday)
+    {
+        var start = TimeBoundaries.StartOfWeek(DateTime.Parse(day, System.Globalization.CultureInfo.InvariantCulture));
+
+        Assert.Equal(DateTime.Parse(expectedMonday, System.Globalization.CultureInfo.InvariantCulture), start);
+        Assert.Equal(DayOfWeek.Monday, start.DayOfWeek);
+    }
+
+    [Fact]
+    public void 一周的起点忽略传入的时分秒()
+    {
+        Assert.Equal(new DateTime(2026, 11, 23), TimeBoundaries.StartOfWeek(new DateTime(2026, 11, 26, 18, 30, 5)));
+    }
+
     [Fact]
     public void 结束时刻之前最后一个tick属于本期_之后第一个tick不属于()
     {

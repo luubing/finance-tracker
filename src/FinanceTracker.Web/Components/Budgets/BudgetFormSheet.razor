@@ -1,0 +1,297 @@
+@namespace FinanceTracker.Web.Components.Budgets
+@inject IBudgetService BudgetService
+@inject PageDataGate DataGate
+@inject IPopupService PopupService
+
+@*
+    新建 / 编辑预算的底部 Sheet（设计稿 05 · 半屏 Sheet）：
+      顶部「总预算 | 分类预算」分段 → 金额（自定义数字键盘输入，不唤起系统键盘）→ 月份 → 账本 → （分类预算）分类 → （编辑）删除。
+    固定在底部的是数字键盘，右侧高大的「保存」键就是保存按钮（与「记一笔」同一套键盘）。
+    - 预算规则不变：总预算 = 不选分类，分类预算 = 选一个支出分类；账本不选 = 全部账本；同一年月、同一账本范围、同一分类只能有一条
+      （重复由服务层校验，提示「该月份已存在相同的预算，请直接编辑」显示在表单里，Sheet 保持打开，改一下再保存）。
+    - 校验提示分两类：表单内提示（缺金额 / 缺分类 / 重复 / 金额不合法这类用户能立刻改的）与 Toast（保存失败这类意外错误，文案沿用旧页面「操作失败: …」）。
+    - 表单只在 Sheet 由隐藏变为显示的那一刻按 Target 初始化；之后页面重绘（例如编辑中列表刷新了）不会冲掉用户正在输入的内容。
+    - 保存成功后收起 Sheet，并把保存下来的预算交给页面（OnSaved）：页面据此切到该预算所在的月份与账本，用户一定看得到刚保存的预算。
+    - 编辑模式下「删除预算」行是左滑「删除」的非滑动等价入口；真正的确认 Alert 在页面里（OnDelete 把要删的预算交给页面）。
+    - 观察属性（E2E）：budget-sheet、budget-scope（分段）、budget-amount（data-value / data-empty / data-size）、
+      budget-form-period（月份切换器，-prev / -next / -label）、budget-form-ledger-any / budget-form-ledger-chip、budget-form-category-chip（data-id / data-selected）、
+      budget-delete-cell、budget-form-error、budget-save（键盘的保存键）。
+*@
+<BottomSheet Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             OnClosed="HandleClosedAsync"
+             Title="@BudgetFormPresentation.Title(IsEditing)"
+             Dismissible="@(!_saving)"
+             TestId="budget-sheet">
+    <ChildContent>
+        <div class="ft-budgetform"
+             data-testid="budget-form"
+             data-mode="@(IsEditing ? "edit" : "create")"
+             data-scope="@BudgetFormPresentation.ScopeOf(_isCategory)">
+            <SegmentedControl Options="ScopeOptions"
+                              Value="@BudgetFormPresentation.ScopeOf(_isCategory)"
+                              ValueChanged="OnScopeChanged"
+                              AriaLabel="预算类型"
+                              TestId="budget-scope" />
+
+            @* 金额：键盘一个个键拼出来；读屏读「预算金额 …」，圆点光标只是装饰 *@
+            <AmountEntry Value="@_amount" SpokenLabel="预算金额" TestId="budget-amount" />
+
+            <GroupedList TestId="budget-form-rows">
+                <div class="ft-field ft-budgetform__period">
+                    <span class="ft-field__label">月份</span>
+                    <PeriodSwitcher Label="@StatisticsPresentation.MonthLabel(_year, _month)"
+                                    PreviousLabel="@StatisticsPresentation.PreviousMonthLabel(_year, _month)"
+                                    NextLabel="@StatisticsPresentation.NextMonthLabel(_year, _month)"
+                                    CanPrevious="@StatisticsPresentation.CanShiftMonth(_year, _month, -1)"
+                                    CanNext="@StatisticsPresentation.CanShiftMonth(_year, _month, 1)"
+                                    OnPrevious="PreviousMonth"
+                                    OnNext="NextMonth"
+                                    AriaLabel="预算月份"
+                                    Class="ft-period--flat"
+                                    TestId="budget-form-period" />
+                </div>
+            </GroupedList>
+
+            @if (Ledgers.Count > 0)
+            {
+                <section class="ft-filtersec" aria-labelledby="@_ledgerTitleId" data-testid="budget-form-ledger">
+                    <h3 class="ft-filtersec__title" id="@_ledgerTitleId">账本</h3>
+                    <div class="ft-chips" role="group" aria-labelledby="@_ledgerTitleId">
+                        <ChoiceChip Label="@BudgetFormPresentation.AllLedgersText"
+                                    Selected="@(_ledgerId is null)"
+                                    TestId="budget-form-ledger-any"
+                                    OnClick="() => ChooseLedger(null)" />
+                        @foreach (var ledger in Ledgers)
+                        {
+                            var current = ledger;
+                            <ChoiceChip @key="current.Id"
+                                        Label="@current.Name"
+                                        Icon="@LedgerPresentation.NormalizeIcon(current.Icon)"
+                                        Selected="@(_ledgerId == current.Id)"
+                                        TestId="budget-form-ledger-chip"
+                                        data-id="@current.Id"
+                                        OnClick="() => ChooseLedger(current.Id)" />
+                        }
+                    </div>
+                </section>
+            }
+
+            @if (_isCategory)
+            {
+                <section class="ft-filtersec" aria-labelledby="@_categoryTitleId" data-testid="budget-form-category">
+                    <h3 class="ft-filtersec__title" id="@_categoryTitleId">分类</h3>
+                    <div class="ft-chips" role="group" aria-labelledby="@_categoryTitleId">
+                        @foreach (var category in Categories)
+                        {
+                            var current = category;
+                            <ChoiceChip @key="current.Id"
+                                        Label="@current.Name"
+                                        Icon="@BillPresentation.CategoryIcon(current.Icon)"
+                                        Tone="@BillPresentation.CategoryTone(current.Name, current.Id)"
+                                        Selected="@(_categoryId == current.Id)"
+                                        TestId="budget-form-category-chip"
+                                        data-id="@current.Id"
+                                        OnClick="() => ChooseCategory(current.Id)" />
+                        }
+                    </div>
+                    @if (Categories.Count == 0)
+                    {
+                        <div class="ft-filtersec__empty" role="status" data-testid="budget-form-category-empty">暂无支出分类</div>
+                    }
+                </section>
+            }
+
+            @if (IsEditing)
+            {
+                @* 左滑「删除」的非滑动等价入口 *@
+                <GroupedList>
+                    <ListCell Title="删除预算" Destructive TestId="budget-delete-cell" OnClick="RequestDeleteAsync" />
+                </GroupedList>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="ft-form-error" role="alert" data-testid="budget-form-error">@_error</div>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <AmountKeypad OnKey="OnKey"
+                      OnSave="SaveAsync"
+                      SaveEnabled="CanSave"
+                      Busy="_saving"
+                      SaveTestId="budget-save" />
+    </Footer>
+</BottomSheet>
+
+@code {
+    private static readonly IReadOnlyList<SegmentOption> ScopeOptions =
+        BudgetFormPresentation.Scopes.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
+
+    private readonly string _ledgerTitleId = $"ft-budget-ledger-{Guid.NewGuid():N}";
+    private readonly string _categoryTitleId = $"ft-budget-category-{Guid.NewGuid():N}";
+
+    private int _year;
+    private int _month;
+    private string _amount = string.Empty;
+    private Guid? _ledgerId;
+    private Guid? _categoryId;
+    private bool _isCategory;
+    private string? _error;
+    private bool _saving;
+    private bool _wasVisible;
+
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>当前登录用户（预算的所有者）</summary>
+    [Parameter, EditorRequired] public Guid UserId { get; set; }
+
+    /// <summary>表单的初始值：有 Id 是编辑，没有是新建（年月 / 账本 / 默认分段由页面按当前筛选给出）。打开 Sheet 时读取</summary>
+    [Parameter] public BudgetFormTarget? Target { get; set; }
+
+    /// <summary>账本选项（用户自己的账本）；空则不显示账本一栏，预算归「全部账本」</summary>
+    [Parameter] public IReadOnlyList<LedgerModel> Ledgers { get; set; } = Array.Empty<LedgerModel>();
+
+    /// <summary>可设预算的分类（支出分类）</summary>
+    [Parameter] public IReadOnlyList<Category> Categories { get; set; } = Array.Empty<Category>();
+
+    /// <summary>保存成功（新建或更新）后触发，参数是保存后的预算；此时 Sheet 已被要求收起</summary>
+    [Parameter] public EventCallback<Budget> OnSaved { get; set; }
+
+    /// <summary>点「删除预算」：把要删的预算交给页面确认（Alert 在页面里）</summary>
+    [Parameter] public EventCallback<BudgetFormTarget> OnDelete { get; set; }
+
+    /// <summary>Sheet 退出动画结束、卸载之后触发（页面在这里清理「正在编辑」的状态）</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private bool IsEditing => Target?.IsEditing == true;
+
+    private bool CanSave => BudgetFormPresentation.Validate(AmountInput.Parse(_amount), _isCategory, _categoryId) is null;
+
+    protected override void OnParametersSet()
+    {
+        // 只在「从隐藏变为显示」的那一刻按 Target 初始化表单；之后页面重绘不能冲掉用户正在输入的内容
+        if (Visible && !_wasVisible && Target is { } target)
+        {
+            _year = target.Year;
+            _month = target.Month;
+            _amount = target.Amount is { } amount ? AmountInput.FromDecimal(amount) : string.Empty;
+            _ledgerId = target.LedgerId;
+            _categoryId = target.CategoryId;
+            _isCategory = target.IsCategory;
+            _error = null;
+            _saving = false;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void OnScopeChanged(string scope)
+    {
+        _isCategory = scope == BudgetFormPresentation.ScopeCategory;
+        _error = null;
+    }
+
+    private void OnKey(string key)
+    {
+        _amount = AmountInput.Apply(_amount, key);
+        _error = null;
+    }
+
+    private void PreviousMonth()
+    {
+        (_year, _month) = StatisticsPresentation.ShiftMonth(_year, _month, -1);
+        _error = null;
+    }
+
+    private void NextMonth()
+    {
+        (_year, _month) = StatisticsPresentation.ShiftMonth(_year, _month, 1);
+        _error = null;
+    }
+
+    private void ChooseLedger(Guid? ledgerId)
+    {
+        _ledgerId = ledgerId;
+        _error = null;
+    }
+
+    private void ChooseCategory(Guid categoryId)
+    {
+        _categoryId = categoryId;
+        _error = null;
+    }
+
+    private async Task RequestDeleteAsync()
+    {
+        if (Target is { IsEditing: true } target && !_saving)
+        {
+            await OnDelete.InvokeAsync(target);
+        }
+    }
+
+    private async Task HandleClosedAsync()
+    {
+        _error = null;
+        _saving = false;
+        await OnClosed.InvokeAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving || Target is not { } target)
+        {
+            return;
+        }
+
+        // 条件没凑齐时保存键是置灰的，但仍可点：点了就告诉用户缺什么
+        var amount = AmountInput.Parse(_amount);
+        _error = BudgetFormPresentation.Validate(amount, _isCategory, _categoryId);
+        if (_error is not null)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            var budget = new Budget
+            {
+                Id = target.Id ?? Guid.Empty,
+                UserId = UserId,
+                Year = _year,
+                Month = _month,
+                Amount = amount!.Value,
+                LedgerId = _ledgerId,
+                CategoryId = _isCategory ? _categoryId : null,
+            };
+
+            // 写库也排进读库的单车道：常驻的 Tab 根页面可能正在刷新，同一个 DbContext 不允许并行操作
+            var saved = await DataGate.RunAsync(() => target.IsEditing
+                ? BudgetService.UpdateBudgetAsync(budget)
+                : BudgetService.CreateBudgetAsync(budget));
+
+            await PopupService.EnqueueSnackbarAsync(BudgetFormPresentation.SavedMessage(target.IsEditing), AlertTypes.Success);
+
+            await VisibleChanged.InvokeAsync(false);
+            await OnSaved.InvokeAsync(saved);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            // 服务层的业务校验（重复预算、金额 / 年月不合法、预算已不存在）：文案本身就是面向用户的，留在表单里让用户改
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

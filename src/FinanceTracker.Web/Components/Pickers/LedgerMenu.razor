@@ -1,0 +1,67 @@
+@namespace FinanceTracker.Web.Components.Pickers
+
+@*
+    账本菜单（设计稿 04 · 账本必选）：从「账本」行弹出的账本列表——自己的账本，加上有写权限的共享账本（带「共享」徽标），
+    末项「新建账本…」（调用方给了 OnCreate 才显示）。选中的账本右侧有对勾。
+    - 这是共用的账本选择器：「记一笔」用它，待确认账单与导入也用它（取代 MASA 下拉的 LedgerSelect）。
+    - 只负责展示与回报「选了哪个 / 要新建」：账本列表怎么读、共享账本的写权限怎么判断都由调用方负责，
+      保存前的账本必填与写权限校验仍由服务层统一把关。
+    - 观察属性（E2E）：菜单 data-testid（默认 ledger-menu）；每个账本 ledger-option（data-value = 账本 Id、data-selected）；
+      新建 ledger-option-new。
+*@
+<PopoverMenu Visible="Visible"
+             VisibleChanged="VisibleChanged"
+             Anchor="Anchor"
+             AriaLabel="选择账本"
+             TestId="@TestId">
+    @foreach (var ledger in Ledgers)
+    {
+        var current = ledger;
+        <PopoverMenuItem Icon="@LedgerPresentation.NormalizeIcon(current.Icon)"
+                         Label="@current.Name"
+                         Value="@current.Id.ToString()"
+                         Selected="@(current.Id == SelectedId)"
+                         TestId="ledger-option"
+                         OnClick="() => OnSelect.InvokeAsync(current.Id)">
+            <Trailing>
+                @if (current.IsShared)
+                {
+                    <span class="ft-badge ft-badge--brand" data-testid="ledger-option-shared">共享</span>
+                }
+            </Trailing>
+        </PopoverMenuItem>
+    }
+    @if (OnCreate.HasDelegate)
+    {
+        <PopoverMenuItem Icon="mdi-plus-circle-outline"
+                         Label="新建账本…"
+                         Accent
+                         TestId="ledger-option-new"
+                         OnClick="OnCreate" />
+    }
+</PopoverMenu>
+
+@code {
+    /// <summary>是否显示</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+
+    /// <summary>触发行：菜单相对它定位</summary>
+    [Parameter] public ElementReference? Anchor { get; set; }
+
+    /// <summary>可选的账本（自己的账本 + 有写权限的共享账本）</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<LedgerModel> Ledgers { get; set; } = [];
+
+    /// <summary>当前选中的账本</summary>
+    [Parameter] public Guid? SelectedId { get; set; }
+
+    /// <summary>选了某个账本</summary>
+    [Parameter] public EventCallback<Guid> OnSelect { get; set; }
+
+    /// <summary>点了「新建账本…」；不给就不显示这一项</summary>
+    [Parameter] public EventCallback OnCreate { get; set; }
+
+    /// <summary>E2E 钩子：菜单的 data-testid</summary>
+    [Parameter] public string? TestId { get; set; } = "ledger-menu";
+}

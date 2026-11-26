@@ -1,200 +1,371 @@
 @page "/payment-channels"
-@using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Core.Entities
 @inject IPaymentChannelService PaymentChannelService
 @inject IUserDefaultService UserDefaultService
+@inject IBillService BillService
 @inject AuthenticationService AuthStateService
-@inject NavigationManager Navigation
+@inject PageDataGate DataGate
 @inject IPopupService PopupService
+@inject ILogger<PaymentChannels> Logger
 
-<PStackPageBar Title="支付渠道"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    支付渠道管理（二级页面模板，设计稿 05「分类与支付渠道同构」）：
+      · 「自定义」组：左滑出现「编辑」「删除」；点按整行进入编辑 Sheet（含设为默认、删除——左滑操作的非滑动等价入口）；
+        右侧是该渠道下的账单数；末尾「新建支付渠道」行
+      · 「预设渠道」组：只读（不能改名、不能删除），右侧标注「预设」；点按弹出菜单，可设为 / 取消默认
+      · 「默认」徽标：只有一个默认支付渠道，设置沿用「用户默认值」服务，记一笔默认选中它（取代旧页面行内的星标按钮）
+    右上角「＋」与「新建支付渠道」行都打开底部 Sheet（表单是通用的 NameIconFormSheet，与分类共用）；
+    删除用 Alert 确认（软删除；渠道下还有账单时服务层拦截，这里给出提示）；提示走全局 Toast。
+    读库经过 PageDataGate 与常驻的 Tab 根页面排队（它们共用一个 DbContext）。
+    服务层校验与权限语义不变：本页只调用既有服务，不绕过任何校验。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <MRow>
-        <MCol Cols="12">
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-credit-card-multiple</MIcon>
-                    支付渠道管理
-                    <MSpacer />
-                    <MButton Color="primary" OnClick="ShowCreateDialog">
-                        <MIcon Class="mr-2">mdi-plus</MIcon>
-                        添加渠道
-                    </MButton>
-                </MCardTitle>
-
-                <MCardText>
-                    <MList>
-                        @foreach (var channel in _channels)
-                        {
-                            <MListItem>
-                                <MListItemIcon>
-                                    <MIcon>@channel.Icon</MIcon>
-                                </MListItemIcon>
-                                <MListItemContent>
-                                    <MListItemTitle>@channel.Name</MListItemTitle>
-                                </MListItemContent>
-                                <MListItemAction Class="d-flex align-center">
-                                    <MButton Icon OnClick="() => SetDefaultChannel(channel)">
-                                        <MIcon Color="@(channel.IsDefault ? "warning" : "default")">mdi-star</MIcon>
-                                    </MButton>
-                                    @if (!channel.IsPreset)
+<SecondaryPage Title="支付渠道" TestId="payment-channels-page">
+    <Actions>
+        <GlassButton Kind="ButtonKind.Brand" Round Icon="mdi-plus" AriaLabel="新建支付渠道" TestId="channel-add" OnClick="OpenCreate" />
+    </Actions>
+    <ChildContent>
+        @if (_isLoading)
+        {
+            <GroupedList Header="自定义" TestId="channels-skeleton">
+                @for (var i = 0; i < 3; i++)
+                {
+                    <div class="ft-skeleton-row" aria-hidden="true">
+                        <span class="ft-skeleton ft-skeleton--tile"></span>
+                        <span class="ft-skeleton-row__main">
+                            <span class="ft-skeleton ft-skeleton--title"></span>
+                        </span>
+                    </div>
+                }
+            </GroupedList>
+        }
+        else if (_loadFailed)
+        {
+            <EmptyState Icon="mdi-cloud-alert-outline" Title="支付渠道加载失败" Text="稍后重试一下" TestId="channels-error">
+                <Action>
+                    <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-refresh" TestId="channels-retry" OnClick="RetryAsync">重试</GlassButton>
+                </Action>
+            </EmptyState>
+        }
+        else
+        {
+            @* 自定义支付渠道：始终有「新建支付渠道」行，没有自定义渠道时它就是这一组的全部内容 *@
+            <GroupedList Header="自定义"
+                         Footer="@(CustomRows.Count > 0 ? "左滑渠道可编辑或删除，点按进入编辑、设为默认。" : null)"
+                         TestId="custom-channels">
+                @foreach (var channel in CustomRows)
+                {
+                    <SwipeRow @key="channel.Id" TestId="channel-row" data-channel-id="@channel.Id.ToString()">
+                        <Actions>
+                            <SwipeAction Icon="mdi-pencil" Label="编辑" Tone="ActionTone.Brand" TestId="swipe-edit" OnClick="() => OpenEdit(channel)" />
+                            <SwipeAction Icon="mdi-delete" Label="删除" Tone="ActionTone.Danger" TestId="swipe-delete" OnClick="() => AskDelete(channel)" />
+                        </Actions>
+                        <ChildContent>
+                            <ListCell Title="@channel.Name"
+                                      Value="@ManagedItemPresentation.UsageText(channel.BillCount)"
+                                      Chevron
+                                      TestId="channel-cell"
+                                      OnClick="() => OpenEdit(channel)">
+                                <Leading>
+                                    <span class="ft-tile ft-tile--soft ft-tile--@channel.Tone" aria-hidden="true"><i class="mdi @channel.Icon"></i></span>
+                                </Leading>
+                                <Badges>
+                                    @if (channel.IsDefault)
                                     {
-                                        <MButton Icon OnClick="() => ShowEditDialog(channel)">
-                                            <MIcon>mdi-pencil</MIcon>
-                                        </MButton>
-                                        <MButton Icon OnClick="() => DeleteChannel(channel)">
-                                            <MIcon Color="error">mdi-delete</MIcon>
-                                        </MButton>
+                                        <Badge Kind="BadgeKind.Brand" TestId="badge-default">默认</Badge>
                                     }
-                                    else
-                                    {
-                                        <MChip Small Outlined>预设</MChip>
-                                    }
-                                </MListItemAction>
-                            </MListItem>
-                        }
-                    </MList>
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-</MContainer>
+                                </Badges>
+                            </ListCell>
+                        </ChildContent>
+                    </SwipeRow>
+                }
+                <ListCell Title="新建支付渠道" Class="ft-cell--brand" TestId="channel-add-row" OnClick="OpenCreate">
+                    <Leading>
+                        <span class="ft-tile ft-tile--outline" aria-hidden="true"><i class="mdi mdi-plus"></i></span>
+                    </Leading>
+                </ListCell>
+            </GroupedList>
 
-<!-- 创建/编辑对话框 -->
-<MDialog @bind-Value="_showDialog" MaxWidth="500">
-    <MCard>
-        <MCardTitle>
-            @(_isEditing ? "编辑支付渠道" : "创建支付渠道")
-        </MCardTitle>
+            @* 预设支付渠道：只读，点按只能设为 / 取消默认 *@
+            <GroupedList Header="预设渠道"
+                         Footer="预设渠道不能修改或删除，点按可设为默认。"
+                         TestId="preset-channels">
+                @foreach (var channel in PresetRows)
+                {
+                    <ListCell @key="channel.Id"
+                              Title="@channel.Name"
+                              Value="@ManagedItemPresentation.PresetLabel"
+                              TestId="preset-cell"
+                              OnClick="() => OpenPresetMenu(channel)">
+                        <Leading>
+                            <span class="ft-tile ft-tile--soft ft-tile--@channel.Tone" aria-hidden="true"><i class="mdi @channel.Icon"></i></span>
+                        </Leading>
+                        <Badges>
+                            @if (channel.IsDefault)
+                            {
+                                <Badge Kind="BadgeKind.Brand" TestId="badge-default">默认</Badge>
+                            }
+                        </Badges>
+                    </ListCell>
+                }
+            </GroupedList>
+        }
+    </ChildContent>
+</SecondaryPage>
 
-        <MCardText>
-            <MForm @ref="_form" Model="_channelModel" OnValidSubmit="SaveChannel">
-                <MTextField @bind-Value="_channelModel.Name"
-                            Label="渠道名称"
-                            Outlined
-                            Dense
-                            Required />
+@* 新建 / 编辑支付渠道（底部 Sheet；表单与分类共用 NameIconFormSheet；编辑时的默认 / 删除是本页自己的操作，放进插槽） *@
+<NameIconFormSheet @bind-Visible="_sheetVisible"
+                   Noun="支付渠道"
+                   TestIdPrefix="channel"
+                   NamePlaceholder="例如：公司报销卡"
+                   IconChoices="PaymentChannelPresentation.IconChoices"
+                   DefaultIcon="@PaymentChannelPresentation.DefaultIcon"
+                   PreviewTone="@(_editing is { } preview ? preview.Tone : "gray")"
+                   Editing="FormTarget"
+                   Save="SaveAsync"
+                   OnSaved="OnChannelSavedAsync"
+                   OnClosed="OnSheetClosed">
+    <EditingExtras>
+        @if (_editing is { } editing)
+        {
+            <GroupedList>
+                <ListCell Icon="mdi-star" Tone="orange" Title="设为默认支付渠道" Subtitle="新建账单时默认选中这个支付渠道">
+                    <Trailing>
+                        <ToggleSwitch Value="@editing.IsDefault" ValueChanged="OnDefaultToggled" AriaLabel="设为默认支付渠道" TestId="channel-default-switch" />
+                    </Trailing>
+                </ListCell>
+            </GroupedList>
 
-                <MTextField @bind-Value="_channelModel.Icon"
-                            Label="图标（mdi-xxx）"
-                            Outlined
-                            Dense
-                            Placeholder="mdi-credit-card" />
+            <GroupedList>
+                <ListCell Title="删除支付渠道" Destructive TestId="channel-delete-cell" OnClick="() => AskDelete(editing)" />
+            </GroupedList>
+        }
+    </EditingExtras>
+</NameIconFormSheet>
 
-                <MTextField @bind-Value="_channelModel.SortOrder"
-                            Label="排序顺序"
-                            Outlined
-                            Dense
-                            Type="number" />
-            </MForm>
-        </MCardText>
+@* 预设支付渠道的菜单：只能设为 / 取消默认 *@
+<ActionSheet @bind-Visible="_presetMenuVisible"
+             Title="@_presetTarget?.Name"
+             Message="预设渠道不能修改或删除"
+             OnClosed="OnPresetMenuClosed"
+             TestId="channel-preset-sheet">
+    <ActionSheetItem Icon="mdi-star" TestId="preset-default" OnClick="TogglePresetDefaultAsync">
+        @PaymentChannelPresentation.DefaultMenuLabel(_presetTarget?.IsDefault == true)
+    </ActionSheetItem>
+</ActionSheet>
 
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CloseDialog">取消</MButton>
-            <MButton Color="primary" OnClick="SaveChannel">保存</MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+@* 删除确认 *@
+<GlassAlert @bind-Visible="_deleteVisible"
+            Title="@($"删除支付渠道「{_deleteTarget?.Name}」？")"
+            Message="删除后该支付渠道不再显示。渠道下还有账单时无法删除，请先把账单改到其他支付渠道。"
+            ConfirmText="删除"
+            Destructive
+            OnConfirm="DeleteConfirmedAsync"
+            OnClosed="OnDeleteClosed"
+            TestId="channel-delete-alert" />
 
 @code {
-    private List<ChannelModel> _channels = new();
-    private bool _showDialog;
-    private bool _isEditing;
-    private ChannelModel _channelModel = new();
-    private MForm? _form;
+    /// <summary>一行支付渠道（取数时一次性算好，渲染时不再查库）</summary>
+    private sealed record ChannelRow(
+        Guid Id,
+        string Name,
+        string Icon,
+        string Tone,
+        int SortOrder,
+        bool IsPreset,
+        bool IsDefault,
+        int BillCount);
+
+    private List<ChannelRow> _rows = new();
+
     private Guid _userId;
+    private bool _isLoading = true;
+    private bool _loadFailed;
 
-    protected override async Task OnInitializedAsync()
+    // 新建 / 编辑 Sheet（这里只记「是否显示」与「正在编辑哪一个」；表单状态在 NameIconFormSheet 里）
+    private bool _sheetVisible;
+    private ChannelRow? _editing;
+
+    // 预设渠道菜单、删除确认 Alert
+    private bool _presetMenuVisible;
+    private ChannelRow? _presetTarget;
+    private bool _deleteVisible;
+    private ChannelRow? _deleteTarget;
+
+    private List<ChannelRow> CustomRows => _rows.Where(r => !r.IsPreset).ToList();
+
+    private List<ChannelRow> PresetRows => _rows.Where(r => r.IsPreset).ToList();
+
+    /// <summary>表单的初始值：编辑时取正在编辑的那一行；新建时为空</summary>
+    private NameIconTarget? FormTarget => _editing is { } row ? new NameIconTarget(row.Id, row.Name, row.Icon, row.SortOrder) : null;
+
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与账本页相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // AuthenticationService 带电路级缓存，且对预渲染 / 电路断开做了安全封装（失败返回 null，保持 Guid.Empty）
         _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
-
-        await LoadChannels();
+        await LoadAsync();
+        _isLoading = false;
+        StateHasChanged();
     }
 
-    private async Task LoadChannels()
-    {
-        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
-        var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
-
-        _channels = channels
-            .Select(c => new ChannelModel
-            {
-                Id = c.Id,
-                Name = c.Name,
-                Icon = c.Icon,
-                IsPreset = c.IsPreset,
-                IsDefault = userDefault?.DefaultPaymentChannelId == c.Id,
-                SortOrder = c.SortOrder
-            })
-            .ToList();
-    }
-
-    private void ShowCreateDialog()
-    {
-        _isEditing = false;
-        _channelModel = new ChannelModel
-        {
-            Icon = "mdi-credit-card"
-        };
-        _showDialog = true;
-    }
-
-    private void ShowEditDialog(ChannelModel channel)
-    {
-        _isEditing = true;
-        _channelModel = new ChannelModel
-        {
-            Id = channel.Id,
-            Name = channel.Name,
-            Icon = channel.Icon,
-            SortOrder = channel.SortOrder
-        };
-        _showDialog = true;
-    }
-
-    private void CloseDialog()
-    {
-        _showDialog = false;
-    }
-
-    private async Task SaveChannel()
+    private async Task LoadAsync()
     {
         try
         {
-            if (_isEditing)
+            // 取数时一次性把「默认」「账单数」算好；同一个 DbContext 不支持并行查询，逐个统计，并与其它页面的读库排队
+            var rows = await DataGate.RunAsync(async () =>
             {
-                var channel = new Core.Entities.PaymentChannel
-                {
-                    Id = _channelModel.Id,
-                    UserId = _userId,
-                    Name = _channelModel.Name,
-                    Icon = _channelModel.Icon ?? "mdi-credit-card",
-                    SortOrder = _channelModel.SortOrder
-                };
+                var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+                var userDefault = await UserDefaultService.GetUserDefaultAsync(_userId);
 
-                await PaymentChannelService.UpdatePaymentChannelAsync(channel);
-                await PopupService.EnqueueSnackbarAsync("支付渠道更新成功", AlertTypes.Success);
-            }
-            else
+                var loaded = new List<ChannelRow>(channels.Count);
+                foreach (var channel in channels)
+                {
+                    // 预设渠道不显示账单数（右侧标注「预设」），省掉这几次查询
+                    var billCount = channel.IsPreset ? 0 : await BillService.GetBillCountAsync(_userId, paymentChannelId: channel.Id);
+
+                    loaded.Add(new ChannelRow(
+                        channel.Id,
+                        channel.Name,
+                        PaymentChannelPresentation.NormalizeIcon(channel.Icon),
+                        PaymentChannelPresentation.ToneFor(channel.Id),
+                        channel.SortOrder,
+                        channel.IsPreset,
+                        userDefault?.DefaultPaymentChannelId == channel.Id,
+                        billCount));
+                }
+
+                return loaded;
+            });
+
+            _rows = rows;
+            _loadFailed = false;
+            SyncEditingRow();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "加载支付渠道失败");
+            // 已经有数据时保留旧数据（只提示）；第一次就失败才整页显示错误状态
+            _loadFailed = _rows.Count == 0;
+            await PopupService.EnqueueSnackbarAsync($"加载支付渠道失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
+    }
+
+    private async Task RetryAsync()
+    {
+        _isLoading = true;
+        _loadFailed = false;
+        StateHasChanged();
+
+        await LoadAsync();
+        _isLoading = false;
+    }
+
+    /// <summary>
+    /// 列表重新加载后，让正在编辑的那一行指向最新数据（例如默认状态变了）
+    /// </summary>
+    private void SyncEditingRow()
+    {
+        if (_editing is not null)
+        {
+            _editing = _rows.FirstOrDefault(r => r.Id == _editing.Id) ?? _editing;
+        }
+    }
+
+    // ------------------------------------------------------------------ 新建 / 编辑
+
+    private void OpenCreate()
+    {
+        _editing = null;
+        _sheetVisible = true;
+    }
+
+    private void OpenEdit(ChannelRow channel)
+    {
+        _editing = channel;
+        _sheetVisible = true;
+    }
+
+    // Sheet 退出动画结束后清理「正在编辑」（动画期间保持原内容，避免闪动）
+    private void OnSheetClosed() => _editing = null;
+
+    /// <summary>落库：新建或更新自定义支付渠道（服务层校验与权限语义不变；失败抛出异常，由表单提示）</summary>
+    private async Task SaveAsync(NameIconValues values)
+    {
+        if (_editing is { } editing)
+        {
+            await PaymentChannelService.UpdatePaymentChannelAsync(new PaymentChannel
             {
-                var channel = new Core.Entities.PaymentChannel
-                {
-                    UserId = _userId,
-                    Name = _channelModel.Name,
-                    Icon = _channelModel.Icon ?? "mdi-credit-card",
-                    SortOrder = _channelModel.SortOrder
-                };
+                Id = editing.Id,
+                UserId = _userId,
+                Name = values.Name,
+                Icon = values.Icon,
+                SortOrder = values.SortOrder,
+            });
+        }
+        else
+        {
+            await PaymentChannelService.CreatePaymentChannelAsync(new PaymentChannel
+            {
+                UserId = _userId,
+                Name = values.Name,
+                Icon = values.Icon,
+                SortOrder = values.SortOrder,
+            });
+        }
+    }
 
-                await PaymentChannelService.CreatePaymentChannelAsync(channel);
-                await PopupService.EnqueueSnackbarAsync("支付渠道创建成功", AlertTypes.Success);
+    // 保存成功（Sheet 已被要求收起）：重新加载列表
+    private async Task OnChannelSavedAsync()
+    {
+        await LoadAsync();
+    }
+
+    // ------------------------------------------------------------------ 设为默认
+
+    private async Task OnDefaultToggled(bool makeDefault)
+    {
+        if (_editing is { } editing)
+        {
+            await SetDefaultAsync(editing, makeDefault);
+        }
+    }
+
+    private void OpenPresetMenu(ChannelRow channel)
+    {
+        _presetTarget = channel;
+        _presetMenuVisible = true;
+    }
+
+    private void OnPresetMenuClosed() => _presetTarget = null;
+
+    private async Task TogglePresetDefaultAsync()
+    {
+        // 菜单项先收起菜单再触发（此时 _presetTarget 仍有值，清理发生在退出动画结束后的 OnClosed）
+        if (_presetTarget is { } channel)
+        {
+            await SetDefaultAsync(channel, !channel.IsDefault);
+        }
+    }
+
+    private async Task SetDefaultAsync(ChannelRow channel, bool makeDefault)
+    {
+        try
+        {
+            var result = await UserDefaultService.SetDefaultPaymentChannelAsync(_userId, makeDefault ? channel.Id : null);
+
+            if (result)
+            {
+                await PopupService.EnqueueSnackbarAsync(PaymentChannelPresentation.DefaultChangedMessage(makeDefault), AlertTypes.Success);
+                await LoadAsync();
             }
-
-            CloseDialog();
-            await LoadChannels();
         }
         catch (Exception ex)
         {
@@ -202,8 +373,27 @@
         }
     }
 
-    private async Task DeleteChannel(ChannelModel channel)
+    // ------------------------------------------------------------------ 删除
+
+    private void AskDelete(ChannelRow channel)
     {
+        _deleteTarget = channel;
+        _deleteVisible = true;
+    }
+
+    private void OnDeleteClosed()
+    {
+        _deleteTarget = null;
+    }
+
+    private async Task DeleteConfirmedAsync()
+    {
+        // Alert 先于 OnConfirm 关闭，此时 _deleteTarget 仍有值（清理发生在退出动画结束后的 OnClosed）
+        if (_deleteTarget is not { } channel)
+        {
+            return;
+        }
+
         try
         {
             var result = await PaymentChannelService.DeletePaymentChannelAsync(channel.Id, _userId);
@@ -211,7 +401,13 @@
             if (result)
             {
                 await PopupService.EnqueueSnackbarAsync("支付渠道删除成功", AlertTypes.Success);
-                await LoadChannels();
+
+                if (_editing?.Id == channel.Id)
+                {
+                    _sheetVisible = false;
+                }
+
+                await LoadAsync();
             }
             else
             {
@@ -230,37 +426,5 @@
         {
             await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
         }
-    }
-
-    private async Task SetDefaultChannel(ChannelModel channel)
-    {
-        try
-        {
-            var result = await UserDefaultService.SetDefaultPaymentChannelAsync(
-                _userId,
-                channel.IsDefault ? null : channel.Id);
-
-            if (result)
-            {
-                await PopupService.EnqueueSnackbarAsync(
-                    channel.IsDefault ? "已取消默认支付渠道" : "已设置为默认支付渠道",
-                    AlertTypes.Success);
-                await LoadChannels();
-            }
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"操作失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-    }
-
-    private class ChannelModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string? Icon { get; set; }
-        public bool IsPreset { get; set; }
-        public bool IsDefault { get; set; }
-        public int SortOrder { get; set; }
     }
 }

@@ -1,0 +1,133 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    列表单元格（设计稿 06 · 列表单元格）：图标块 + 标题 + 副标题 + 右值 / 徽标 / 开关 / 箭头。
+    - 给了 OnClick 就渲染成 <button>（可聚焦、可读屏、整行可点）；否则是普通 <div>（例如右侧放开关的设置行）。
+    - 高度：无副标题 56，有副标题 66；分隔线从标题左缘开始（有图标块时缩进到图标块之后）。
+    - 只暴露内容插槽与事件，不含业务逻辑。
+*@
+@if (OnClick.HasDelegate)
+{
+    <button type="button"
+            class="@CssClass"
+            disabled="@Disabled"
+            aria-label="@AriaLabel"
+            data-testid="@TestId"
+            @onclick="OnClick"
+            @attributes="AdditionalAttributes">
+        @Body
+    </button>
+}
+else
+{
+    <div class="@CssClass"
+         data-testid="@TestId"
+         @attributes="AdditionalAttributes">
+        @Body
+    </div>
+}
+
+@code {
+    /// <summary>图标块里的 MDI 图标类名；为空且没有 Leading 时不显示图标块</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>图标块配色：purple / teal / pink / orange / blue / green / gray</summary>
+    [Parameter] public string Tone { get; set; } = "gray";
+
+    /// <summary>自定义左侧内容（优先于图标块，例如分类色块或头像）</summary>
+    [Parameter] public RenderFragment? Leading { get; set; }
+
+    /// <summary>标题</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>标题后面的备注：与标题同一行，前面带「 · 」，灰色常规字重（账单行：分类加粗 + 备注灰色）；放不下时它先被省略。读屏名称请用 AriaLabel 给整句</summary>
+    [Parameter] public string? TitleNote { get; set; }
+
+    /// <summary>副标题（有它时单元格变高）</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>右侧的值文本</summary>
+    [Parameter] public string? Value { get; set; }
+
+    /// <summary>右侧徽标</summary>
+    [Parameter] public RenderFragment? Badges { get; set; }
+
+    /// <summary>右侧自定义内容（例如开关）</summary>
+    [Parameter] public RenderFragment? Trailing { get; set; }
+
+    /// <summary>显示右侧箭头</summary>
+    [Parameter] public bool Chevron { get; set; }
+
+    /// <summary>危险操作：标题用红色</summary>
+    [Parameter] public bool Destructive { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>读屏名称；不给时读标题 + 副标题</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>点击单元格；给了才会渲染成按钮</summary>
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private bool HasLeading => Leading != null || !string.IsNullOrEmpty(Icon);
+
+    private string CssClass => string.Join(' ', new[]
+    {
+        "ft-cell",
+        OnClick.HasDelegate ? "ft-cell--click" : null,
+        string.IsNullOrEmpty(Subtitle) ? null : "ft-cell--two",
+        HasLeading ? "ft-cell--lead" : null,
+        Destructive ? "ft-cell--destructive" : null,
+        Class,
+    }.Where(c => !string.IsNullOrEmpty(c)));
+
+    private RenderFragment Body => @<text>
+        @if (Leading != null)
+        {
+            @Leading
+        }
+        else if (!string.IsNullOrEmpty(Icon))
+        {
+            <span class="ft-tile ft-tile--@Tone" aria-hidden="true"><i class="mdi @Icon"></i></span>
+        }
+        <span class="ft-cell__main">
+            @if (string.IsNullOrEmpty(TitleNote))
+            {
+                <span class="ft-cell__title">@Title</span>
+            }
+            else
+            {
+                @* 标题 + 备注：两段各是标题盒里的一个 flex 子项（分类名按内容宽、放不下才省略；备注占剩下的宽度并自己省略），子项之间不能有空白文本节点 *@
+                <span class="ft-cell__title ft-cell__title--noted"><span class="ft-cell__title-text">@Title</span><span class="ft-cell__title-note"> · @TitleNote</span></span>
+            }
+            @if (!string.IsNullOrEmpty(Subtitle))
+            {
+                <span class="ft-cell__subtitle">@Subtitle</span>
+            }
+        </span>
+        @if (Badges != null || Trailing != null || !string.IsNullOrEmpty(Value) || Chevron)
+        {
+            <span class="ft-cell__trail">
+                @Badges
+                @if (!string.IsNullOrEmpty(Value))
+                {
+                    <span class="ft-cell__value">@Value</span>
+                }
+                @Trailing
+                @if (Chevron)
+                {
+                    <i class="mdi mdi-chevron-right ft-cell__chevron" aria-hidden="true"></i>
+                }
+            </span>
+        }
+    </text>;
+}

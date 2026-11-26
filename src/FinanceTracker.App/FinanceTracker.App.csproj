@@ -38,8 +38,12 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- Splash Screen -->
-		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+		<!-- Splash Screen：系统启动画面 = 纯色底 + 一张静态图（冷启动设计稿 docs/design/cold-start）。
+		     Color = tokens.css 里的 ft-splash-bg 令牌；图居中，Logo 方块在系统启动画面与 Web 层加载页之间不动。
+		     BaseSize 108 = 方块 96 + 四周各 6 的透明边：MAUI 在 Android 12+ 生成的 drawable 把图固定拉成 108dp，留这圈边方块才是 96。
+		     （XML 注释里不能出现连续两个连字符，令牌名这里不带前缀的两个短横线。）
+		     tokens.css、splash.svg、MainPage.xaml 与这里的取值必须一致，DesignTokensTests 校验。 -->
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#5C2EF7" BaseSize="108,108" />
 
 		<!-- Images -->
 		<MauiImage Include="Resources\Images\*" />
@@ -50,8 +54,8 @@
 		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 
-		<!-- App Icon -->
-		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#512BD4" />
+		<!-- App Icon：品牌渐变背景层 + 白色 wallet-outline 前景层，与启动画面、加载页同一个 Logo，点开图标不再变色 -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#5C2EF7" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,0 +1,116 @@
+@namespace FinanceTracker.Web.Components.PendingBills
+
+@*
+    待确认账单卡片（设计稿 screens/10-pending）：来源行（支付渠道 · 通知栏 / 短信识别 + 时间）→ 一行账单信息（分类色块 + 分类 / 备注摘要 + 金额）
+    → 操作行（账本芯片 + 「忽略」+ 「确认入账」）。
+    - 识别结果里没有分类：卡片上显示的是「确认入账时会使用的分类」（与入账规则同一个，见 PendingBillConversion.PickCategory），
+      所以卡片上看到什么，入账后账单就是什么；要改分类就点这一行，进「确认账单」Sheet 再改（Sheet 里能改金额 / 类型 / 支付渠道 / 账本）。
+    - 账本芯片：账本必填，识别结果里没有账本，这里先放默认账本，点它可以换；没有账本（用户一个都没建）时是「选择账本」，
+      点「确认入账」不入账，而是弹出账本菜单（里面有「新建账本…」）。
+    - 本组件不持有数据也不改数据：所有操作都以事件交给页面，处理中（Busy）整张卡片的按钮禁用，防止重复入账。
+    - 观察属性（E2E）：卡片 pending-card（data-pending-id / data-type / data-source / data-busy）；来源 pending-source、时间 pending-time、
+      主行 pending-edit（分类名 .ft-cell__title、备注 .ft-cell__subtitle）、金额 pending-amount、账本芯片 pending-ledger（data-missing）、忽略 pending-ignore、确认 pending-confirm。
+*@
+<li class="ft-pcard"
+    data-testid="pending-card"
+    data-pending-id="@Model.Id"
+    data-type="@(Model.IsIncome ? "income" : "expense")"
+    data-source="@(Model.IsSms ? "sms" : "notification")"
+    data-busy="@(Busy ? "true" : null)">
+    <div class="ft-pcard__head">
+        <span class="ft-pcard__source">
+            <i class="mdi @Model.ChannelIcon" aria-hidden="true"></i>
+            <span class="ft-pcard__sourcetext" data-testid="pending-source">@Model.SourceLine</span>
+        </span>
+        <span class="ft-pcard__time" data-testid="pending-time">@Model.TimeText</span>
+    </div>
+
+    <ListCell Title="@Model.CategoryName"
+              Subtitle="@Model.NoteText"
+              Chevron
+              Disabled="Busy"
+              Class="ft-pcard__main"
+              TestId="pending-edit"
+              AriaLabel="@($"修改后入账：{Model.Summary}")"
+              OnClick="EditAsync">
+        <Leading>
+            <span class="ft-tile ft-tile--soft ft-tile--@Model.Tone" aria-hidden="true"><i class="mdi @Model.CategoryIcon"></i></span>
+        </Leading>
+        <Trailing>
+            <span class="ft-pcard__amount @(Model.IsIncome ? "ft-pcard__amount--income" : null)"
+                  data-long="@(PendingBillPresentation.IsLongAmount(Model.AmountText) ? "true" : null)"
+                  data-testid="pending-amount">@Model.AmountText</span>
+        </Trailing>
+    </ListCell>
+
+    <div class="ft-pcard__foot">
+        <button type="button"
+                class="ft-pcard__ledger"
+                disabled="@Busy"
+                aria-haspopup="menu"
+                aria-label="@($"账本，{LedgerText}。{Model.Summary}")"
+                data-testid="pending-ledger"
+                data-missing="@(LedgerMissing ? "true" : "false")"
+                data-value="@(LedgerId?.ToString())"
+                @ref="_ledgerChip"
+                @onclick="PickLedgerAsync">
+            <i class="mdi mdi-book-open-variant" aria-hidden="true"></i>
+            <span class="ft-pcard__ledgertext" data-testid="pending-ledger-text">@LedgerText</span>
+            <i class="mdi mdi-chevron-down" aria-hidden="true"></i>
+        </button>
+        <GlassButton Kind="ButtonKind.Neutral"
+                     Disabled="Busy"
+                     TestId="pending-ignore"
+                     AriaLabel="@($"{PendingBillPresentation.IgnoreLabel}：{Model.Summary}")"
+                     OnClick="IgnoreAsync">@PendingBillPresentation.IgnoreLabel</GlassButton>
+        <GlassButton Kind="ButtonKind.Brand"
+                     Busy="Busy"
+                     TestId="pending-confirm"
+                     AriaLabel="@($"{PendingBillPresentation.ConfirmLabel}：{Model.Summary}")"
+                     OnClick="ConfirmAsync">@PendingBillPresentation.ConfirmLabel</GlassButton>
+    </div>
+</li>
+
+@code {
+    private ElementReference _ledgerChip;
+
+    /// <summary>卡片内容（PendingBillPresentation.BuildCard 一次算好）</summary>
+    [Parameter, EditorRequired] public PendingCardModel Model { get; set; } = null!;
+
+    /// <summary>这张卡片入账时使用的账本 Id；没有（用户还没有账本）为空</summary>
+    [Parameter] public Guid? LedgerId { get; set; }
+
+    /// <summary>账本名；没有账本时为空，芯片显示「选择账本」</summary>
+    [Parameter] public string? LedgerName { get; set; }
+
+    /// <summary>处理中（正在入账 / 忽略）：整张卡片的按钮禁用</summary>
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>点主行：打开「确认账单」Sheet，参数是待确认账单 Id</summary>
+    [Parameter] public EventCallback<Guid> OnEdit { get; set; }
+
+    /// <summary>点「确认入账」</summary>
+    [Parameter] public EventCallback<Guid> OnConfirm { get; set; }
+
+    /// <summary>点「忽略」</summary>
+    [Parameter] public EventCallback<Guid> OnIgnore { get; set; }
+
+    /// <summary>点账本芯片：给出待确认账单 Id 和芯片本身（账本菜单相对它定位）</summary>
+    [Parameter] public EventCallback<LedgerPick> OnPickLedger { get; set; }
+
+    /// <summary>账本芯片被点：哪张卡片、菜单该贴着哪个元素</summary>
+    public readonly record struct LedgerPick(Guid PendingId, ElementReference Anchor);
+
+    private bool LedgerMissing => LedgerId is null;
+
+    private string LedgerText => PendingBillPresentation.LedgerChipText(LedgerId is null ? null : LedgerName);
+
+    private Task EditAsync() => OnEdit.InvokeAsync(Model.Id);
+
+    // 账本必填：还没有账本（没得选默认）时点「确认入账」不入账，而是直接弹出账本菜单（里面有「新建账本…」）
+    private Task ConfirmAsync() => LedgerMissing ? PickLedgerAsync() : OnConfirm.InvokeAsync(Model.Id);
+
+    private Task IgnoreAsync() => OnIgnore.InvokeAsync(Model.Id);
+
+    private Task PickLedgerAsync() => OnPickLedger.InvokeAsync(new LedgerPick(Model.Id, _ledgerChip));
+}

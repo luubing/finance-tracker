@@ -1,300 +1,350 @@
 @page "/sms-recognition"
-@using FinanceTracker.Core.Interfaces
-@using FinanceTracker.Core.Enums
-@using FinanceTracker.Core.Services
-@using FinanceTracker.Web.Services
+@using SmsMessage = FinanceTracker.Core.Interfaces.SmsMessage
+@using FinanceTracker.Web.Components.PendingBills
 @inject ISmsService SmsService
-@inject ICategoryService CategoryService
-@inject IPaymentChannelService PaymentChannelService
-@inject IBillService BillService
-@inject AuthenticationService AuthService
+@inject IPendingBillService PendingBillService
+@inject PageStackNavController NavController
 @inject IPopupService PopupService
+@inject ILogger<SmsRecognition> Logger
 
-<PStackPageBar Title="短信识别"
-               CenterTitle
-               Flat
-               Color="primary" />
+@*
+    短信识别页（二级页面模板，设计稿 screens/10-pending 的设置式分组风格）：
+      · 权限分组：短信读取权限（已开启 / 未开启 +「去授权」，与待确认账单页共用同一种权限行）
+      · 读取范围分组：开始日期（默认 30 天前；点按唤起系统日期选择器）
+      · 读取结果：「读取结果」摘要分组（新加入 / 已在待确认列表里 / 没识别出金额 / 列表已满未加入 / 加入失败，各类有数才显示，
+        「新加入」一行点按去待确认账单页）+「识别到 N 条支付短信」+ 每条短信一张卡片（原文摘要、号码 · 时间、右下角的去向标签）
+      · 主按钮「读取短信」固定在页面底部（没有权限时置灰；读取中禁用，防止重复读取）
+    读到的支付短信不再直接创建正式账单，而是放进「待确认账单」（SmsCapture，规则见 ADR 0007 §21 / 工单 19）：
+    与实时短信监听（SmsBroadcastReceiver）同一份解析规则（PaymentContentParser）、同一个服务（IPendingBillService）、同样的去重
+    （来源 + 金额 + 交易时间 ±1 分钟），所以重复读取同一批短信不会产生重复项；识别不出金额的短信不加入（验证码、营销短信不混进来）；
+    待确认账单最多 200 条，批量读取按剩余容量加入（由新到旧），不会顶掉用户还没处理的待确认账单。
+    账本在「待确认账单」里确认入账时再选，所以本页没有账本行。已确认入账的短信重新读取时会再次出现在待确认列表里（去重只对着待确认列表）。
+    观察属性（E2E）：sms-page、sms-content（data-state = idle｜loading｜results｜empty，data-permission = granted｜denied，data-ready = 权限状态读完了，data-reads = 已读完的次数，data-count）、
+      sms-permission 系列（见 CapturePermissionRow）、sms-date-row / sms-date（data-value）、
+      sms-read、sms-summary（data-added / data-duplicate / data-no-amount / data-over-capacity / data-failed）与它的行
+      sms-summary-added / -duplicate / -no-amount / -over-capacity / -failed、
+      sms-results-header、sms-result（data-sms-id、data-outcome = added｜duplicate｜no-amount｜over-capacity｜failed）/ sms-body / sms-meta / sms-outcome、sms-empty。
+*@
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <MRow>
-        <MCol Cols="12">
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-message-text</MIcon>
-                    短信识别
-                </MCardTitle>
+<SecondaryPage Title="@SmsRecognitionPresentation.Title" TestId="sms-page">
+    <ChildContent>
+        <div class="ft-sms"
+             data-testid="sms-content"
+             data-state="@ContentState"
+             data-permission="@(_hasPermission ? "granted" : "denied")"
+             data-ready="@(_permissionLoaded ? "true" : "false")"
+             data-reads="@_reads"
+             data-count="@ResultCount"
+             aria-busy="@(_loading ? "true" : null)">
+            <GroupedList Header="@SmsRecognitionPresentation.PermissionGroupTitle" TestId="sms-permission-group">
+                <CapturePermissionRow Title="@SmsRecognitionPresentation.PermissionTitle"
+                                      Enabled="_hasPermission"
+                                      Subtitle="@PendingBillPresentation.SmsHint"
+                                      EnabledSubtitle="@SmsRecognitionPresentation.PermissionGrantedText"
+                                      IconOff="mdi-message-alert-outline"
+                                      ActionLabel="@SmsRecognitionPresentation.GrantLabel"
+                                      Busy="_requesting"
+                                      OnAction="RequestPermissionAsync"
+                                      TestId="sms-permission"
+                                      ActionTestId="sms-permission-grant" />
+            </GroupedList>
 
-                <MCardText>
-                    @if (!_hasPermission)
+            <GroupedList Header="@SmsRecognitionPresentation.RangeGroupTitle"
+                         Footer="@(_hasPermission ? SmsRecognitionPresentation.RangeFooter : SmsRecognitionPresentation.NeedPermissionFooter)"
+                         Class="ft-addbill__rows ft-sms__rows"
+                         TestId="sms-range-group">
+                @* 开始日期：看到的是「2026年10月26日」，真正的输入是盖在整行上的透明 date——点按即唤起系统的日期选择器 *@
+                <ListCell Icon="mdi-calendar-range"
+                          Tone="blue"
+                          Title="@SmsRecognitionPresentation.FromDateTitle"
+                          Value="@SmsRecognitionPresentation.DateLabel(_fromDate)"
+                          Class="ft-addbill__field"
+                          Chevron
+                          TestId="sms-date-row"
+                          data-value="@SmsRecognitionPresentation.ToInputValue(_fromDate)">
+                    <Trailing>
+                        <input type="date"
+                               class="ft-addbill__picker"
+                               aria-label="@SmsRecognitionPresentation.FromDateTitle"
+                               data-testid="sms-date"
+                               value="@SmsRecognitionPresentation.ToInputValue(_fromDate)"
+                               max="@SmsRecognitionPresentation.ToInputValue(AppTimeZone.ToLocal(DateTime.UtcNow))"
+                               @onchange="OnDateChanged" />
+                    </Trailing>
+                </ListCell>
+            </GroupedList>
+
+            @if (_loading)
+            {
+                <ul class="ft-sms__list" data-testid="sms-skeleton" aria-hidden="true">
+                    @for (var i = 0; i < 2; i++)
                     {
-                        <MAlert Type="AlertTypes.Warning" Dense>
-                            需要短信读取权限才能使用此功能
-                            <MButton Color="warning" Small Class="ml-2" OnClick="RequestPermission">
-                                授权
-                            </MButton>
-                        </MAlert>
+                        <li class="ft-smscard ft-smscard--skeleton">
+                            <span class="ft-skeleton ft-skeleton--title"></span>
+                            <span class="ft-skeleton ft-skeleton--sub"></span>
+                        </li>
                     }
-                    else
+                </ul>
+            }
+            else if (_capture is { } capture && capture.Items.Count > 0)
+            {
+                <GroupedList Header="@SmsRecognitionPresentation.SummaryGroupTitle"
+                             Footer="@SmsRecognitionPresentation.SummaryFooter(capture)"
+                             TestId="sms-summary"
+                             data-added="@capture.Added"
+                             data-duplicate="@capture.Duplicate"
+                             data-no-amount="@capture.NoAmount"
+                             data-over-capacity="@capture.OverCapacity"
+                             data-failed="@capture.Failed">
+                    @if (capture.Added > 0)
                     {
-                        <MRow>
-                            <MCol Cols="12" Sm="6">
-                                <MTextField @bind-Value="_fromDate"
-                                            Label="开始日期"
-                                            Type="date"
-                                            Outlined
-                                            Dense />
-                            </MCol>
-                            <MCol Cols="12" Sm="6">
-                                <MButton Color="primary" OnClick="ReadSms" Loading="_loading">
-                                    <MIcon Class="mr-2">mdi-magnify</MIcon>
-                                    读取短信
-                                </MButton>
-                            </MCol>
-                        </MRow>
-
-                        @if (_smsMessages.Any())
-                        {
-                            <MDivider Class="my-4" />
-
-                            <div class="text-h6 mb-4">识别到 @_smsMessages.Count 条支付短信</div>
-
-                            @foreach (var sms in _smsMessages)
-                            {
-                                <MCard Outlined Class="mb-2">
-                                    <MCardText>
-                                        <MRow>
-                                            <MCol Cols="12" Sm="8">
-                                                <div class="text-body-2">@sms.Body</div>
-                                                <div class="text-caption text--secondary">
-                                                    来自: @sms.Address | 时间: @sms.Date.ToString("yyyy-MM-dd HH:mm")
-                                                </div>
-                                            </MCol>
-                                            <MCol Cols="12" Sm="4" Class="d-flex align-center justify-end">
-                                                <MButton Small Color="primary" OnClick="() => CreateBillFromSms(sms)">
-                                                    创建账单
-                                                </MButton>
-                                            </MCol>
-                                        </MRow>
-                                    </MCardText>
-                                </MCard>
-                            }
-                        }
-                        else if (_loading)
-                        {
-                            <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
-                                <MProgressCircular Indeterminate Size="64" Color="primary" />
-                            </MContainer>
-                        }
-                        else if (!_loading && _hasSearched)
-                        {
-                            <MAlert Type="AlertTypes.Info" Dense>
-                                未找到支付类短信
-                            </MAlert>
-                        }
+                        <ListCell Icon="mdi-tray-arrow-down"
+                                  Tone="green"
+                                  Title="@SmsRecognitionPresentation.AddedRowTitle"
+                                  Value="@SmsRecognitionPresentation.CountText(capture.Added)"
+                                  AriaLabel="@SmsRecognitionPresentation.AddedRowAriaLabel(capture.Added)"
+                                  Chevron
+                                  TestId="sms-summary-added"
+                                  OnClick="OpenPending" />
                     }
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
-</MContainer>
+                    @if (capture.Duplicate > 0)
+                    {
+                        <ListCell Icon="mdi-content-copy"
+                                  Tone="gray"
+                                  Title="@SmsRecognitionPresentation.DuplicateRowTitle"
+                                  Value="@SmsRecognitionPresentation.CountText(capture.Duplicate)"
+                                  TestId="sms-summary-duplicate" />
+                    }
+                    @if (capture.NoAmount > 0)
+                    {
+                        <ListCell Icon="mdi-help-circle-outline"
+                                  Tone="orange"
+                                  Title="@SmsRecognitionPresentation.NoAmountRowTitle"
+                                  Value="@SmsRecognitionPresentation.CountText(capture.NoAmount)"
+                                  TestId="sms-summary-no-amount" />
+                    }
+                    @if (capture.OverCapacity > 0)
+                    {
+                        <ListCell Icon="mdi-tray-full"
+                                  Tone="orange"
+                                  Title="@SmsRecognitionPresentation.OverCapacityRowTitle"
+                                  Value="@SmsRecognitionPresentation.CountText(capture.OverCapacity)"
+                                  TestId="sms-summary-over-capacity" />
+                    }
+                    @if (capture.Failed > 0)
+                    {
+                        <ListCell Icon="mdi-alert-circle-outline"
+                                  Tone="pink"
+                                  Title="@SmsRecognitionPresentation.FailedRowTitle"
+                                  Value="@SmsRecognitionPresentation.CountText(capture.Failed)"
+                                  TestId="sms-summary-failed" />
+                    }
+                </GroupedList>
 
-<!-- 手动补全对话框（Issue 14）：短信金额识别失败时，让用户手动输入金额/类型/渠道后创建账单 -->
-@if (_editingSms != null)
-{
-    <MDialog Value="true" Persistent MaxWidth="480">
-        <ChildContent>
-            <MCard>
-                <MCardTitle>
-                    <MIcon Class="mr-2">mdi-pencil</MIcon>
-                    识别失败，请手动补全
-                </MCardTitle>
-                <MCardText>
-                    <div class="text-body-2 mb-4">@(_editingSms.Body.Length > 120 ? _editingSms.Body[..120] + "…" : _editingSms.Body)</div>
+                <h2 class="ft-sms__header" data-testid="sms-results-header">@SmsRecognitionPresentation.ResultsHeader(capture.Items.Count)</h2>
+                <ul class="ft-sms__list" data-testid="sms-results">
+                    @foreach (var item in capture.Items)
+                    {
+                        <li class="ft-smscard"
+                            @key="item.Sms"
+                            data-testid="sms-result"
+                            data-sms-id="@item.Sms.Id"
+                            data-outcome="@SmsRecognitionPresentation.OutcomeValue(item.Outcome)">
+                            <div class="ft-smscard__body" data-testid="sms-body">@SmsRecognitionPresentation.BodySummary(item.Sms.Body)</div>
+                            <div class="ft-smscard__foot">
+                                <span class="ft-smscard__meta" data-testid="sms-meta">@SmsRecognitionPresentation.MetaText(item.Sms.Address, item.Sms.Date)</span>
+                                <span class="ft-badge ft-badge--@SmsRecognitionPresentation.OutcomeTone(item.Outcome)" data-testid="sms-outcome">@SmsRecognitionPresentation.OutcomeLabel(item.Outcome)</span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+            else if (_hasSearched)
+            {
+                <EmptyState Icon="mdi-message-off-outline"
+                            Title="@SmsRecognitionPresentation.NoResultText"
+                            TestId="sms-empty" />
+            }
+            else if (_hasPermission)
+            {
+                <div class="ft-sms__idle" data-testid="sms-idle">@SmsRecognitionPresentation.IdleText</div>
+            }
+        </div>
 
-                    <MTextField @bind-Value="_manualAmountText"
-                                Label="金额"
-                                Type="number"
-                                Prefix="¥"
-                                Outlined
-                                Dense />
-
-                    <MSwitch @bind-Value="_manualIsIncome"
-                             Label="收入"
-                             Class="mt-4" />
-
-                    <MTextField @bind-Value="_manualChannel"
-                                Label="支付渠道"
-                                Outlined
-                                Dense />
-                </MCardText>
-                <MCardActions>
-                    <MSpacer />
-                    <MButton Text OnClick="CancelManualBill">取消</MButton>
-                    <MButton Color="primary" OnClick="ConfirmManualBill">创建账单</MButton>
-                </MCardActions>
-            </MCard>
-        </ChildContent>
-    </MDialog>
-}
+        @* 主按钮固定在页面底部 *@
+        <div class="ft-pagefoot" data-testid="sms-foot">
+            <GlassButton Kind="ButtonKind.Brand"
+                         Large
+                         Block
+                         Icon="mdi-magnify"
+                         Busy="_loading"
+                         Disabled="@(!_hasPermission)"
+                         TestId="sms-read"
+                         OnClick="ReadAsync">@(_loading ? SmsRecognitionPresentation.ReadingLabel : SmsRecognitionPresentation.ReadLabel)</GlassButton>
+        </div>
+    </ChildContent>
+</SecondaryPage>
 
 @code {
+    // 权限（_permissionLoaded：首次读取权限状态已经结束，成功或失败；E2E 靠它判断「denied」是真的没权限、而不是还没读完）
     private bool _hasPermission;
+    private bool _permissionLoaded;
+    private bool _requesting;
+
+    // 读取范围与结果
+    private DateTime _fromDate;
     private bool _loading;
     private bool _hasSearched;
-    private string _fromDate = DateTime.Now.AddDays(-30).ToString("yyyy-MM-dd");
-    private List<Core.Interfaces.SmsMessage> _smsMessages = new();
-    private Guid _userId;
+    private SmsCaptureResult? _capture;
 
-    protected override async Task OnInitializedAsync()
+    // 已经读完的次数（成功或失败都算一次；与最终的结果同一次渲染更新）：E2E 靠它判断「这一次读取已经结束」，不会把上一次的结果当成这一次的
+    private int _reads;
+
+    private int ResultCount => _capture?.Items.Count ?? 0;
+
+    private string ContentState => _loading ? "loading"
+        : ResultCount > 0 ? "results"
+        : _hasSearched ? "empty"
+        : "idle";
+
+    protected override void OnInitialized()
     {
-        var userId = await AuthService.GetUserIdAsync();
-        if (userId.HasValue)
-        {
-            _userId = userId.Value;
-        }
-
-        _hasPermission = await SmsService.HasPermissionAsync();
+        _fromDate = SmsRecognitionPresentation.DefaultFromDate(AppTimeZone.ToLocal(DateTime.UtcNow));
     }
 
-    private async Task RequestPermission()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _hasPermission = await SmsService.RequestPermissionAsync();
-        if (_hasPermission)
+        if (!firstRender)
         {
-            await PopupService.EnqueueSnackbarAsync("权限已授予", AlertTypes.Success);
+            return;
         }
+
+        await LoadPermissionAsync();
+        StateHasChanged();
     }
 
-    private async Task ReadSms()
+    // ------------------------------------------------------------------ 读取权限
+
+    /// <summary>平台调用失败按「未授权」处理（给出「去授权」，用户点了会得到明确反馈）</summary>
+    private async Task LoadPermissionAsync()
     {
-        if (_loading) return;
-
-        _loading = true;
-        _hasSearched = true;
-
         try
         {
-            var fromDate = DateTime.Parse(_fromDate);
-            _smsMessages = await SmsService.ReadPaymentSmsAsync(fromDate);
-
-            if (!_smsMessages.Any())
-            {
-                await PopupService.EnqueueSnackbarAsync("未找到支付类短信", AlertTypes.Info);
-            }
+            _hasPermission = await SmsService.HasPermissionAsync();
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"读取短信失败: {ex.Message}", AlertTypes.Error);
+            Logger.LogWarning(ex, "读取短信权限状态失败");
+        }
+        finally
+        {
+            _permissionLoaded = true;
+        }
+    }
+
+    private async Task RequestPermissionAsync()
+    {
+        if (_requesting)
+        {
+            return;
+        }
+
+        _requesting = true;
+        try
+        {
+            _hasPermission = await SmsService.RequestPermissionAsync();
+            await PopupService.EnqueueSnackbarAsync(
+                _hasPermission ? SmsRecognitionPresentation.GrantedMessage : PendingBillPresentation.SmsNotGrantedMessage,
+                _hasPermission ? AlertTypes.Success : AlertTypes.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "申请短信权限失败");
+            await PopupService.EnqueueSnackbarAsync(PendingBillPresentation.PermissionFailedMessage(ex.GetUserMessage()), AlertTypes.Warning);
+        }
+        finally
+        {
+            _requesting = false;
+        }
+    }
+
+    // ------------------------------------------------------------------ 读取短信
+
+    private void OnDateChanged(ChangeEventArgs e)
+    {
+        // 清空日期（浏览器允许）或格式不对：沿用原来的日期，不让读取范围落到「没有值」
+        if (SmsRecognitionPresentation.TryParseInputValue(e.Value?.ToString(), out var date))
+        {
+            _fromDate = date;
+        }
+    }
+
+    /// <summary>读短信 → 识别出金额的放进待确认账单（SmsCapture）→ 摘要与每条短信的去向 → 提示</summary>
+    private async Task ReadAsync()
+    {
+        if (_loading || !_hasPermission)
+        {
+            return;
+        }
+
+        _loading = true;
+        _hasSearched = true;
+        _capture = null;
+        StateHasChanged();
+
+        try
+        {
+            List<SmsMessage> messages;
+            try
+            {
+                messages = await SmsService.ReadPaymentSmsAsync(_fromDate);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "读取短信失败");
+                // 读失败不是「没有短信」：退回读取前的引导状态（不显示「未找到支付类短信」），原因由 Toast 说明
+                _hasSearched = false;
+                await PopupService.EnqueueSnackbarAsync(SmsRecognitionPresentation.ReadFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+                return;
+            }
+
+            if (messages.Count == 0)
+            {
+                await PopupService.EnqueueSnackbarAsync(SmsRecognitionPresentation.NoResultText, AlertTypes.Info);
+                return;
+            }
+
+            try
+            {
+                _capture = await SmsCapture.CaptureAsync(PendingBillService, messages, Logger);
+            }
+            catch (Exception ex)
+            {
+                // 单条写入出错 SmsCapture 自己会记成「加入失败」；走到这里是意料之外的错误
+                Logger.LogWarning(ex, "把读到的短信加入待确认账单失败");
+                _hasSearched = false;
+                await PopupService.EnqueueSnackbarAsync(SmsRecognitionPresentation.CaptureFailedMessage(ex.GetUserMessage()), AlertTypes.Error);
+                return;
+            }
+
+            var toast = SmsRecognitionPresentation.CaptureToast(_capture);
+            await PopupService.EnqueueSnackbarAsync(toast.Message, ToAlertType(toast.Level));
         }
         finally
         {
             _loading = false;
+            _reads++;
         }
     }
 
-    // ===== 手动补全（Issue 14：识别失败的短信由用户手动补全后创建账单） =====
-    private Core.Interfaces.SmsMessage? _editingSms;
-    private string _manualAmountText = string.Empty;
-    private bool _manualIsIncome;
-    private string _manualChannel = string.Empty;
-
-    private void CancelManualBill()
+    private static AlertTypes ToAlertType(SmsToastLevel level) => level switch
     {
-        CloseManualDialog();
-    }
+        SmsToastLevel.Success => AlertTypes.Success,
+        SmsToastLevel.Warning => AlertTypes.Warning,
+        SmsToastLevel.Error => AlertTypes.Error,
+        _ => AlertTypes.Info,
+    };
 
-    private async Task ConfirmManualBill()
-    {
-        if (_editingSms == null) return;
-
-        // 手动补全时同样校验金额，避免重复打开对话框覆盖用户输入
-        if (!decimal.TryParse(_manualAmountText.Trim(), out var amount) || amount <= 0)
-        {
-            await PopupService.EnqueueSnackbarAsync("请输入有效的金额", AlertTypes.Warning);
-            return;
-        }
-
-        var sms = _editingSms;
-        CloseManualDialog();
-        await CreateBillFromSms(sms, amount, _manualIsIncome, _manualChannel);
-    }
-
-    private void CloseManualDialog()
-    {
-        _editingSms = null;
-        _manualAmountText = string.Empty;
-        _manualIsIncome = false;
-        _manualChannel = string.Empty;
-    }
-
-    private async Task CreateBillFromSms(Core.Interfaces.SmsMessage sms)
-    {
-        try
-        {
-            // 与短信广播接收器、通知栏监听共用同一份解析规则（PaymentContentParser）；备注记录原始短信内容
-            var parsed = PaymentContentParser.Parse(sms.Body);
-
-            if (parsed.Amount <= 0)
-            {
-                // Issue 14：金额识别失败时打开手动补全对话框，而不是直接中断
-                _editingSms = sms;
-                _manualAmountText = string.Empty;
-                _manualIsIncome = false;
-                _manualChannel = string.Empty;
-                return;
-            }
-
-            await CreateBillFromSms(sms, parsed.Amount, parsed.IsIncome, parsed.Channel);
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-    }
-
-    private async Task CreateBillFromSms(Core.Interfaces.SmsMessage sms, decimal amount, bool isIncome, string channel)
-    {
-        try
-        {
-            // 获取分类和渠道
-            var categories = await CategoryService.GetCategoriesAsync(_userId);
-            var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
-
-            var category = categories.FirstOrDefault(c => c.Name == "其他支出") ??
-                           categories.FirstOrDefault(c => c.Type == (isIncome ? BillType.Income : BillType.Expense));
-
-            var paymentChannel = channels.FirstOrDefault(c => c.Name.Contains(channel)) ??
-                                 channels.FirstOrDefault(c => c.Name == "其他");
-
-            if (category == null || paymentChannel == null)
-            {
-                await PopupService.EnqueueSnackbarAsync("无法匹配分类或渠道，请手动选择", AlertTypes.Warning);
-                return;
-            }
-
-            var bill = new Core.Entities.Bill
-            {
-                UserId = _userId,
-                Amount = amount,
-                Type = isIncome ? BillType.Income : BillType.Expense,
-                CategoryId = category.Id,
-                PaymentChannelId = paymentChannel.Id,
-                TransactionTime = sms.Date,
-                Note = sms.Body,
-                Source = BillSource.SmsRecognition,
-                SyncStatus = SyncStatus.Pending
-            };
-
-            await BillService.CreateBillAsync(bill);
-
-            // 从列表中移除已处理的短信
-            _smsMessages.Remove(sms);
-
-            await PopupService.EnqueueSnackbarAsync("账单创建成功", AlertTypes.Success);
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"创建账单失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-    }
+    /// <summary>摘要里「新加入待确认账单」：去待确认账单页确认入账</summary>
+    private void OpenPending() => NavController.Push("/pending-bills");
 }

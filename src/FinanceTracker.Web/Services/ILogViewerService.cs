@@ -15,6 +15,7 @@ public interface ILogViewerService
     /// <param name="pageSize">每页数量</param>
     /// <param name="levels">日志级别筛选（可选）</param>
     /// <returns>日志列表和总数</returns>
+    /// <exception cref="IOException">日志文件读取失败：目录无法枚举（可能是 <see cref="UnauthorizedAccessException"/>），或有日志文件但一个都读不出来。没有日志文件不算失败，返回空列表</exception>
     Task<(List<LogEntry> Logs, int TotalCount)> GetLogsAsync(
         DateTime? startDate = null,
         DateTime? endDate = null,
@@ -49,6 +50,7 @@ public interface ILogViewerService
     /// 获取日志统计信息
     /// </summary>
     /// <returns>日志统计</returns>
+    /// <exception cref="IOException">同 <see cref="GetLogsAsync"/>：日志文件读取失败时抛出，不返回全 0 的统计</exception>
     Task<LogStatistics> GetStatisticsAsync();
 }
 
@@ -96,11 +98,6 @@ public class LogEntry
     /// 属性字典（包含上下文信息）
     /// </summary>
     public Dictionary<string, string> Properties { get; set; } = new();
-
-    /// <summary>
-    /// 是否显示详情
-    /// </summary>
-    public bool ShowDetail { get; set; }
 
     /// <summary>
     /// 日志文件名

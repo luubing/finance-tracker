@@ -1,0 +1,43 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    左滑行（设计稿 05：左滑出现操作按钮）。本组件只渲染标记，滑动手势由 wwwroot/js/ui.js 的事件委托统一处理
+    （全局只装一份监听，行数再多也不产生每行一次的 JS 互操作，新增 / 重绘的行自动生效）。
+
+    约定（脚本依赖这些类名与属性，E2E 也观察它们）：
+      .ft-swipe[data-open="true|false"]      操作按钮是否已展开
+      .ft-swipe[data-dragging="true"]        正在拖动（此时不播放过渡动画）
+      .ft-swipe__tray                        操作按钮托盘（展开前 inert + aria-hidden，不可聚焦、读屏忽略）
+      .ft-swipe__content                     随手指位移的内容层
+
+    每个左滑操作都必须有不依赖滑动的等价入口（例如点按进入编辑页 / Sheet）——这是调用方的责任，本组件不替它决定。
+*@
+<div class="ft-swipe"
+     data-open="false"
+     data-disabled="@(Disabled ? "true" : null)"
+     data-testid="@TestId"
+     @attributes="AdditionalAttributes">
+    <div class="ft-swipe__tray" inert aria-hidden="true">
+        @Actions
+    </div>
+    <div class="ft-swipe__content">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    /// <summary>行内容（通常是一个 ListCell）</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>左滑后露出的操作（一到三个 SwipeAction）</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>禁用滑动（没有可用操作时）</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; } = "swipe-row";
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+}

@@ -66,6 +66,26 @@ public sealed class SqliteTestDatabase : IAsyncDisposable
     public Task<User> CreateUserAsync(string phoneNumber) =>
         new AuthService(Context, NullLogger<AuthService>.Instance).RegisterOrLoginAsync(phoneNumber);
 
+    private Ledger? _defaultLedger;
+
+    /// <summary>
+    /// 默认用户名下的默认账本。账本必填，测试里新建账单几乎都需要一个账本。
+    /// 首次调用时才创建（而不是随库初始化创建）：有些用例要断言"账本数量/同步内容"，不能凭空多出一个账本
+    /// </summary>
+    public async Task<Ledger> GetDefaultLedgerAsync() =>
+        _defaultLedger ??= await CreateLedgerAsync(User.Id, "默认账本");
+
+    /// <summary>
+    /// 为指定用户创建一个账本
+    /// </summary>
+    public Task<Ledger> CreateLedgerAsync(Guid ownerId, string name) =>
+        new LedgerService(Context, NullLogger<LedgerService>.Instance).CreateLedgerAsync(new Ledger
+        {
+            UserId = ownerId,
+            Name = name,
+            Icon = "mdi-book-open-variant"
+        });
+
     public async ValueTask DisposeAsync()
     {
         await Context.DisposeAsync();

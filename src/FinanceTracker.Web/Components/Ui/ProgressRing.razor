@@ -1,0 +1,89 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    进度环（设计稿 screens 09-budgets ②）：一圈粗环从 12 点钟方向顺时针画到当前进度，环中心放内容（百分比 + 说明）。
+    和构成圆环（DonutChart）一样用纯 SVG 画：没有脚本与 CDN 依赖，E2E 能直接读出进度；几何由 RingGeometry（纯函数）给出。
+    - 三种配色（品牌 / 警示橙 / 危险红），与进度条（ProgressBar）同一套语义；状态不能只靠颜色，
+      所以调用方必须同时提供 AriaValueText，并在环中心或旁边放文字说明（「已超支」「剩余 / 超支 ¥…」）。
+    - 无障碍：根节点 role="progressbar"，aria-valuenow 为 0–100 的整数，aria-valuetext 是带状态的文字；SVG 本身是装饰（aria-hidden）。
+    - 弧长变化走 CSS 过渡（stroke-dasharray）；「减弱动态效果」下不做过渡。
+    - 观察属性（E2E）：data-testid（TestId）、data-tone = brand | warning | danger、data-percent（弧长占整圈的百分比，0–100）。
+*@
+<div class="ft-ring ft-ring--@ToneKey @Class"
+     role="progressbar"
+     aria-valuemin="0"
+     aria-valuemax="100"
+     aria-valuenow="@Now"
+     aria-valuetext="@AriaValueText"
+     aria-label="@AriaLabel"
+     data-testid="@TestId"
+     data-tone="@ToneKey"
+     data-percent="@PercentText"
+     @attributes="AdditionalAttributes">
+    <svg class="ft-ring__svg" viewBox="0 0 @Num(RingGeometry.ViewBox) @Num(RingGeometry.ViewBox)" aria-hidden="true" focusable="false">
+        <circle class="ft-ring__track"
+                cx="@Num(Center)" cy="@Num(Center)" r="@Num(RingGeometry.Radius)"
+                fill="none"
+                stroke-width="@Num(RingGeometry.StrokeWidth)"></circle>
+        @if (Clamped > 0m)
+        {
+            @* 从 12 点钟方向开始、顺时针；用虚线只显示进度那一段（虚线长度走样式，才能有过渡） *@
+            <circle class="ft-ring__arc"
+                    cx="@Num(Center)" cy="@Num(Center)" r="@Num(RingGeometry.Radius)"
+                    fill="none"
+                    stroke-width="@Num(RingGeometry.StrokeWidth)"
+                    stroke-linecap="round"
+                    transform="rotate(-90 @Num(Center) @Num(Center))"
+                    style="stroke-dasharray: @Num(ArcLength) @Num(RingGeometry.Circumference)"></circle>
+        }
+    </svg>
+    <div class="ft-ring__center">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    private const double Center = RingGeometry.ViewBox / 2d;
+
+    /// <summary>进度，0–100（超出范围按边界处理）</summary>
+    [Parameter] public decimal Percent { get; set; }
+
+    /// <summary>配色</summary>
+    [Parameter] public ProgressTone Tone { get; set; } = ProgressTone.Brand;
+
+    /// <summary>读屏名称（例如「总预算」）</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>读屏的值说明，应包含状态（例如「已用 87%，接近上限」）；不给时只读百分比</summary>
+    [Parameter] public string? AriaValueText { get; set; }
+
+    /// <summary>环中心的内容（百分比 + 说明）</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>附加样式类</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string ToneKey => Tone switch
+    {
+        ProgressTone.Warning => "warning",
+        ProgressTone.Danger => "danger",
+        _ => "brand",
+    };
+
+    private decimal Clamped => Math.Clamp(Percent, 0m, 100m);
+
+    private int Now => (int)Math.Floor(Clamped);
+
+    private double ArcLength => RingGeometry.ArcLength(Percent);
+
+    private string PercentText => Clamped.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    // SVG 属性与样式里的数字：固定用 . 作小数点（不随设备区域设置变化），最多三位小数
+    private static string Num(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+}

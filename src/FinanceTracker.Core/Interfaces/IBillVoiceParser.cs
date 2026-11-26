@@ -55,4 +55,31 @@ public class ParsedBillDraft
     /// 识别的原始文本（预填到备注）
     /// </summary>
     public string RawText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 解析器在 <see cref="RawText"/> 里「认出」的片段（金额 / 分类 / 支付渠道 / 时间），按出现位置排序，
+    /// 只供界面在转写文本里高亮；解析没认出的字段没有片段。不参与任何解析规则，也不会落库。
+    /// </summary>
+    public IReadOnlyList<VoiceMatchSpan> Matches { get; set; } = [];
 }
+
+/// <summary>语音解析认出的片段种类</summary>
+public enum VoiceMatchKind
+{
+    /// <summary>金额（「三十五块」「¥35」）</summary>
+    Amount = 0,
+
+    /// <summary>分类（分类名，或预设分类的同义词，如「午饭」）</summary>
+    Category = 1,
+
+    /// <summary>支付渠道（渠道名，或同义词，如「微信」）</summary>
+    PaymentChannel = 2,
+
+    /// <summary>交易时间（「昨天」「上周五」「5月20号」）</summary>
+    Time = 3,
+}
+
+/// <summary>
+/// 识别文本里被解析器认出的一段：<paramref name="Start"/> / <paramref name="Length"/> 是 <see cref="ParsedBillDraft.RawText"/> 里的字符位置。
+/// </summary>
+public readonly record struct VoiceMatchSpan(int Start, int Length, VoiceMatchKind Kind);

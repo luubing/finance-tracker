@@ -1,0 +1,153 @@
+@namespace FinanceTracker.Web.Components.Statistics
+@inherits StatisticsViewBase
+@inject IStatisticsService StatisticsService
+
+@*
+    年度视图（设计稿 screens 03-stats；统计 Tab「年度」分段的内容）。
+    年份由外壳（Pages/Statistics.razor）的年份胶囊持有（上一年 / 下一年）、账本由外壳的账本胶囊持有，经参数传进来；本视图负责取数与摆放：
+      KPI 单卡（支出 / 收入 / 结余）→ 同比分析 → 月度趋势（十二个月的支出 / 收入 / 净收支折线）→ 支出构成（圆环 + 图例）→ 收入构成（圆环 + 图例）。
+    原年度报告页的全部能力都在：年份切换、三项汇总、同比（当年是「年初至今 vs 去年同期」，已结束的年份比整年；去年同期为 0 显示「—」）、
+    月度趋势、分类统计。数据口径与以前完全一致（ADR 0005）：GetAnnualStatisticsAsync / GetAnnualYearOverYearDataAsync，年份与月份按应用时区；统计只算当前用户自己记的账单。
+    分类统计在第 2 轮评审后（用户拍板）拆成「支出构成 / 收入构成」两个圆环：原先支出与收入的分类混在一起、占比占两者合计，
+    现在统计服务分别给出 ExpenseCategoryStats / IncomeCategoryStats，各自占比占本类合计，与月度分段的构成口径一致；混合口径的 CategoryStats 仍保留给 REST 接口。
+    观察属性（E2E）：根 stats-annual（data-year / data-state）；KPI annual-kpi 与 annual-total-expense / -income / -net（data-amount）；
+    同比 annual-yoy（ChartPanel）→ annual-yoy-scope / annual-yoy-period、annual-yoy-expense / annual-yoy-income（data-tone = good | bad | flat）
+    → {id}-rate（变化率文字）、{id}-base（去年同期金额，data-amount）、{id}-nobase（无对比基数的说明）；
+    月度趋势 annual-monthly（ChartPanel）；构成按类型各一套：annual-{expense|income}-header、annual-{expense|income}-composition（ChartPanel）
+    → annual-{key}-donut（donut-arc）、annual-{key}-total（data-amount）、annual-{key}-legend（legend-row）、annual-{key}-empty。
+*@
+<div class="ft-stats-view"
+     data-testid="stats-annual"
+     data-year="@Year"
+     data-state="@StateKey"
+     aria-busy="@(IsLoading ? "true" : null)">
+    @if (LoadFailed)
+    {
+        <EmptyState Icon="mdi-alert-circle-outline"
+                    Title="统计加载失败"
+                    Text="下拉刷新，再试一次"
+                    TestId="stats-load-failed" />
+    }
+    else
+    {
+        <KpiCard Items="_kpi" Loading="@(!HasLoaded)" TestId="annual-kpi" />
+
+        <SectionHeader Title="@StatisticsPresentation.YoyTitle" TestId="annual-yoy-header" />
+        <ChartPanel Loading="@(!HasLoaded)" SkeletonHeight="150" TestId="annual-yoy">
+            @if (_yoy is { } yoy)
+            {
+                <div class="ft-yoy">
+                    <p class="ft-yoy__scope" data-testid="annual-yoy-scope">@StatisticsPresentation.YoyScopeText(yoy)</p>
+                    <p class="ft-yoy__period" data-testid="annual-yoy-period">@StatisticsPresentation.YoyPeriodText(yoy)</p>
+                    @YoyCell("支出同比", "annual-yoy-expense", yoy.ExpenseChangeRate, yoy.PreviousYearExpense, higherIsBetter: false)
+                    @YoyCell("收入同比", "annual-yoy-income", yoy.IncomeChangeRate, yoy.PreviousYearIncome, higherIsBetter: true)
+                </div>
+            }
+        </ChartPanel>
+
+        <SectionHeader Title="@StatisticsPresentation.AnnualMonthlyTitle" TestId="annual-monthly-header" />
+        <ChartPanel Loading="@(!HasLoaded)"
+                    Empty="@(_billCount == 0)"
+                    EmptyText="@StatisticsPresentation.AnnualEmptyText"
+                    EmptyIcon="mdi-chart-line"
+                    SkeletonHeight="260"
+                    TestId="annual-monthly">
+            <EChartsView Option="_monthlyOption" Height="260" />
+        </ChartPanel>
+
+        @Composition(BillType.Expense)
+        @Composition(BillType.Income)
+    }
+</div>
+
+@code {
+    /// <summary>年份（应用时区）；由外壳的年份胶囊持有</summary>
+    [Parameter, EditorRequired] public int Year { get; set; }
+
+    // 加载结果（一次取齐、一起写入）
+    private IReadOnlyList<KpiItem> _kpi = BuildKpi(0m, 0m, "annual-total-expense", "annual-total-income", "annual-total-net");
+    private YearOverYearData? _yoy;
+    private int _billCount;
+    private object? _monthlyOption;
+    private decimal _totalExpense;
+    private decimal _totalIncome;
+    private IReadOnlyList<LegendRow> _expenseLegend = [];
+    private IReadOnlyList<LegendRow> _incomeLegend = [];
+
+    protected override object? LoadKey => Year;
+
+    protected override async Task LoadAsync()
+    {
+        // 参数在 await 期间可能变化：先取快照，用同一份参数取完所有数据
+        var year = Year;
+
+        var annual = await StatisticsService.GetAnnualStatisticsAsync(UserId, year, LedgerId);
+
+        // 整年同比：已结束的年份比整年；当年比「年初至今 vs 去年同期」，避免拿不完整的今年和去年全年比
+        var yoy = await StatisticsService.GetAnnualYearOverYearDataAsync(UserId, year, LedgerId);
+
+        _kpi = BuildKpi(annual.TotalExpense, annual.TotalIncome, "annual-total-expense", "annual-total-income", "annual-total-net");
+        _yoy = yoy;
+        _billCount = annual.BillCount;
+        _monthlyOption = StatisticsChartOptions.Monthly(annual.MonthlyData);
+        _totalExpense = annual.TotalExpense;
+        _totalIncome = annual.TotalIncome;
+        _expenseLegend = StatisticsPresentation.LegendOfCategories(annual.ExpenseCategoryStats);
+        _incomeLegend = StatisticsPresentation.LegendOfCategories(annual.IncomeCategoryStats);
+    }
+
+    /// <summary>
+    /// 构成：支出 / 收入各一节（节标题 + 圆环 + 图例），占比各自占本类合计；没有这一类账单时圆环是空环，下面一行说明。
+    /// 观察属性按类型带前缀：annual-expense-* / annual-income-*（header、composition、donut、total、legend、empty）。
+    /// </summary>
+    private RenderFragment Composition(BillType type)
+    {
+        var key = type == BillType.Income ? "income" : "expense";
+        var total = type == BillType.Income ? _totalIncome : _totalExpense;
+        var rows = type == BillType.Income ? _incomeLegend : _expenseLegend;
+
+        return @<text>
+            <SectionHeader Title="@StatisticsPresentation.CompositionTitle(type)" TestId="@($"annual-{key}-header")" />
+            <ChartPanel Loading="@(!HasLoaded)" TestId="@($"annual-{key}-composition")" SkeletonHeight="330">
+                <DonutChart Rows="rows" TestId="@($"annual-{key}-donut")">
+                    <span class="ft-donut__caption">@StatisticsPresentation.AnnualTotalLabel(type)</span>
+                    <AmountDisplay Amount="total"
+                                   Size="AmountSize.Lg"
+                                   Class="@(StatisticsPresentation.IsLongAmount(total) ? "ft-donut__total ft-amount--long" : "ft-donut__total")"
+                                   TestId="@($"annual-{key}-total")" />
+                </DonutChart>
+                @if (rows.Count > 0)
+                {
+                    <LegendList Rows="rows" AriaLabel="@StatisticsPresentation.AnnualLegendAriaLabel(type)" TestId="@($"annual-{key}-legend")" />
+                }
+                else
+                {
+                    <p class="ft-panel__note" data-testid="@($"annual-{key}-empty")">@StatisticsPresentation.AnnualCompositionEmptyText(type)</p>
+                }
+            </ChartPanel>
+        </text>;
+    }
+
+    /// <summary>
+    /// 同比的一栏：标题、变化率（涨跌的语义色）、去年同期金额；去年同期为 0 时变化率是「—」并说明「无对比基数」。
+    /// </summary>
+    private RenderFragment YoyCell(string label, string testId, decimal? rate, decimal previous, bool higherIsBetter)
+    {
+        var tone = StatisticsPresentation.ChangeTone(rate, higherIsBetter);
+        var rateText = StatisticsPresentation.FormatChangeRate(rate);
+        var size = StatisticsPresentation.RateSize(rateText);
+
+        return @<div class="ft-yoy__cell" data-testid="@testId" data-tone="@tone">
+            <p class="ft-yoy__label">@label</p>
+            <p class="ft-yoy__rate ft-yoy__rate--@tone @(size.Length > 0 ? $"ft-yoy__rate--{size}" : null)" data-testid="@(testId + "-rate")">@rateText</p>
+            <p class="ft-yoy__base">
+                去年同期
+                <AmountDisplay Amount="previous" Size="AmountSize.Md" TestId="@(testId + "-base")" />
+            </p>
+            @if (!rate.HasValue)
+            {
+                <p class="ft-yoy__nobase" data-testid="@(testId + "-nobase")">（无对比基数）</p>
+            }
+        </div>;
+    }
+}

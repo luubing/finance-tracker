@@ -1,9 +1,10 @@
 @namespace FinanceTracker.Web.Components.Charts
 @using FinanceTracker.Core.Interfaces
+@using FinanceTracker.Web.Design
 
 @if (_option != null)
 {
-    <MECharts Option="_option" Height="260" />
+    <EChartsView Option="_option" Height="260" />
 }
 
 @code {
@@ -100,8 +101,8 @@
                     data = cumExpense,
                     smooth = true,
                     showSymbol = false,
-                    lineStyle = new { width = 2, color = "#FF5252" },
-                    itemStyle = new { color = "#FF5252" }
+                    lineStyle = new { width = 2, color = DesignTokens.ExpenseColor },
+                    itemStyle = new { color = DesignTokens.ExpenseColor }
                 },
                 new
                 {
@@ -110,8 +111,8 @@
                     data = cumIncome,
                     smooth = true,
                     showSymbol = false,
-                    lineStyle = new { width = 2, color = "#4CAF50" },
-                    itemStyle = new { color = "#4CAF50" }
+                    lineStyle = new { width = 2, color = DesignTokens.IncomeColor },
+                    itemStyle = new { color = DesignTokens.IncomeColor }
                 },
                 new
                 {
@@ -121,8 +122,8 @@
                     smooth = true,
                     showSymbol = false,
                     areaStyle = new { opacity = 0.15 },
-                    lineStyle = new { width = 2, color = "#2196F3" },
-                    itemStyle = new { color = "#2196F3" }
+                    lineStyle = new { width = 2, color = DesignTokens.BrandColor },
+                    itemStyle = new { color = DesignTokens.BrandColor }
                 }
             }
         };

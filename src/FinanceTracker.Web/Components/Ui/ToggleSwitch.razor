@@ -1,0 +1,41 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    开关（设计稿 06 · 列表单元格）：iOS 样式，51 × 31，打开为绿色。
+    语义是 role="switch" + aria-checked，读屏会读出「开 / 关」；整个可点区域扩展到 ≥ 44（见 ui.css 的 ::before）。
+    必须给 AriaLabel（或用 aria-labelledby 指向旁边的标题）。
+*@
+<button type="button"
+        role="switch"
+        class="ft-switch"
+        aria-checked="@(Value ? "true" : "false")"
+        aria-label="@AriaLabel"
+        disabled="@Disabled"
+        data-testid="@TestId"
+        @onclick="ToggleAsync"
+        @attributes="AdditionalAttributes">
+</button>
+
+@code {
+    /// <summary>是否打开</summary>
+    [Parameter] public bool Value { get; set; }
+
+    [Parameter] public EventCallback<bool> ValueChanged { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>读屏名称</summary>
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private async Task ToggleAsync()
+    {
+        Value = !Value;
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

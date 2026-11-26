@@ -26,26 +26,14 @@ public class BillsController : BaseApiController
 
     /// <summary>
     /// 账本写权限校验：账单归属共享账本时，Viewer/非成员不能记账（与 ADR 0004 权限模型一致）。
-    /// 账本为空（未归属账本）或属于本人时直接放行（EnsureCanWrite 内部已覆盖自有账本场景）。
+    /// 属于本人的账本直接放行（EnsureCanWrite 内部已覆盖自有账本场景）。
+    /// 账本必填由 <see cref="ValidateBillRequest"/> 先行拦截，这里不再把"未传账本"当作合法情形。
     /// </summary>
     private async Task<IActionResult?> ValidateLedgerWritePermissionAsync(Guid userId, Guid? ledgerId)
     {
         if (ledgerId.HasValue && ledgerId.Value != Guid.Empty)
         {
-            try
-            {
-                await _ledgerMemberService.EnsureCanWriteAsync(ledgerId.Value, userId);
-            }
-            catch (ForbiddenAccessException ex)
-            {
-                // 注意：Forbid(string) 的参数是 authenticationScheme 而非消息，误用会导致 500。
-                // 这里显式返回 403 + 错误信息
-                return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            return await CheckLedgerWritableAsync(_ledgerMemberService, ledgerId.Value, userId);
         }
 
         return null;
@@ -196,6 +184,12 @@ public class BillsController : BaseApiController
             var updatedBill = await _billService.UpdateBillAsync(bill);
             return Ok(MapToResponse(updatedBill));
         }
+        catch (ForbiddenAccessException ex)
+        {
+            // 账单现在所在的账本里我只是只读成员：已认证但无权操作 → 403（不能是 401）。
+            // 不能用 Forbid(string)：参数是认证方案名而非消息
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
@@ -211,7 +205,17 @@ public class BillsController : BaseApiController
     public async Task<IActionResult> DeleteBill(Guid id)
     {
         var userId = GetUserId();
-        var result = await _billService.DeleteBillAsync(id, userId);
+
+        bool result;
+        try
+        {
+            result = await _billService.DeleteBillAsync(id, userId);
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            // 只读成员不能删除共享账本里的账单：403 + 原因（不能是 401，否则客户端会误判为登录过期而登出）
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
 
         if (!result)
         {
@@ -262,6 +266,13 @@ public class BillsController : BaseApiController
         if (request.PaymentChannelId == Guid.Empty)
         {
             return BadRequest(new { message = "请选择支付渠道" });
+        }
+
+        // 账本必填：新建与编辑都必须指定账本（BillService 也会兜底校验，这里先返回明确的 400，
+        // 避免编辑场景下 ArgumentException 被 UpdateBill 统一映射成 404）
+        if (request.LedgerId is null || request.LedgerId == Guid.Empty)
+        {
+            return BadRequest(new { message = "请选择账本" });
         }
 
         return null;
@@ -315,7 +326,7 @@ public class BillRequest
     public Guid PaymentChannelId { get; set; }
 
     /// <summary>
-    /// 账本ID（null 表示未归属账本）
+    /// 账本ID（必填；类型保持可空是为了缺省时能返回"请选择账本"的明确提示，而不是反序列化成 Guid.Empty）
     /// </summary>
     public Guid? LedgerId { get; set; }
 

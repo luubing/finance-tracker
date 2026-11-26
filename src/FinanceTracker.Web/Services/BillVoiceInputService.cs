@@ -29,7 +29,7 @@ public sealed class BillVoiceInputService : IAsyncDisposable
     /// <summary>语音识别出错时触发（含用户可读的错误信息）</summary>
     public event Func<string, Task>? ErrorOccurred;
 
-    /// <summary>按住录音过程中收到部分识别文本时触发（实时上屏）</summary>
+    /// <summary>识别过程中收到部分识别文本时触发（实时上屏）：原生按住录音的流式结果，或浏览器 Web Speech 的临时结果</summary>
     public event Func<string, Task>? PartialTextReceived;
 
     /// <summary>
@@ -103,7 +103,11 @@ public sealed class BillVoiceInputService : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            // 用户取消或超时，静默结束
+            // 用户取消或超时，静默结束；超时时浏览器端的识别器还在跑，要让它停下并丢弃结果（原生一次性识别由取消令牌自己结束）
+            if (_voiceService is null)
+            {
+                await CancelAsync();
+            }
         }
         catch (JSDisconnectedException)
         {
@@ -116,6 +120,50 @@ public sealed class BillVoiceInputService : IAsyncDisposable
         finally
         {
             _isRecognizing = false;
+        }
+    }
+
+    /// <summary>
+    /// 浏览器识别：说完了（覆盖层里点大麦克风）——让识别器结束并给出已听到内容的最终结果，结果仍通过
+    /// <see cref="VoiceTextReceived"/> / <see cref="ErrorOccurred"/> 返回。没有正在进行的识别、或走原生一次性识别时什么也不做。
+    /// </summary>
+    public async Task StopAsync()
+    {
+        if (_voiceService is not null || !_moduleTask.IsValueCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            var module = await _moduleTask.Value;
+            await module.InvokeVoidAsync("stopRecognition");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // 尽力而为：识别器已经结束 / 电路已断开，没有可停的东西
+        }
+    }
+
+    /// <summary>
+    /// 浏览器识别：取消正在进行的识别并丢弃结果（取消按钮 / Esc / 超时 / Sheet 被关），不回调任何结果与错误；幂等。
+    /// 按住录音的取消走 <see cref="CancelHoldRecordingAsync"/>。
+    /// </summary>
+    public async Task CancelAsync()
+    {
+        if (_voiceService is not null || !_moduleTask.IsValueCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            var module = await _moduleTask.Value;
+            await module.InvokeVoidAsync("cancelRecognition");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            // 尽力而为：识别器已经结束 / 电路已断开，没有可取消的东西
         }
     }
 
@@ -264,6 +312,14 @@ public sealed class BillVoiceInputService : IAsyncDisposable
     [JSInvokable]
     public Task OnVoiceText(string text) => PublishResultAsync(text);
 
+    /// <summary>JS 回调：识别过程中的部分结果（实时转写）。空白文本忽略</summary>
+    [JSInvokable]
+    public Task OnPartialText(string text)
+    {
+        var handler = PartialTextReceived;
+        return handler is null || string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : handler(text);
+    }
+
     /// <summary>JS 回调：识别失败</summary>
     [JSInvokable]
     public Task OnError(string message) => NotifyErrorAsync(message);
@@ -276,12 +332,19 @@ public sealed class BillVoiceInputService : IAsyncDisposable
             if (_moduleTask.IsValueCreated)
             {
                 var module = await _moduleTask.Value;
+
+                // 回调引用马上就要释放：还在识别的话先让识别器停下并丢弃结果，别让它在后台继续录音
+                if (_voiceService is null)
+                {
+                    await module.InvokeVoidAsync("cancelRecognition");
+                }
+
                 await module.DisposeAsync();
             }
         }
-        catch (JSDisconnectedException)
+        catch (Exception ex) when (ex is JSDisconnectedException or JSException or TaskCanceledException)
         {
-            // 电路已断开，模块引用由运行时回收
+            // 电路已断开（模块引用由运行时回收）或脚本已经不在：没有可停的东西
         }
 
         _dotNetReference?.Dispose();

@@ -1,781 +1,926 @@
 @page "/bills"
-@using FinanceTracker.Core.Enums
-@using FinanceTracker.Core.Interfaces
+@using Masa.Blazor.Presets.PageStack.NavController
+@implements IDisposable
 @inject IBillService BillService
 @inject ICategoryService CategoryService
 @inject IPaymentChannelService PaymentChannelService
 @inject ILedgerService LedgerService
+@inject ILedgerMemberService LedgerMemberService
 @inject AuthenticationService AuthStateService
+@inject BillEventService BillEventService
+@inject PageDataGate DataGate
+@inject AddBillSheetService BillSheet
 @inject PageStackNavController NavController
 @inject IPopupService PopupService
-@inject BillEventService BillEventService
-@inject ILedgerMemberService LedgerMemberService
+@inject ILogger<Bills> Logger
 
-<PStackPageBar Title="账单列表"
-               CenterTitle
-               Flat
-               Color="primary">
-    <ActionContent>
-    
-        <MButton Icon OnClick="PushAddBill">
-            <MIcon Color="white">mdi-plus</MIcon>
-        </MButton>
-        <MButton Icon Disabled="_isRefreshing" OnClick="RefreshData">
-            <MIcon Color="white" Class="@(_isRefreshing ? "mdi-spin" : null)">mdi-refresh</MIcon>
-        </MButton>
-        <MButton Icon OnClick="() => _showFilterDrawer = !_showFilterDrawer">
-            <MIcon Color="white">mdi-filter</MIcon>
-        </MButton>
-        <MButton Icon OnClick="ToggleSelectMode">
-            <MIcon Color="white">@(_selectMode ? "mdi-close" : "mdi-checkbox-multiple-marked-outline")</MIcon>
-        </MButton>
-    </ActionContent>
-</PStackPageBar>
+@*
+    账单 Tab（设计稿 01 · 四个 Tab 根页面 / screens 02-bills）：
+      大标题「账单」（滚动后折叠为居中小标题）+ 右侧「筛选」「多选」两个按钮
+      → 搜索框 → 全部 / 支出 / 收入 分段 → 条件条（时间 / 账本 / 分类 / 支付渠道四颗标签，横向滑动）
+      → 汇总卡（当前条件下<b>全部</b>账单的支出 / 收入 / 笔数，不受分页影响）
+      → 按日分组的账单（组头：今天 / 昨天 / 日期、星期、当日合计——合计基于已加载账单，与汇总卡的全量口径不同）。
+    行内左滑「编辑 / 删除」，等价入口是点按整行进入编辑页（页内可删除）；删除（软删除）前用 Alert 确认，并随同步传播。
+    没有写权限的账单（共享账本里其他成员记的）不提供左滑，点按给「只有记录它的人可以修改」的提示——是提示，不是错误，更不会登出。
+    刷新：只有下拉手势，没有按钮形式的刷新入口（ADR 0007）；只重读本页数据（含筛选选项），不触发云端同步（同步只在「我的」里手动触发）。
+    筛选（09 号）：
+      - 导航栏「筛选」打开筛选 Sheet（BillFilterSheet：时间 / 账本含「未归属账本」/ 分类 / 支付渠道，底部「查看 N 笔账单」）；
+        Sheet 编辑的是草稿，点「查看」才生效。条件条上的标签点按 = 打开 Sheet 并定位到该组，已设置条件的标签点 × = 单独移除，
+        移除 / 生效后列表与汇总联动。条件条始终显示四颗标签，已设置的排在前面。
+      - 时间预设（今天 / 本周 / 本月 / 本年）按应用时区的日历日换算，区间含端点（TimeBoundaries）。
+      - 默认视图是「本月」（设计稿 02 / 13）：它不算筛选条件——不计角标、条件条上是中性的「本月 ⌄」；选别的时间范围才是条件。
+        取消时间（再点一次已选的预设，或条件标签的 ×）= 不限时间；Sheet 的「重置」回到「本月」。本月没有账单时空状态说「本月还没有账单」并给「查看全部账单」。
+      - 分类可多选（属于其中任意一个即符合），条件条上是「餐饮美食等 2 项」；其余三个维度单选。
+    批量选择（09 号）：导航栏「多选」进入，行首出现勾选框，底部浮出操作栏（全选 / 清空 / 已选数 / 归属账本），
+    「归属账本」打开 AssignLedgerSheet 选目标账本（必选）后批量更新。只有自己记的账单可选；筛选 / 批量状态随页面常驻，切换 Tab 不丢。
+    搜索（10 号）：大标题下方的搜索框（SearchField）按备注 / 分类名称（不区分大小写的包含匹配）搜索，整体是数字时再匹配金额（相等）；
+      与分段、条件条、筛选 Sheet 的全部条件叠加（取交集），汇总卡的笔数 / 金额随之联动，筛选 Sheet 底部的「查看 N 笔账单」也带着关键字算。
+      关键字不是筛选维度：不计角标数、条件条上没有它的标签，搜索框里的文字就是它的展示。
+      提交时机（停顿 / 回车 / 清除，输入法组词期间不提交）见 SearchField 与 wwwroot/js/ui.js；输入框是不受控的，从外部清空时靠换 @key（_searchEpoch）重建。
+      搜索框随页面常驻、跟着页面滚动（不是吸顶），与其它条件一样切换 Tab 不丢。
+    取数：列表与汇总用同一份 BillFilter；本页的读库都经过 PageDataGate 与首页 / 统计页排队（Tab 根页面常驻，共用一个 DbContext）。
+*@
 
-<!-- 筛选条件抽屉 -->
-<PDrawer Value="_showFilterDrawer"
-         ValueChanged="OnFilterDrawerChanged"
-         Class="bill-pdrawer justify-end transparent"
-         ContentStyle="max-width:80%!important;"
-         Title="筛选条件"
-         Right
-         SaveText="查询"
-         CancelText="重置"
-         OnSave="ApplyFilters"
-         OnCancel="ResetFilters"
-         BodyClass="pa-4">
-    <div class="mb-4">
-        <MTextField @bind-Value="_filter.StartDate"
-                    Label="开始日期"
-                    Type="date"
-                    Outlined
-                    Dense
-                    HideDetails="true" />
-    </div>
-    <div class="mb-4">
-        <MTextField @bind-Value="_filter.EndDate"
-                    Label="结束日期"
-                    Type="date"
-                    Outlined
-                    Dense
-                    HideDetails="true" />
-    </div>
-    <div class="mb-4">
-        <MSelect @bind-Value="_filter.CategoryId"
-                 Items="_categories"
-                 ItemText="c => c.Name"
-                 ItemValue="c => (Guid?)c.Id"
-                 Label="分类"
-                 Outlined
-                 Dense
-                 Clearable
-                 HideDetails="true" />
-    </div>
-    <div class="mb-4">
-        <MSelect @bind-Value="_filter.PaymentChannelId"
-                 Items="_paymentChannels"
-                 ItemText="c => c.Name"
-                 ItemValue="c => (Guid?)c.Id"
-                 Label="支付渠道"
-                 Outlined
-                 Dense
-                 Clearable
-                 HideDetails="true" />
-    </div>
-    <div class="mb-4">
-        <MSelect @bind-Value="_filter.LedgerId"
-                 Items="_ledgers"
-                 ItemText="@(l => l.DisplayText)"
-                 ItemValue="l => (Guid?)l.Id"
-                 Label="账本"
-                 Outlined
-                 Dense
-                 Clearable
-                 HideDetails="true" />
-    </div>
-    <div class="mb-2">
-        <div class="text-caption text--secondary mb-2">账单类型</div>
-        <MButtonGroup @bind-Value="_filterTypeValue" @bind-Value:after="OnFilterTypeChanged" Class="d-flex" Style="gap: 8px;">
-            <MButton Value="@((StringNumber?)"")" Color="default" Class="flex-grow-1">全部</MButton>
-            <MButton Value="@((StringNumber?)"Expense")" Color="error" Class="flex-grow-1">支出</MButton>
-            <MButton Value="@((StringNumber?)"Income")" Color="success" Class="flex-grow-1">收入</MButton>
-        </MButtonGroup>
-    </div>
-</PDrawer>
+@if (_isLoading || _userId != Guid.Empty)
+{
+    <LargeTitlePage Title="账单"
+                    Class="@(_selectMode ? "ft-bills ft-bills--selecting" : "ft-bills")"
+                    TestId="bills-page"
+                    Busy="@_isLoading"
+                    OnRefresh="PullRefreshAsync"
+                    RefreshTestId="bills-ptr">
+        <Actions>
+            <span class="ft-lnav__btnwrap">
+                <GlassButton Kind="ButtonKind.Glass"
+                             Round
+                             Icon="mdi-filter-variant"
+                             AriaLabel="@BillListPresentation.FilterButtonLabel(_filter.PanelCount)"
+                             aria-haspopup="dialog"
+                             TestId="bills-filter-open"
+                             OnClick="() => OpenFilter(null)" />
+                @if (_filter.PanelCount > 0)
+                {
+                    <span class="ft-lnav__badge" data-testid="bills-filter-badge" aria-hidden="true">@_filter.PanelCount</span>
+                }
+            </span>
+            <GlassButton Kind="ButtonKind.Glass"
+                         Round
+                         Icon="@(_selectMode ? "mdi-close" : "mdi-checkbox-multiple-marked-outline")"
+                         AriaLabel="@(_selectMode ? "退出多选" : "多选")"
+                         aria-pressed="@(_selectMode ? "true" : "false")"
+                         TestId="bills-select-toggle"
+                         OnClick="ToggleSelectMode" />
+        </Actions>
+        <ChildContent>
+            @* 搜索框：不受控（内容由浏览器持有），换 @key 才会被清空；结果笔数通过 role=status 播报给读屏 *@
+            <SearchField @key="_searchEpoch"
+                         TestId="bills-search"
+                         Placeholder="@BillListPresentation.SearchPlaceholder"
+                         AriaLabel="@BillListPresentation.SearchLabel"
+                         ClearLabel="@BillListPresentation.SearchClearLabel"
+                         MaxLength="BillListPresentation.SearchMaxLength"
+                         StatusText="@SearchStatusText"
+                         OnSearch="ApplyKeywordAsync" />
 
-<MContainer Style="height: calc(100vh - 56px); overflow-y: scroll;">
-    <!-- 批量操作栏（批量选择模式） -->
-    @if (_selectMode)
-    {
-        <MRow Class="my-0">
-            <MCol Cols="12">
-                <MCard Class="mb-2">
-                    <MCardText Class="d-flex align-center pa-2">
-                        <div class="d-flex align-center mr-2" style="cursor: pointer;"
-                             @onclick="() => OnSelectAllChanged(!_selectAll)">
-                            <MIcon Color="primary">
-                                @(_selectAll ? "mdi-checkbox-marked" : "mdi-checkbox-blank-outline")
-                            </MIcon>
-                            <span class="text-caption ml-1">全选</span>
-                        </div>
-                        <span class="text-caption text--secondary">已选 @_selectedBillIds.Count 笔</span>
-                        <MSpacer />
-                        <MButton Small Color="primary" Class="mr-1"
-                                 Disabled="@(!_selectedBillIds.Any())"
-                                 OnClick="ShowAssignDialog">
-                            <MIcon Small Class="mr-1">mdi-book-plus</MIcon>
-                            归属账本
-                        </MButton>
-                        <MButton Small Text Disabled="@(!_selectedBillIds.Any())" OnClick="ClearSelection">
-                            清空
-                        </MButton>
-                    </MCardText>
-                </MCard>
-            </MCol>
-        </MRow>
-    }
+            <SegmentedControl Options="SegmentOptions"
+                              Value="@_segment"
+                              ValueChanged="OnSegmentChanged"
+                              AriaLabel="账单类型"
+                              TestId="bills-segment" />
 
-    <!-- 统计卡片 -->
-    <MRow Class="my-0">
-        <MCol Cols="6" Class="pr-1">
-            <MCard Color="error" Dark>
-                <MCardText Class="text-center pa-2">
-                    <div class="text-caption">总支出</div>
-                    <div class="text-subtitle-1 font-weight-bold">¥@_totalExpense.ToString("N2")</div>
-                </MCardText>
-            </MCard>
-        </MCol>
-        <MCol Cols="6" Class="pl-1">
-            <MCard Color="success" Dark>
-                <MCardText Class="text-center pa-2">
-                    <div class="text-caption">总收入</div>
-                    <div class="text-subtitle-1 font-weight-bold">¥@_totalIncome.ToString("N2")</div>
-                </MCardText>
-            </MCard>
-        </MCol>
-    </MRow>
+            @* 条件条：时间 / 账本 / 分类 / 支付渠道四颗标签，已设置条件的排在前面；横向滑动，不换行 *@
+            <div class="ft-chiprow" role="group" aria-label="筛选条件" data-testid="bills-chips">
+                @foreach (var dimension in ChipOrder)
+                {
+                    var current = dimension;
+                    <BillFilterChip @key="current"
+                                    Dimension="current"
+                                    Value="@ChipValue(current)"
+                                    Active="@_filter.Has(current)"
+                                    TestId="@("bills-chip-" + current.ToString().ToLowerInvariant())"
+                                    OnOpen="() => OpenFilter(current)"
+                                    OnRemove="() => RemoveConditionAsync(current)" />
+                }
+            </div>
 
-    <!-- 账单列表 -->
-    <MRow Class="my-0">
-        <MCol Cols="12">
+            @* 汇总卡：当前条件下全部账单（不受分页影响）的支出 / 收入 / 笔数 *@
+            <section class="ft-summary" aria-label="汇总" data-testid="bills-summary">
+                <div class="ft-summary__cell">
+                    <span class="ft-summary__label">支出</span>
+                    @if (_isLoading)
+                    {
+                        <span class="ft-skeleton ft-skeleton--summary" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <AmountDisplay Amount="_summary.TotalExpense" Class="@SummaryAmountClass(_summary.TotalExpense, "ft-summary__expense")" TestId="bills-total-expense" />
+                    }
+                </div>
+                <div class="ft-summary__cell">
+                    <span class="ft-summary__label">收入</span>
+                    @if (_isLoading)
+                    {
+                        <span class="ft-skeleton ft-skeleton--summary" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <AmountDisplay Amount="_summary.TotalIncome" Class="@SummaryAmountClass(_summary.TotalIncome, "ft-summary__income")" TestId="bills-total-income" />
+                    }
+                </div>
+                <div class="ft-summary__cell">
+                    <span class="ft-summary__label">笔数</span>
+                    @if (_isLoading)
+                    {
+                        <span class="ft-skeleton ft-skeleton--summary" aria-hidden="true"></span>
+                    }
+                    else
+                    {
+                        <span class="ft-summary__count" data-testid="bills-count" data-count="@_summary.Count">@_summary.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+                    }
+                </div>
+            </section>
+
             @if (_isLoading)
             {
-                <MContainer Class="d-flex justify-center align-center" Style="height: 200px;">
-                    <MProgressCircular Indeterminate Size="64" Color="primary" />
-                </MContainer>
+                <section class="ft-day" data-testid="bills-skeleton" aria-hidden="true">
+                    <GroupedList>
+                        @for (var i = 0; i < 4; i++)
+                        {
+                            <div class="ft-skeleton-row">
+                                <span class="ft-skeleton ft-skeleton--tile"></span>
+                                <span class="ft-skeleton-row__main">
+                                    <span class="ft-skeleton ft-skeleton--title"></span>
+                                    <span class="ft-skeleton ft-skeleton--sub"></span>
+                                </span>
+                            </div>
+                        }
+                    </GroupedList>
+                </section>
+            }
+            else if (_groups.Count == 0)
+            {
+                // 只受默认的「本月」限制（没有别的条件、没有搜索）：更早的月份里可能有账单，不能说「还没有账单」，并给出「查看全部账单」
+                var onlyMonth = !_filter.HasAny && _filter.IsDefaultTime;
+                var empty = BillListPresentation.EmptyState(_filter.HasConditions, _filter.HasKeyword, onlyMonth);
+                <EmptyState Icon="@(_filter.HasAny ? "mdi-text-box-search-outline" : "mdi-receipt")"
+                            Title="@empty.Title"
+                            Text="@empty.Text"
+                            TestId="bills-empty">
+                    <Action>
+                        @if (_filter.HasAny)
+                        {
+                            <GlassButton Kind="ButtonKind.Soft" Large Icon="@(_filter.HasConditions ? "mdi-filter-remove-outline" : "mdi-magnify-close")" TestId="bills-clear-filter" OnClick="ClearAllFiltersAsync">@BillListPresentation.ClearConditionsText(_filter.HasConditions, _filter.HasKeyword)</GlassButton>
+                        }
+                        else
+                        {
+                            <GlassButton Kind="ButtonKind.Brand" Large Icon="mdi-plus" TestId="bills-first-bill" OnClick="OpenAddBill">记一笔</GlassButton>
+                            @if (onlyMonth)
+                            {
+                                <GlassButton Kind="ButtonKind.Soft" Large Icon="mdi-calendar-blank-outline" TestId="bills-show-all" OnClick="ShowAllTimeAsync">@BillListPresentation.ShowAllTimeText</GlassButton>
+                            }
+                        }
+                    </Action>
+                </EmptyState>
             }
             else
             {
-                @foreach (var group in _groupedBills)
-                {
-                    <MCard Class="mb-4">
-                        <MCardTitle Class="pb-0">
-                            <div>
-                                <div class="text-h6">@group.Date.ToString("yyyy年MM月dd日")</div>
-                                <div class="text-caption text--secondary">
-                                    支出: ¥@group.TotalExpense.ToString("N2") | 收入: ¥@group.TotalIncome.ToString("N2")
-                                </div>
-                            </div>
-                        </MCardTitle>
-
-                        <MCardText>
-                            <MList Class="px-0">
-                                @foreach (var bill in group.Bills)
+                <div data-testid="bills-list" data-loaded-count="@_items.Count">
+                    @foreach (var group in _groups)
+                    {
+                        <section class="ft-day" data-testid="bills-day" data-date="@group.Key" @key="group.Key">
+                            <header class="ft-day__head">
+                                <h2 class="ft-day__title" data-testid="bills-day-title">@group.Title</h2>
+                                <span class="ft-day__date" data-testid="bills-day-date">@group.DateText</span>
+                                <span class="ft-day__totals" data-testid="bills-day-totals" data-expense="@Plain(group.Expense)" data-income="@Plain(group.Income)">@group.TotalsText</span>
+                            </header>
+                            <GroupedList TestId="bills-day-group">
+                                @foreach (var item in group.Items)
                                 {
-                                    <MListItem OnClick="() => OnBillClicked(bill)" Class="px-0">
-                                        @if (_selectMode)
-                                        {
-                                            <div class="mr-2 d-flex align-center" style="cursor: pointer;"
-                                                 @onclick="() => ToggleBillSelection(bill.Id)"
-                                                 @onclick:stopPropagation>
-                                                <MIcon Color="primary">
-                                                    @(_selectedBillIds.Contains(bill.Id) ? "mdi-checkbox-marked" : "mdi-checkbox-blank-outline")
-                                                </MIcon>
-                                            </div>
-                                        }
-                                        else
-                                        {
-                                            <MListItemIcon Class="mr-2">
-                                                <MIcon Size="28" Color="@(bill.Type == "Expense" ? "error" : "success")">
-                                                    @(bill.Type == "Expense" ? "mdi-minus" : "mdi-plus")
-                                                </MIcon>
-                                            </MListItemIcon>
-                                        }
-                                        <MListItemContent>
-                                            <MListItemTitle>
-                                                <span>@bill.CategoryName</span>
-                                                @if (!string.IsNullOrEmpty(bill.Note))
-                                                {
-                                                    <span class="text--secondary ml-2">- @bill.Note</span>
-                                                }
-                                            </MListItemTitle>
-                                            <MListItemSubtitle>
-                                                <MIcon Small Class="mr-1">@bill.PaymentChannelIcon</MIcon>
-                                                @bill.PaymentChannelName
-                                                @if (!string.IsNullOrEmpty(bill.LedgerName))
-                                                {
-                                                    <MChip XSmall Outlined Class="mx-1">
-                                                        <MIcon XSmall Class="mr-1">@bill.LedgerIcon</MIcon>
-                                                        @bill.LedgerName
-                                                    </MChip>
-                                                }
-                                                <span class="ml-2">@bill.TransactionTime.ToString("HH:mm")</span>
-                                            </MListItemSubtitle>
-                                        </MListItemContent>
-                                        <MListItemAction Class="d-flex align-center">
-                                            <span class="@(bill.Type == "Expense" ? "error--text" : "success--text") text-h6">
-                                                @(bill.Type == "Expense" ? "-" : "+")¥@bill.Amount.ToString("N2")
-                                            </span>
-                                            @if (!_selectMode)
+                                    <SwipeRow @key="item.Id"
+                                              TestId="bill-swipe"
+                                              Disabled="@(_selectMode || !item.CanModify)"
+                                              data-bill-id="@item.Id">
+                                        <Actions>
+                                            @if (item.CanModify)
                                             {
-                                                <span class="ml-1" style="cursor: pointer;"
-                                                      @onclick="() => ShowDeleteConfirm(bill)"
-                                                      @onclick:stopPropagation>
-                                                    <MIcon Small Color="error">mdi-delete</MIcon>
-                                                </span>
+                                                <SwipeAction Icon="mdi-pencil" Label="编辑" Tone="ActionTone.Brand" TestId="swipe-edit" OnClick="() => OpenEdit(item.Id)" />
                                             }
-                                        </MListItemAction>
-                                    </MListItem>
+                                            @* 我是只读成员的共享账本里自己记的账单：能打开编辑（保存时才被拒绝），但不给删除入口（服务层同样 403） *@
+                                            @if (item.CanDelete)
+                                            {
+                                                <SwipeAction Icon="mdi-delete" Label="删除" Tone="ActionTone.Danger" TestId="swipe-delete" OnClick="() => AskDelete(item)" />
+                                            }
+                                        </Actions>
+                                        <ChildContent>
+                                            <BillRow Model="item.Row"
+                                                     Selectable="_selectMode"
+                                                     Selected="@_selected.Contains(item.Id)"
+                                                     Disabled="@(_selectMode && !item.Selectable)"
+                                                     OnClick="OnRowClickAsync" />
+                                        </ChildContent>
+                                    </SwipeRow>
                                 }
-                            </MList>
-                        </MCardText>
-                    </MCard>
-                }
+                            </GroupedList>
+                        </section>
+                    }
+                </div>
 
-                <!-- 加载更多 -->
                 @if (_hasMore)
                 {
-                    <MContainer Class="d-flex justify-center pb-4">
-                        <MButton Outlined Color="primary" OnClick="LoadMore" Loading="_loadingMore">
-                            加载更多
-                        </MButton>
-                    </MContainer>
+                    <div class="ft-bills__more">
+                        <GlassButton Kind="ButtonKind.Soft" Busy="_isLoadingMore" TestId="bills-load-more" OnClick="LoadMoreAsync">加载更多</GlassButton>
+                    </div>
                 }
             }
-        </MCol>
-    </MRow>
-</MContainer>
+        </ChildContent>
+    </LargeTitlePage>
 
-<!-- 删除账单确认对话框 -->
-<MDialog @bind-Value="_showDeleteDialog" MaxWidth="320">
-    <MCard>
-        <MCardTitle Class="text-h6">
-            确认删除
-        </MCardTitle>
+    @* 删除确认（软删除，随同步传播） *@
+    <GlassAlert @bind-Visible="_deleteVisible"
+                Title="@BillListPresentation.DeleteTitle"
+                Message="@(_deleteTarget is null ? null : BillListPresentation.DeleteMessage(_deleteTarget))"
+                ConfirmText="删除"
+                Destructive
+                OnConfirm="DeleteConfirmedAsync"
+                OnClosed="OnDeleteClosed"
+                TestId="bill-delete-alert" />
 
-        <MCardText>
-            确定要删除这笔账单吗？删除后将从列表中移除。
-        </MCardText>
+    @* 多选模式的底部操作栏：悬浮在 Tab 栏之上，不是玻璃（玻璃层预算已被 Tab 栏与导航栏两个按钮用完） *@
+    @if (_selectMode)
+    {
+        <div class="ft-actionbar" role="toolbar" aria-label="批量操作" data-testid="bills-batchbar">
+            <GlassButton Kind="ButtonKind.Text" Disabled="@(SelectableCount == 0)" TestId="bills-select-all" OnClick="SelectAll">全选</GlassButton>
+            <GlassButton Kind="ButtonKind.Text" Disabled="@(_selected.Count == 0)" TestId="bills-select-clear" OnClick="ClearSelection">清空</GlassButton>
+            <span class="ft-actionbar__count" aria-live="polite" data-testid="bills-select-count" data-count="@_selected.Count">@BillListPresentation.SelectionText(_selected.Count)</span>
+            <GlassButton Kind="ButtonKind.Brand" Icon="mdi-book-plus" Disabled="@(_selected.Count == 0)" TestId="bills-assign" OnClick="ShowAssignSheet">归属账本</GlassButton>
+        </div>
+    }
 
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CancelDelete">取消</MButton>
-            <MButton Color="error" Loading="_isDeleting" OnClick="ConfirmDelete">删除</MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+    @* 筛选 Sheet：编辑草稿，点「查看」才生效；笔数与汇总卡同一口径 *@
+    <BillFilterSheet @bind-Visible="_filterOpen"
+                     Applied="_filter"
+                     Focus="_filterFocus"
+                     Ledgers="_ledgerOptions"
+                     Categories="_categoryOptions"
+                     Channels="_channelOptions"
+                     InitialCount="_summary.Count"
+                     CountAsync="CountForSheetAsync"
+                     OnApply="ApplyFromSheetAsync" />
 
-<!-- 批量归属账本对话框 -->
-<MDialog @bind-Value="_showAssignDialog" MaxWidth="400">
-    <MCard>
-        <MCardTitle Class="text-h6">
-            归属账本
-        </MCardTitle>
-
-        <MCardText>
-            <div class="text-caption text--secondary mb-2">
-                将已选的 @_selectedBillIds.Count 笔账单归属到账本（已归属的账单将被重新归属）
-            </div>
-            @if (_ledgers.Any())
-            {
-                <MSelect @bind-Value="_assignLedgerId"
-                         Items="_ledgers"
-                         ItemText="l => l.Name"
-                         ItemValue="l => (Guid?)l.Id"
-                         Label="目标账本"
-                         Outlined
-                         Dense
-                         Clearable
-                         HideDetails="true" />
-                <div class="text-caption text--secondary mt-2">不选择账本表示移出已选账单的账本归属</div>
-            }
-            else
-            {
-                <div class="text-caption text--secondary">暂无账本，请先到“我的 - 账本管理”中创建</div>
-            }
-        </MCardText>
-
-        <MCardActions>
-            <MSpacer />
-            <MButton Text OnClick="CloseAssignDialog">取消</MButton>
-            <MButton Color="primary" Loading="_isAssigning"
-                     Disabled="@(!_ledgers.Any() || _isAssigning)"
-                     OnClick="ConfirmAssign">
-                确定
-            </MButton>
-        </MCardActions>
-    </MCard>
-</MDialog>
+    @* 批量归属账本：只能归到自己的账本，账本必选 *@
+    <AssignLedgerSheet @bind-Visible="_assignVisible"
+                       SelectedCount="_selected.Count"
+                       Ledgers="_ownLedgers"
+                       Busy="_isAssigning"
+                       OnConfirm="ConfirmAssignAsync" />
+}
 
 @code {
-    private bool _isLoading = true;
-    private bool _loadingMore;
-    private bool _hasMore = true;
-    private int _currentPage = 1;
     private const int PageSize = 20;
 
-    // 手动刷新状态
-    private bool _isRefreshing;
-
-    // 筛选抽屉
-    private bool _showFilterDrawer;
-    private StringNumber? _filterTypeValue;
-
-    // 批量选择模式
-    private bool _selectMode;
-    private bool _selectAll;
-    private HashSet<Guid> _selectedBillIds = new();
-
-    // 删除账单
-    private bool _showDeleteDialog;
-    private bool _isDeleting;
-    private BillModel? _deletingBill;
-
-    // 批量归属账本
-    private bool _showAssignDialog;
-    private bool _isAssigning;
-    private Guid? _assignLedgerId;
-
-    private List<CategoryModel> _categories = new();
-    private List<PaymentChannelModel> _paymentChannels = new();
-    private List<LedgerModel> _ledgers = new();
-    private List<BillGroup> _groupedBills = new();
-
-    private decimal _totalExpense;
-    private decimal _totalIncome;
-
-    private FilterModel _filter = new();
+    private static readonly IReadOnlyList<SegmentOption> SegmentOptions =
+    [
+        new(BillListPresentation.SegmentAll, "全部"),
+        new(BillListPresentation.SegmentExpense, "支出"),
+        new(BillListPresentation.SegmentIncome, "收入"),
+    ];
 
     private Guid _userId;
 
-    protected override async Task OnInitializedAsync()
-    {
-        _userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+    // 整页骨架：首次进入 / 换了账号时为 true；之后改条件、刷新都保留旧内容直到新数据到达，不闪烁
+    private bool _isLoading = true;
+    private bool _isLoadingMore;
+    private bool _disposed;
 
-        await LoadFilterData();
-        await LoadBills();
+    // 应用时区的「现在」：组头的「今天 / 昨天」、行的时间文案用它（每次加载时更新）
+    private DateTime _nowLocal = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+    // 筛选状态：分段（账单类型）+ 筛选 Sheet / 条件条里的条件；两者合起来就是列表与汇总共用的 BillFilter
+    private readonly BillListFilter _filter = new();
+    private string _segment = BillListPresentation.SegmentAll;
+
+    // 搜索框是不受控的（内容在浏览器里，服务端不回写）：需要从外部清空时（清除全部条件 / 换了账号）+1，搜索框换 @key 重建
+    private int _searchEpoch;
+
+    // 筛选 Sheet：是否打开，以及打开后定位到哪一组（从条件条上的标签进入时有值）
+    private bool _filterOpen;
+    private BillFilterDimension? _filterFocus;
+
+    // 已加载的账单（服务端顺序）、按天分组的结果、全量汇总
+    private List<BillListItem> _items = new();
+    private IReadOnlyList<BillDayGroup> _groups = [];
+    private BillSummary _summary = BillSummary.Empty;
+    private int _pageCount;
+    private bool _hasMore;
+
+    // 每次要求重新加载 +1：排队等锁期间被更新的加载取代的旧加载直接放弃，只有最新一次真正查询
+    private int _loadVersion;
+
+    // 筛选选项：账本（自有 + 共享）、分类、支付渠道；批量归属只能归到自己的账本
+    private List<LedgerModel> _ledgerOptions = new();
+    private List<LedgerModel> _ownLedgers = new();
+    private List<BillFilterOption> _categoryOptions = new();
+    private List<BillFilterOption> _channelOptions = new();
+
+    // 我是只读成员（Viewer）的共享账本：自己记在里面的账单不给删除 / 批量归属的入口（服务层同样以 403 拒绝，ADR 0004）。
+    // 与筛选选项一起读（读本地成员缓存）；读不到共享账本时保留上一次的结果
+    private HashSet<Guid> _readOnlyLedgerIds = new();
+
+    // 多选模式
+    private bool _selectMode;
+    private readonly HashSet<Guid> _selected = new();
+
+    // 删除确认
+    private bool _deleteVisible;
+    private BillListItem? _deleteTarget;
+
+    // 批量归属账本
+    private bool _assignVisible;
+    private bool _isAssigning;
+
+    protected override void OnInitialized()
+    {
+        // 打开时看的是默认视图「本月」（不算筛选条件）；骨架屏阶段的条件条也已经是它，不会等数据到了才从「时间」变成「本月」
+        _filter.ResetPanel();
+
+        AuthStateService.AuthStateChanged += OnAuthStateChanged;
+        BillEventService.BillChanged += OnBillChanged;
+        NavController.PageClosed += OnPageClosed;
     }
 
-    private async Task LoadFilterData()
+    // 注意：本应用为 Blazor Server（ServerPrerendered 渲染），OnInitializedAsync 阶段 JS interop 不可用，
+    // 登录状态存在 localStorage 里，所以依赖它的初始化放到首次渲染之后（与 Index.razor 相同）。
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var categories = await CategoryService.GetCategoriesAsync(_userId);
-        _categories = categories.Select(c => new CategoryModel
+        if (firstRender)
         {
-            Id = c.Id,
-            Name = c.Name,
-            Icon = c.Icon,
-            Type = c.Type
-        }).ToList();
-
-        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
-        _paymentChannels = channels.Select(c => new PaymentChannelModel
-        {
-            Id = c.Id,
-            Name = c.Name,
-            Icon = c.Icon
-        }).ToList();
-
-        var ledgers = await LedgerService.GetLedgersAsync(_userId);
-        _ledgers = ledgers.Select(l => new LedgerModel
-        {
-            Id = l.Id,
-            Name = l.Name,
-            Icon = l.Icon,
-            IsShared = false
-        }).ToList();
-
-        // 共享账本：筛选时账本内全部成员账单可见（BillService 已处理共享可见性）
-        try
-        {
-            var sharedLedgers = await LedgerMemberService.GetSharedLedgersAsync(_userId);
-            _ledgers.AddRange(sharedLedgers.Select(l => new LedgerModel
-            {
-                Id = l.Id,
-                Name = l.Name,
-                Icon = l.Icon,
-                IsShared = true
-            }));
-        }
-        catch
-        {
-            // 共享账本加载失败不影响自有账本
-        }
-    }
-
-    private async Task LoadBills()
-    {
-        _isLoading = true;
-        _currentPage = 1;
-        _groupedBills.Clear();
-        _selectedBillIds.Clear();
-        _selectAll = false;
-
-        try
-        {
-            var billModels = await FetchBillsAsync(_currentPage);
-
-            GroupBills(billModels);
-
-            _hasMore = billModels.Count == PageSize;
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
-        {
-            _isLoading = false;
-        }
-    }
-
-    /// <summary>
-    /// 手动刷新账单列表（保持当前筛选条件）
-    /// </summary>
-    private async Task RefreshData()
-    {
-        if (_isRefreshing)
-        {
-            return;
-        }
-
-        _isRefreshing = true;
-        StateHasChanged();
-
-        try
-        {
-            await LoadFilterData();
-            await LoadBills();
-        }
-        finally
-        {
-            _isRefreshing = false;
+            await LoadUserAsync();
             StateHasChanged();
         }
     }
 
-    /// <summary>
-    /// 按筛选条件获取指定页的账单
-    /// </summary>
-    private async Task<List<BillModel>> FetchBillsAsync(int page)
+    public void Dispose()
     {
-        DateTime? startDate = !string.IsNullOrEmpty(_filter.StartDate)
-            ? DateTime.Parse(_filter.StartDate)
-            : null;
-
-        // 结束日期含当天：服务端的结束条件是"含端点的结束时刻"，必须取当天最后一个 tick（见 TimeBoundaries）
-        DateTime? endDate = !string.IsNullOrEmpty(_filter.EndDate)
-            ? TimeBoundaries.EndOfDay(DateTime.Parse(_filter.EndDate))
-            : null;
-
-        var bills = await BillService.GetBillsAsync(
-            _userId,
-            startDate,
-            endDate,
-            _filter.CategoryId,
-            _filter.PaymentChannelId,
-            _filter.LedgerId,
-            _filter.Type,
-            page,
-            PageSize);
-
-        return bills.Select(b => new BillModel
-        {
-            Id = b.Id,
-            Amount = b.Amount,
-            Type = b.Type.ToString(),
-            CategoryId = b.CategoryId,
-            CategoryName = b.Category?.Name ?? "未知分类",
-            CategoryIcon = b.Category?.Icon ?? "mdi-tag",
-            PaymentChannelId = b.PaymentChannelId,
-            PaymentChannelName = b.PaymentChannel?.Name ?? "未知渠道",
-            PaymentChannelIcon = b.PaymentChannel?.Icon ?? "mdi-credit-card",
-            LedgerName = b.Ledger?.Name,
-            LedgerIcon = b.Ledger?.Icon ?? "mdi-book",
-            // 库里是 UTC：视图模型统一持有应用时区的墙上时间，列表的按天分组、排序、HH:mm 展示都基于它
-            TransactionTime = AppTimeZone.ToLocal(b.TransactionTime),
-            Note = b.Note
-        }).ToList();
+        _disposed = true;
+        AuthStateService.AuthStateChanged -= OnAuthStateChanged;
+        BillEventService.BillChanged -= OnBillChanged;
+        NavController.PageClosed -= OnPageClosed;
     }
 
-    private async Task LoadMore()
-    {
-        if (_loadingMore) return;
+    // ------------------------------------------------------------------ 事件
 
-        _loadingMore = true;
-        _currentPage++;
+    private void OnAuthStateChanged() => _ = RunOnUiAsync(LoadUserAsync, "认证状态变化后刷新账单失败");
+
+    // 记一笔 / 编辑 / 导入 / 本页删除与归属账本都会发出：重新加载并保持已加载的页数
+    private void OnBillChanged() => _ = RunOnUiAsync(
+        async () =>
+        {
+            if (_userId != Guid.Empty)
+            {
+                await ReloadAsync(keepPages: true);
+            }
+        },
+        "账单变更后刷新账单列表失败");
+
+    private void OnPageClosed(object? sender, PageStackPageClosedEventArgs e)
+    {
+        // 二级页面关闭后重新加载（账本 / 分类 / 支付渠道 / 导入 / 待确认账单……都可能改了这里展示的数据）。
+        // 记一笔 / 编辑账单是布局级的 Sheet，不经过页面栈；它保存时已经通过 BillChanged 刷新
+        _ = RunOnUiAsync(
+            async () =>
+            {
+                if (_userId != Guid.Empty)
+                {
+                    await ReloadAsync(keepPages: true, reloadOptions: true);
+                }
+            },
+            "二级页面关闭后刷新账单列表失败");
+    }
+
+    /// <summary>
+    /// 在渲染线程上执行并重绘；失败只记日志（电路可能已关闭），不能把异常抛到事件源
+    /// </summary>
+    private async Task RunOnUiAsync(Func<Task> work, string failureMessage)
+    {
+        if (_disposed)
+        {
+            return;
+        }
 
         try
         {
-            var billModels = await FetchBillsAsync(_currentPage);
+            await InvokeAsync(async () =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
 
-            GroupBills(billModels);
-
-            _hasMore = billModels.Count == PageSize;
+                await work();
+                StateHasChanged();
+            });
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
-        {
-            _loadingMore = false;
+            Logger.LogWarning(ex, "{Message}", failureMessage);
         }
     }
 
-    /// <summary>
-    /// 账单变更（删除/归属账本）后重新加载，保持已加载的页数
-    /// </summary>
-    private async Task ReloadBills()
-    {
-        var lastLoadedPage = _currentPage;
-        _isLoading = true;
-        _currentPage = 1;
-        _groupedBills.Clear();
+    // ------------------------------------------------------------------ 加载
 
+    private async Task LoadUserAsync()
+    {
+        Guid userId;
         try
         {
-            var hasMore = true;
+            userId = await AuthStateService.GetUserIdAsync() ?? Guid.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "读取登录状态失败");
+            userId = Guid.Empty;
+        }
 
-            for (var page = 1; page <= lastLoadedPage && hasMore; page++)
+        if (userId == Guid.Empty)
+        {
+            // 未登录（退出登录后 Tab 根页面还留在页面栈里）：清掉上一个用户的数据，不显示任何账单
+            ResetData();
+            _userId = Guid.Empty;
+            _isLoading = false;
+            return;
+        }
+
+        if (userId != _userId)
+        {
+            // 首次进入，或换了账号：回到骨架，不让上一个用户的数据闪一下
+            ResetData();
+            _userId = userId;
+            _isLoading = true;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        // 骨架由 ReloadAsync 在「最新一次加载」结束时收起（见那里）：这一次若被更新的加载取代而提前返回，
+        // 不能在这里就收起，否则会闪一下「还没有账单」，直到最新那次读完
+        try
+        {
+            await ReloadAsync(keepPages: true, reloadOptions: true);
+        }
+        catch
+        {
+            // 取数失败已在 ReloadAsync 里提示；这里只保证骨架不会永远停着
+            _isLoading = false;
+            throw;
+        }
+    }
+
+    private void ResetData()
+    {
+        _items = new List<BillListItem>();
+        _groups = [];
+        _summary = BillSummary.Empty;
+        _pageCount = 0;
+        _hasMore = false;
+        // 搜索框里有字才需要重建（首次进入时搜索框还是空的，重建只会白白丢掉用户这时已经敲的字）
+        if (_filter.HasKeyword)
+        {
+            _searchEpoch++;
+        }
+
+        _filter.ResetAll();
+        _segment = BillListPresentation.SegmentAll;
+        _filterOpen = false;
+        _filterFocus = null;
+        _selectMode = false;
+        _selected.Clear();
+        _assignVisible = false;
+        _ledgerOptions = new List<LedgerModel>();
+        _ownLedgers = new List<LedgerModel>();
+        _readOnlyLedgerIds = new HashSet<Guid>();
+        _categoryOptions = new List<BillFilterOption>();
+        _channelOptions = new List<BillFilterOption>();
+    }
+
+    /// <summary>
+    /// 重新加载列表与汇总。
+    /// <paramref name="keepPages"/>：保持已加载的页数（账单变更 / 刷新）；否则回到第一页（改了筛选条件）。
+    /// 整个读库经过 <see cref="PageDataGate"/>：Tab 根页面常驻、共用一个 DbContext，一次账单变更会让首页 / 账单页 / 统计页同时重新加载。
+    /// </summary>
+    private async Task ReloadAsync(bool keepPages = false, bool reloadOptions = false)
+    {
+        if (_userId == Guid.Empty)
+        {
+            return;
+        }
+
+        var version = ++_loadVersion;
+        string? failure = null;
+
+        await DataGate.RunAsync(async () =>
+        {
+            // 排队期间又有更新的加载请求：这一次不用做了，最新的那次会读到最新的筛选条件
+            if (version != _loadVersion || _disposed)
             {
-                var billModels = await FetchBillsAsync(page);
-                GroupBills(billModels);
-                hasMore = billModels.Count == PageSize;
-                _currentPage = page;
+                return;
             }
 
-            _hasMore = hasMore;
-        }
-        catch (Exception ex)
-        {
-            await PopupService.EnqueueSnackbarAsync($"加载失败: {ex.GetUserMessage()}", AlertTypes.Error);
-        }
-        finally
+            _nowLocal = AppTimeZone.ToLocal(DateTime.UtcNow);
+
+            try
+            {
+                if (reloadOptions || _categoryOptions.Count == 0)
+                {
+                    await LoadFilterOptionsAsync();
+                }
+
+                await FetchAsync(keepPages ? Math.Max(1, _pageCount) : 1);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "加载账单列表失败");
+                failure = ex.GetUserMessage();
+            }
+        });
+
+        // 骨架只在最新一次加载结束时收起：被更新的加载取代的这一次什么也没读，骨架要留着等最新那次
+        if (version == _loadVersion)
         {
             _isLoading = false;
         }
-    }
 
-    private void GroupBills(List<BillModel> bills)
-    {
-        var groups = bills
-            .GroupBy(b => b.TransactionTime.Date)
-            .OrderByDescending(g => g.Key)
-            .Select(g => new BillGroup
-            {
-                Date = g.Key,
-                Bills = g.OrderByDescending(b => b.TransactionTime).ToList(),
-                TotalExpense = g.Where(b => b.Type == "Expense").Sum(b => b.Amount),
-                TotalIncome = g.Where(b => b.Type == "Income").Sum(b => b.Amount)
-            })
-            .ToList();
-
-        _groupedBills.AddRange(groups);
-
-        _totalExpense = _groupedBills.Sum(g => g.TotalExpense);
-        _totalIncome = _groupedBills.Sum(g => g.TotalIncome);
-    }
-
-    private void OnFilterDrawerChanged(bool value)
-    {
-        _showFilterDrawer = value;
-    }
-
-    private void PushAddBill()
-    {
-        NavController.Push("/add-bill");
-    }
-
-    private void OnFilterTypeChanged()
-    {
-        _filter.Type = _filterTypeValue?.ToString() switch
+        if (failure is not null)
         {
-            "Expense" => BillType.Expense,
-            "Income" => BillType.Income,
-            _ => null
-        };
-    }
-
-    private async Task ResetFilters()
-    {
-        _filter = new FilterModel();
-        _filterTypeValue = null;
-        _showFilterDrawer = false;
-        await LoadBills();
-    }
-
-    /// <summary>
-    /// 应用筛选条件并关闭抽屉
-    /// </summary>
-    private async Task ApplyFilters()
-    {
-        _showFilterDrawer = false;
-        await LoadBills();
-    }
-
-    private void EditBill(Guid billId)
-    {
-        NavController.Push($"/add-bill/{billId}");
-    }
-
-    /// <summary>
-    /// 点击账单项：批量选择模式下切换选中状态，否则进入编辑页
-    /// </summary>
-    private void OnBillClicked(BillModel bill)
-    {
-        if (_selectMode)
-        {
-            ToggleBillSelection(bill.Id);
-        }
-        else
-        {
-            EditBill(bill.Id);
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {failure}", AlertTypes.Error);
         }
     }
 
     /// <summary>
-    /// 切换批量选择模式（进入时清空已选，退出时重置全选状态）
+    /// 读取前 <paramref name="pageCount"/> 页账单 + 全量汇总（同一份条件）。
+    /// 一次取够 pageCount × PageSize 条：服务端排序是确定的（交易时间、创建时间、Id），所以等价于逐页累加。
     /// </summary>
-    private void ToggleSelectMode()
+    private async Task FetchAsync(int pageCount)
     {
-        _selectMode = !_selectMode;
-        _selectedBillIds.Clear();
-        _selectAll = false;
+        // 时间预设（今天 / 本周……）按本次加载的「现在」换算：加载更多沿用同一个 _nowLocal，翻页时区间不会漂移
+        var query = _filter.ToQuery(_nowLocal);
+        var take = pageCount * PageSize;
+
+        var bills = await BillService.GetBillsAsync(_userId, query, 1, take);
+        var summary = await BillService.GetBillSummaryAsync(_userId, query);
+
+        _items = bills.Select(bill => BillListPresentation.ToItem(bill, _nowLocal, _userId, _readOnlyLedgerIds)).ToList();
+        _pageCount = pageCount;
+        _hasMore = bills.Count >= take;
+        _summary = summary;
+
+        RebuildGroups();
+        PruneSelection();
     }
 
-    private void ToggleBillSelection(Guid billId)
+    private async Task LoadFilterOptionsAsync()
     {
-        if (!_selectedBillIds.Remove(billId))
-        {
-            _selectedBillIds.Add(billId);
-        }
+        var categories = await CategoryService.GetCategoriesAsync(_userId);
+        _categoryOptions = categories.Select(BillFilterOption.FromCategory).ToList();
 
-        SyncSelectAllState();
-    }
+        var channels = await PaymentChannelService.GetPaymentChannelsAsync(_userId);
+        _channelOptions = channels.Select(BillFilterOption.FromChannel).ToList();
 
-    private void OnSelectAllChanged(bool selectAll)
-    {
-        _selectAll = selectAll;
+        var ledgers = await LedgerService.GetLedgersAsync(_userId);
+        _ledgerOptions = ledgers.Select(l => LedgerModel.FromEntity(l)).ToList();
 
-        if (_selectAll)
-        {
-            foreach (var group in _groupedBills)
-            {
-                foreach (var bill in group.Bills)
-                {
-                    _selectedBillIds.Add(bill.Id);
-                }
-            }
-        }
-        else
-        {
-            _selectedBillIds.Clear();
-        }
-    }
+        // 追加共享账本之前先留一份自有账本：批量归属只能归到自己的账本
+        _ownLedgers = _ledgerOptions.ToList();
 
-    /// <summary>
-    /// 根据已选数量同步全选复选框状态
-    /// </summary>
-    private void SyncSelectAllState()
-    {
-        var totalCount = _groupedBills.Sum(g => g.Bills.Count);
-        _selectAll = totalCount > 0 && _selectedBillIds.Count >= totalCount;
-    }
-
-    private void ClearSelection()
-    {
-        _selectedBillIds.Clear();
-        _selectAll = false;
-    }
-
-    /// <summary>
-    /// 显示删除账单确认对话框
-    /// </summary>
-    private void ShowDeleteConfirm(BillModel bill)
-    {
-        _deletingBill = bill;
-        _showDeleteDialog = true;
-    }
-
-    private void CancelDelete()
-    {
-        _showDeleteDialog = false;
-        _deletingBill = null;
-    }
-
-    /// <summary>
-    /// 确认删除账单（软删除，并通知其他页面刷新数据）
-    /// </summary>
-    private async Task ConfirmDelete()
-    {
-        if (_deletingBill == null || _isDeleting)
-        {
-            return;
-        }
-
-        _isDeleting = true;
-
+        // 共享账本：筛选时账本内全部成员的账单可见（BillService 已处理共享可见性）；读本地缓存，加载失败不影响自有账本
+        var sharedLoaded = true;
         try
         {
-            var success = await BillService.DeleteBillAsync(_deletingBill.Id, _userId);
+            var shared = await LedgerMemberService.GetSharedLedgersAsync(_userId);
+            _ledgerOptions.AddRange(shared.Select(l => LedgerModel.FromEntity(l, isShared: true)));
 
-            if (success)
-            {
-                await PopupService.EnqueueSnackbarAsync("账单已删除", AlertTypes.Success);
-                BillEventService.NotifyBillChanged();
-                _showDeleteDialog = false;
-                await ReloadBills();
-            }
-            else
-            {
-                await PopupService.EnqueueSnackbarAsync("账单不存在或已删除", AlertTypes.Warning);
-            }
+            // 其中我是只读成员的：读本地成员缓存（GetSharedLedgersAsync 刚刷新过一次），与服务层拒绝只读成员改账单是同一条规则
+            _readOnlyLedgerIds = await LedgerMemberService.GetReadOnlyLedgerIdsAsync(_userId, shared.Select(l => l.Id).ToList());
         }
         catch (Exception ex)
         {
-            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
+            sharedLoaded = false;
+            Logger.LogWarning(ex, "加载共享账本失败，筛选只列自己的账本");
         }
-        finally
+
+        PruneStaleConditions(sharedLoaded);
+    }
+
+    /// <summary>
+    /// 条件指向的账本 / 分类 / 支付渠道已经不存在了（例如退出了共享账本）：条件条上没有名字可显示、结果也必然是空的，直接移除。
+    /// 共享账本没读成功时不能据此移除——那只是「没读到」，不是「不存在」。
+    /// </summary>
+    private void PruneStaleConditions(bool sharedLedgersLoaded)
+    {
+        if (_filter.LedgerId is { } ledgerId && sharedLedgersLoaded && _ledgerOptions.All(l => l.Id != ledgerId))
         {
-            _isDeleting = false;
-            _deletingBill = null;
+            _filter.Clear(BillFilterDimension.Ledger);
+        }
+
+        // 分类可多选：只去掉不存在了的那几项，其余已选的保留
+        _filter.RetainCategories(_categoryOptions.Select(c => c.Id));
+
+        if (_filter.PaymentChannelId is { } channelId && _channelOptions.All(c => c.Id != channelId))
+        {
+            _filter.Clear(BillFilterDimension.Channel);
         }
     }
 
-    private void ShowAssignDialog()
+    private void RebuildGroups() => _groups = BillListPresentation.Group(_items, _nowLocal);
+
+    /// <summary>已经不在列表里的账单（删除了、筛选条件变了）不能还留在已选里</summary>
+    private void PruneSelection()
     {
-        if (!_selectedBillIds.Any())
+        if (_selected.Count == 0)
         {
             return;
         }
 
-        _assignLedgerId = null;
-        _showAssignDialog = true;
+        var selectable = _items.Where(item => item.Selectable).Select(item => item.Id).ToHashSet();
+        _selected.RemoveWhere(id => !selectable.Contains(id));
     }
 
-    private void CloseAssignDialog()
+    private async Task LoadMoreAsync()
     {
-        _showAssignDialog = false;
-        _assignLedgerId = null;
+        if (_isLoadingMore || _isLoading || !_hasMore)
+        {
+            return;
+        }
+
+        _isLoadingMore = true;
+        var version = _loadVersion;
+        string? failure = null;
+
+        try
+        {
+            await DataGate.RunAsync(async () =>
+            {
+                // 排队期间条件变了 / 已经有新的整页加载：这一页不再有意义
+                if (version != _loadVersion || _disposed)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var next = _pageCount + 1;
+                    var more = await BillService.GetBillsAsync(_userId, _filter.ToQuery(_nowLocal), next, PageSize);
+
+                    if (version != _loadVersion)
+                    {
+                        return;
+                    }
+
+                    // 两次加载之间有新账单插到前面时，相邻两页会重叠：按 Id 去重
+                    var known = _items.Select(item => item.Id).ToHashSet();
+                    _items.AddRange(more
+                        .Where(bill => !known.Contains(bill.Id))
+                        .Select(bill => BillListPresentation.ToItem(bill, _nowLocal, _userId, _readOnlyLedgerIds)));
+
+                    _pageCount = next;
+                    _hasMore = more.Count == PageSize;
+                    RebuildGroups();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "加载更多账单失败");
+                    failure = ex.GetUserMessage();
+                }
+            });
+        }
+        finally
+        {
+            _isLoadingMore = false;
+        }
+
+        if (failure is not null)
+        {
+            await PopupService.EnqueueSnackbarAsync($"加载失败: {failure}", AlertTypes.Error);
+        }
+    }
+
+    // ------------------------------------------------------------------ 刷新
+
+    /// <summary>下拉刷新（唯一的刷新入口）：转圈由 PullToRefresh 负责，这里只重新加载本页数据（保留已加载的页数，顺带重读筛选选项）</summary>
+    private async Task PullRefreshAsync() => await ReloadAsync(keepPages: true, reloadOptions: true);
+
+    // ------------------------------------------------------------------ 筛选
+
+    private static readonly BillFilterDimension[] Dimensions = Enum.GetValues<BillFilterDimension>();
+
+    /// <summary>条件条上标签的顺序：已设置条件的排在前面（各自保持 时间 / 账本 / 分类 / 支付渠道 的相对顺序），没设置的跟在后面</summary>
+    private IEnumerable<BillFilterDimension> ChipOrder => Dimensions.OrderByDescending(_filter.Has);
+
+    /// <summary>
+    /// 条件条上某个标签的文案；这个维度没有可显示的值时为空（标签显示维度名）。
+    /// 时间维度比较特殊：默认的「本月」不是条件（<see cref="BillListFilter.Has"/> 为 false），但标签上要写「本月」，所以按「有没有时间限制」判断。
+    /// </summary>
+    private string? ChipValue(BillFilterDimension dimension)
+    {
+        var hasValue = dimension == BillFilterDimension.Time ? _filter.HasTime : _filter.Has(dimension);
+        if (!hasValue)
+        {
+            return null;
+        }
+
+        return dimension switch
+        {
+            BillFilterDimension.Time => BillListPresentation.TimeText(_filter, _nowLocal),
+            BillFilterDimension.Ledger => BillListPresentation.LedgerText(_filter, _ledgerOptions),
+            BillFilterDimension.Category => BillListPresentation.CategoryText(_filter.CategoryIds, _categoryOptions),
+            BillFilterDimension.Channel => _channelOptions.FirstOrDefault(c => c.Id == _filter.PaymentChannelId)?.Name
+                                           ?? BillListPresentation.UnknownConditionText(dimension),
+            _ => null,
+        };
+    }
+
+    /// <summary>打开筛选 Sheet；从条件条上的标签进入时带上维度，Sheet 定位到那一组</summary>
+    private void OpenFilter(BillFilterDimension? focus)
+    {
+        _filterFocus = focus;
+        _filterOpen = true;
+    }
+
+    /// <summary>条件条上标签的 ×：只移除这一个条件，列表与汇总立即联动</summary>
+    private async Task RemoveConditionAsync(BillFilterDimension dimension)
+    {
+        _filter.Clear(dimension);
+        await ApplyFilterAsync();
     }
 
     /// <summary>
-    /// 确认批量归属账本（清空目标账本表示移出账本归属），并通知其他页面刷新数据
+    /// 筛选 Sheet 底部「查看 N 笔账单」用的笔数：与汇总卡同一个查询（GetBillCountAsync / GetBillSummaryAsync 共用同一份查询构造），
+    /// 经 PageDataGate 排队，不和页面自己的加载抢同一个 DbContext。时间预设按此刻的应用时区日期换算——与点「查看」后重新加载一致。
     /// </summary>
-    private async Task ConfirmAssign()
+    private Task<int> CountForSheetAsync(BillListFilter draft)
     {
-        if (!_selectedBillIds.Any() || _isAssigning)
+        var query = draft.ToQuery(AppTimeZone.ToLocal(DateTime.UtcNow));
+        return DataGate.RunAsync(() => BillService.GetBillCountAsync(_userId, query));
+    }
+
+    /// <summary>筛选 Sheet 点「查看」：Sheet 已收起，这里让草稿生效；条件没变（只是看了看）就不重复查询</summary>
+    private async Task ApplyFromSheetAsync(BillListFilter applied)
+    {
+        // 账单类型由分段控件管理，Sheet 里没有它：以页面当前的为准
+        applied.Type = _filter.Type;
+
+        if (_filter.SameConditionsAs(applied))
         {
+            return;
+        }
+
+        _filter.CopyFrom(applied);
+        await ApplyFilterAsync();
+    }
+
+    private async Task OnSegmentChanged(string value)
+    {
+        _segment = value;
+        _filter.Type = BillListPresentation.TypeOf(value);
+        await ApplyFilterAsync();
+    }
+
+    /// <summary>筛选条件变了（分段 / 条件条 / 筛选 Sheet）：回到第一页重新查询列表与汇总</summary>
+    private Task ApplyFilterAsync() => ReloadAsync();
+
+    /// <summary>
+    /// 搜索框提交了关键字（停顿 / 回车 / 失焦 / 清除，浏览器可能连着派发几次，内容没变的直接忽略）：
+    /// 与其它条件叠加，回到第一页重新查询列表与汇总。
+    /// </summary>
+    private async Task ApplyKeywordAsync(string? text)
+    {
+        var before = _filter.Keyword;
+        _filter.Keyword = text;
+
+        // 在第一个 await 之前就已经更新：同一次输入的第二个 change 事件进来时，这里看到的是新值，直接返回
+        if (_filter.Keyword == before)
+        {
+            return;
+        }
+
+        await ApplyFilterAsync();
+    }
+
+    /// <summary>搜索结果的读屏播报：只在搜索过且数据已就绪时有内容</summary>
+    private string? SearchStatusText => _filter.HasKeyword && !_isLoading ? BillListPresentation.SearchResultText(_summary.Count) : null;
+
+    /// <summary>
+    /// 空状态里的「清除筛选 / 清除搜索」：去掉全部生效的条件，含账单类型与搜索关键字（搜索框换 key 重建，输入框随之清空）。
+    /// 只去掉「条件」：默认的「本月」不是条件，保持不动（搜不到东西点「清除搜索」，回到的是同一个月的列表，而不是突然变成全部时间）。
+    /// </summary>
+    private async Task ClearAllFiltersAsync()
+    {
+        _filter.ClearConditions();
+        _segment = BillListPresentation.SegmentAll;
+        _searchEpoch++;
+        await ApplyFilterAsync();
+    }
+
+    /// <summary>空状态里的「查看全部账单」：只受默认的「本月」限制时，取消时间范围（不限时间）重新查询</summary>
+    private async Task ShowAllTimeAsync()
+    {
+        _filter.Clear(BillFilterDimension.Time);
+        await ApplyFilterAsync();
+    }
+
+    // ------------------------------------------------------------------ 点按 / 导航
+
+    private void OpenAddBill() => BillSheet.Open();
+
+    // 编辑与新建共用「记一笔」Sheet：账单是否存在 / 是不是自己的 / 有没有写权限由 Sheet 读到账单后判断
+    private void OpenEdit(Guid billId) => BillSheet.OpenEdit(billId);
+
+    /// <summary>
+    /// 点按整行：多选模式下切换选中；否则进入编辑页（左滑「编辑」的等价入口，编辑页里能删除）。
+    /// 只读账单（共享账本里其他成员记的）给出说明——这不是错误，更不是登录失效，不会登出。
+    /// </summary>
+    private async Task OnRowClickAsync(Guid billId)
+    {
+        var item = _items.FirstOrDefault(i => i.Id == billId);
+        if (item is null)
+        {
+            return;
+        }
+
+        if (_selectMode)
+        {
+            ToggleSelection(item);
+            return;
+        }
+
+        if (!item.CanModify)
+        {
+            await PopupService.EnqueueSnackbarAsync(BillListPresentation.ReadOnlyHint, AlertTypes.Info);
+            return;
+        }
+
+        OpenEdit(billId);
+    }
+
+    // ------------------------------------------------------------------ 多选 / 批量归属账本
+
+    /// <summary>已加载的账单里能被批量操作的数量（只有自己记的、且不在自己只读的共享账本里的账单能归属账本）</summary>
+    private int SelectableCount => _items.Count(item => item.Selectable);
+
+    private void ToggleSelectMode()
+    {
+        _selectMode = !_selectMode;
+        _selected.Clear();
+    }
+
+    private void ToggleSelection(BillListItem item)
+    {
+        if (!item.Selectable)
+        {
+            return;
+        }
+
+        if (!_selected.Remove(item.Id))
+        {
+            _selected.Add(item.Id);
+        }
+    }
+
+    private void SelectAll()
+    {
+        foreach (var item in _items.Where(item => item.Selectable))
+        {
+            _selected.Add(item.Id);
+        }
+    }
+
+    private void ClearSelection() => _selected.Clear();
+
+    /// <summary>
+    /// 打开「归属账本」Sheet。账本必选的预选 / 空列表引导都由 Sheet 自己处理（只有一个自有账本时打开即预选）
+    /// </summary>
+    private void ShowAssignSheet()
+    {
+        if (_selected.Count == 0)
+        {
+            return;
+        }
+
+        _assignVisible = true;
+    }
+
+    /// <summary>
+    /// 确认批量归属账本（账本必选，不支持「移出账本」），并通知其他页面刷新数据
+    /// </summary>
+    private async Task ConfirmAssignAsync(Guid ledgerId)
+    {
+        if (_selected.Count == 0 || _isAssigning)
+        {
+            return;
+        }
+
+        var ledger = _ownLedgers.FirstOrDefault(l => l.Id == ledgerId);
+        if (ledger is null)
+        {
+            // Sheet 开着的时候账本列表被刷新、所选账本已经不在了（例如在别处删了）：让用户重新选
+            await PopupService.EnqueueSnackbarAsync("请选择目标账本", AlertTypes.Warning);
             return;
         }
 
@@ -783,24 +928,25 @@
 
         try
         {
-            var count = await BillService.AssignBillsToLedgerAsync(
-                _selectedBillIds.ToList(),
-                _userId,
-                _assignLedgerId);
+            // 写库也排进页面数据闸门：别的 Tab 根页面可能正在后台重新加载，同一个 DbContext 不允许并行执行
+            var billIds = _selected.ToList();
+            var count = await DataGate.RunAsync(() => BillService.AssignBillsToLedgerAsync(billIds, _userId, ledgerId));
 
-            await PopupService.EnqueueSnackbarAsync(
-                _assignLedgerId.HasValue
-                    ? $"已将 {count} 笔账单归属到账本"
-                    : $"已将 {count} 笔账单移出账本",
-                AlertTypes.Success);
+            await PopupService.EnqueueSnackbarAsync(BillListPresentation.AssignedText(count, ledger.Name), AlertTypes.Success);
 
+            _assignVisible = false;
+            _selected.Clear();
+
+            // 本页也消费 BillChanged：通知后会按已加载的页数重新加载
             BillEventService.NotifyBillChanged();
-
-            _showAssignDialog = false;
-            _selectedBillIds.Clear();
-            _selectAll = false;
-
-            await ReloadBills();
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            // 所选账单里有我现在是只读成员的共享账本里的（角色在别处被改了，列表还没刷新）：整批被服务层拒绝（403 语义），
+            // 只提示、不登出；重读一遍成员关系，那几笔随即不再可选
+            _assignVisible = false;
+            await PopupService.EnqueueSnackbarAsync(ex.GetUserMessage(), AlertTypes.Warning);
+            await ReloadAsync(keepPages: true, reloadOptions: true);
         }
         catch (Exception ex)
         {
@@ -812,53 +958,64 @@
         }
     }
 
-    private class FilterModel
+    // ------------------------------------------------------------------ 删除
+
+    private void AskDelete(BillListItem item)
     {
-        public string? StartDate { get; set; }
-        public string? EndDate { get; set; }
-        public Guid? CategoryId { get; set; }
-        public Guid? PaymentChannelId { get; set; }
-        public Guid? LedgerId { get; set; }
-        public BillType? Type { get; set; }
+        _deleteTarget = item;
+        _deleteVisible = true;
     }
 
-    private class BillModel
+    // Alert 退出动画结束后清理（动画期间保持原文案，避免闪动）
+    private void OnDeleteClosed() => _deleteTarget = null;
+
+    /// <summary>
+    /// 确认删除账单（软删除，并通知其他页面刷新数据）
+    /// </summary>
+    private async Task DeleteConfirmedAsync()
     {
-        public Guid Id { get; set; }
-        public decimal Amount { get; set; }
-        public string Type { get; set; } = string.Empty;
-        public Guid CategoryId { get; set; }
-        public string CategoryName { get; set; } = string.Empty;
-        public string CategoryIcon { get; set; } = string.Empty;
-        public Guid PaymentChannelId { get; set; }
-        public string PaymentChannelName { get; set; } = string.Empty;
-        public string PaymentChannelIcon { get; set; } = string.Empty;
-        public string? LedgerName { get; set; }
-        public string? LedgerIcon { get; set; }
-        public DateTime TransactionTime { get; set; }
-        public string? Note { get; set; }
+        // Alert 先于 OnConfirm 关闭，此时 _deleteTarget 仍有值（清理发生在退出动画结束后的 OnClosed）
+        if (_deleteTarget is not { } item)
+        {
+            return;
+        }
+
+        try
+        {
+            var success = await DataGate.RunAsync(() => BillService.DeleteBillAsync(item.Id, _userId));
+
+            if (success)
+            {
+                await PopupService.EnqueueSnackbarAsync("账单已删除", AlertTypes.Success);
+
+                // 本页也消费 BillChanged：通知后会按已加载的页数重新加载列表与汇总
+                BillEventService.NotifyBillChanged();
+            }
+            else
+            {
+                await PopupService.EnqueueSnackbarAsync("账单不存在或已删除", AlertTypes.Warning);
+                await ReloadAsync(keepPages: true);
+            }
+        }
+        catch (ForbiddenAccessException ex)
+        {
+            // 我现在是这笔账单所在共享账本的只读成员（角色在别处被改了，列表还没刷新）：服务层拒绝删除（403 语义），
+            // 只提示、不登出；重读一遍成员关系，这一行随即不再给删除入口
+            await PopupService.EnqueueSnackbarAsync(ex.GetUserMessage(), AlertTypes.Warning);
+            await ReloadAsync(keepPages: true, reloadOptions: true);
+        }
+        catch (Exception ex)
+        {
+            await PopupService.EnqueueSnackbarAsync($"删除失败: {ex.GetUserMessage()}", AlertTypes.Error);
+        }
     }
 
-    private class BillGroup
-    {
-        public DateTime Date { get; set; }
-        public List<BillModel> Bills { get; set; } = new();
-        public decimal TotalExpense { get; set; }
-        public decimal TotalIncome { get; set; }
-    }
+    // ------------------------------------------------------------------ 展示辅助
 
-    private class CategoryModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
-        public BillType Type { get; set; }
-    }
+    // 金额位数太多（≥ 12 个字符，例如 ¥1,234,567.89）时缩小字号，不挤出汇总卡的单元格
+    private static string SummaryAmountClass(decimal amount, string tone) =>
+        MoneyPresentation.Format(amount).Length >= 12 ? $"{tone} ft-amount--long" : tone;
 
-    private class PaymentChannelModel
-    {
-        public Guid Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = string.Empty;
-    }
+    // E2E 用的原始金额（两位小数、无千分位）
+    private static string Plain(decimal amount) => amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 }
