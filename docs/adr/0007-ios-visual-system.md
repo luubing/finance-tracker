@@ -6,7 +6,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 并增加沉浸式状态栏、Tab 滑块切换等 iOS 式交互。**组件库选型不变，视觉语言变了**，所以单独记一条决策，
 并在 ADR 0001 里标注「风格描述被本 ADR 取代」。
 
-重构按 24 个 ticket 分批落地，**已全部完成**（收尾清理见 §27）。自动化只覆盖网页层；真机 / 模拟器的人工验收项逐条记在「已知限制」里，没有一项被当作已通过。
+重构按 24 个 ticket 分批落地，**已全部完成**（收尾清理见 §27；首轮 iOS 真机验收反馈的两处宿主差异问题见 §28）。自动化只覆盖网页层；真机 / 模拟器的人工验收项逐条记在「已知限制」里，没有一项被当作已通过。
 
 ## 决策
 
@@ -659,7 +659,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 
 - **清掉了什么**：
   - `app.css` 里的迁移期兼容层（让旧页面在沉浸式下不被状态栏盖住的 `.m-page-stack-item__bar` / `.container` / 工具栏按钮规则）整体删除；其中唯一仍有用的一条——二级页面内容区的上内边距——升为 `ui.css` 的正式规则（§7）。
-    `app.css` 现在只剩「禁止长按选择」与四个 `--ft-safe-*` 变量。
+    `app.css` 现在只剩「禁止长按选择」与四个 `--ft-safe-*` 变量（真机验收之后又加了一条：未处理异常提示条 `#blazor-error-ui` 的默认隐藏规则，见 §28）。
   - `tabBar.js` 与 E2E 基座里「找不到 `data-scroll-root` 就退回旧 `.container`」的兜底删除——所有页面都有滚动根标记，兜底留着只会让漏标的新页面「恰好正常」。
   - 没有任何引用的 `LedgerSelect`（旧账本下拉）删除；`BillFilterChip` 在「已设置条件」时直接渲染通用件 `ConditionChip`（条件标签的标记与样式只剩一份，渲染出来的 DOM 不变）。
   - 15 个 E2E 脚本各抄一份的「玻璃层数」探针合并成 `e2e_base.GLASS_LAYERS_JS`，口径只有一处。
@@ -676,6 +676,30 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   ③ 几个页面里相近的文案常量（短信识别页与导入页各有一份「加载中… / 加载失败，点按重试」）与各页的账本行展示——两三个字符串，抽出来要让两页互相依赖，成本大于收益。
 - **E2E 的结构**：`not_found_test.py`（A 结构与样式 / B 刘海与手势条 / C 宽屏 / D 回首页，可带小节名只跑指定小节）；「组件渲染发生异常」那一支没法在 E2E 里注入渲染失败，样式与结构靠上面的守卫，页面本身走查代码 + 人工验收。
   `GLASS_LAYERS_JS` 与 `scroll_root_*` 等通用探针都在 `e2e_base.py`，新增脚本直接导入，不要再各抄一份。
+
+### 28. iOS 真机验收暴露的两处「宿主差异」问题
+
+第一版 iOS 真机包出来后，用户反馈两件事：**冷启动之后登录页最底部有一行 error**；**登录之后 Tab 没法正常加载**（Tab 栏一直不出现）。
+两件都不是视觉设计的问题，而是 **MAUI 宿主与 Web.Server 宿主的差异**，漏过了只访问 Web.Server 的 E2E。
+
+- **Tab 栏不出现（iOS 专属的回归）**：`TabNavigation.NormalizePath` 只把 http(s) 协议当绝对地址。MAUI Blazor 宿主给 `NavigationManager` 的根地址随平台而异——
+  Android `https://0.0.0.0/`、Windows `https://0.0.0.1/`、**iOS / Mac Catalyst `app://0.0.0.0/`**。iOS 上 `app://0.0.0.0/bills` 被当成普通字符串、规整成「/app://0.0.0.0/bills」，
+  不属于任何 Tab，于是 `GlassTabBar` 在四个根页面上也一直是隐藏态（`Visible` 恒为假，`inert`）；统计页按地址切分段（`StatisticsPresentation.IsStatisticsUri` / `SegmentFromUri`）同样失效。
+  重构前的 `MainLayout` 用的是 `new Uri(uri).AbsolutePath`，不挑协议——所以这是重构引入的回归，Android 与 Web.Server 都正常，只有 iOS 暴露。
+  现在：以 `/` 开头的当应用内路径（类 Unix 系统上 `Uri.TryCreate("/bills", Absolute)` 会把它当成 `file://`，所以不能交给 `Uri`），其余能解析成绝对 URI 的**不限协议**取路径。
+- **登录页底部的 error**：`#blazor-error-ui`（Blazor 的未处理异常提示条）的「默认隐藏」规则只写在 Web.Server 的 `_Layout.cshtml` 里，MAUI 的 `index.html` 没有——
+  翻 git 历史，没有任何一份样式表带过这条规则，MAUI 宿主页从建立项目起就是这样。没有规则的它就是文档末尾一段永远显示的英文（「An unhandled error has occurred. Reload 🗙」），
+  冷启动加载页收走之后露在登录页最底部，还把文档撑出一截可以拖动的高度。（为什么重构之前没人提——推测是旧外壳整屏撑满、这段文字落在首屏之外；没有在旧版真机上对比过。）
+  现在：规则只在两个宿主共用的 `app.css` 里写一份（默认 `display: none`；真的出现未处理异常时是固定在底部、避让手势条、只引用令牌的白色圆角卡片，文字红色、「重新加载」品牌色），
+  两个宿主页都不再自己写样式，文字改成中文、关闭符号改 ✕。
+  这条只解释了「一直挂着」；**没有证据表明启动时真的发生过未处理异常**。若修复后真机上仍然出现这张卡片，说明有真实异常，去「我的 → 错误日志」取日志（Blazor 会把未处理异常写成 Error 级日志）。
+- **根部组件不能把脚本失败变成未处理异常**：`ImmersiveHost` 在 `Main.razor` 根部、不在任何 `ErrorBoundary` 里，它的 JS 失败（`JSException`）会直接变成整个应用的未处理异常提示条；
+  `UiRuntime` / `StartupHost` 早就兜住了，唯独协调器只兜了「连接断开」一类。现在脚本失败记一条错误日志后放弃（沉浸式只是外观增强，错误日志页看得到原因），不再往外抛。
+- **守卫**：`TabNavigationTests` 用 Web.Server / Android / Windows / iOS 四种宿主根地址跑 Tab 根页面识别、二级页面识别与「再次点按」决策（`StatisticsPresentationTests`、`AddBillSheetServiceTests` 同样补了 `app://` 与 `https://0.0.0.0/` 用例；
+  修复前这批用例有 12 条失败）；`HostPageTests` 扫描源码：共用样式里有默认隐藏的规则、宿主页不自己写这个元素的样式、两个宿主页都有结构完整的提示条；`ImmersiveCoordinatorTests` 覆盖脚本失败不抛出且记录错误；
+  E2E 冒烟检查提示条默认隐藏、不撑高文档、强制显示时固定在手势条之上。
+- **教训**：E2E 看不到 MAUI 宿主页与宿主的根地址（`tests/e2e/README.md` 开头有说明）。往后凡是「两个宿主各有一份」的东西（宿主页里的标记 / 样式、对地址格式的假设），要么只留一份放进共用资源，要么写源码扫描 / 多根地址的单元测试；
+  对 `NavigationManager.Uri` 的任何解析都不要假设协议。
 
 ## 考虑的替代方案
 
@@ -787,6 +811,9 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   ⑤ 读屏（VoiceOver / TalkBack）下的朗读顺序与焦点行为——**整套读屏适配审计不在 23 号范围内**；Sheet / 语音覆盖层升起时底下页面的 `inert` 与焦点陷阱、Android 返回键先收起 Sheet / 覆盖层也未处理（见上面两条）。
 - 兜底页面在真机上的观感——「页面未找到」只被 Chromium 手机视口与宽屏扫描过；**「组件渲染发生异常」没有被任何自动化触发过**（渲染失败没法注入），它的样式 / 结构由源码守卫保证，实际观感与「长按复制错误详情」要在真机上故意制造一次渲染异常人工验收（24 号 ticket）。
 - 24 号的「全量回归」没有覆盖的部分：真机 / 模拟器上 18 条路由的逐页走查，以及 iOS 的 CI 构建（需要 macOS 环境；本地只验证过随 `dotnet build FinanceTracker.sln` 编译通过的目标）——它们留在各 ticket 与 24 号的「人工验收」清单里，未勾选。
+- §28 的两处修复（iOS 上 Tab 栏不出现、登录页底部的错误提示条）在本机只验证了「用 `app://0.0.0.0/` 等根地址跑纯逻辑」与 Web.Server 里的样式 / 行为，**没有在 iOS 真机 / 模拟器上重新验证过**——开发机是 Windows，没有 iOS 目标可跑；
+  需要真机确认：冷启动后登录页底部不再有文字；登录后四个 Tab 都显示 Tab 栏并能切换；统计页的分段（月度 / 趋势 / 年度）随地址正确切换。
+  若真机上仍然出现错误提示卡片或 Tab 仍然异常，请先看「我的 → 错误日志」（Tab 栏恢复后才进得去；进不去就用 Xcode / 设备日志取）并带上 iOS 版本。
 
 ## 相关
 

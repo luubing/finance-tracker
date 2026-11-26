@@ -42,10 +42,13 @@
 
     <div id="app"></div>
 
-    <div id="blazor-error-ui">
-        An unhandled error has occurred.
-        <a href="" class="reload">Reload</a>
-        <a class="dismiss">🗙</a>
+    <!-- 未处理异常提示条：默认隐藏（样式见共用的 app.css），出现未处理异常时由 Blazor 脚本显示。
+         不要把规则写回这个页面的内联样式，也不要删掉 app.css 里的 display: none——这个元素没有隐藏规则时，
+         就是一段永远显示在文档末尾的英文（iOS 真机冷启动之后挂在登录页最底部）。Web.Server 宿主（_Layout.cshtml）里是同样的结构 -->
+    <div id="blazor-error-ui" role="alert">
+        发生了未处理的异常。
+        <a href="" class="reload">重新加载</a>
+        <a class="dismiss" role="button" aria-label="关闭">✕</a>
     </div>
 
     <!-- 启动脚本：加载页的行为层 + 页面 load 之后才注入的 CDN 资源（图标字体 / ECharts）。放在 Blazor 脚本之前，计时与观察尽早开始 -->

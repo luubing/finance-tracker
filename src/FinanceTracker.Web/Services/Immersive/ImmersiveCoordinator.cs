@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
 namespace FinanceTracker.Web.Services;
@@ -11,6 +12,11 @@ namespace FinanceTracker.Web.Services;
 /// <item>状态栏：JS 对屏幕顶部像素采样得到图标风格（或读取页面声明的 <c>data-statusbar-bg</c>），
 /// 回调 <see cref="OnStatusBarIconsChanged"/> → <see cref="IStatusBarService"/>。</item>
 /// </list>
+/// <para>
+/// 沉浸式只是外观增强，不能因为它出问题让应用报「未处理异常」：<c>ImmersiveHost</c> 放在 <c>Main.razor</c> 根部、不在任何
+/// <c>ErrorBoundary</c> 里，从这里抛出去的异常会直接变成整个应用的未处理异常提示条。所以连接断开（页面卸载）静默放弃，
+/// 脚本加载 / 执行失败（<see cref="JSException"/>）记一条错误日志后放弃——不吞掉，错误日志页能看到原因。
+/// </para>
 /// </summary>
 public sealed class ImmersiveCoordinator : IAsyncDisposable
 {
@@ -19,6 +25,7 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
     private readonly IJSRuntime _js;
     private readonly ISafeAreaService _safeArea;
     private readonly IStatusBarService _statusBar;
+    private readonly ILogger? _logger;
 
     /// <summary>串行化「读取最新安全区 → 推给 JS」，保证最后一次推送一定对应最新读数</summary>
     private readonly SemaphoreSlim _pushGate = new(1, 1);
@@ -30,11 +37,13 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
     private bool _started;
     private volatile bool _disposed;
 
-    public ImmersiveCoordinator(IJSRuntime js, ISafeAreaService safeArea, IStatusBarService statusBar)
+    /// <param name="logger">记录脚本失败；不传则静默放弃（测试用）</param>
+    public ImmersiveCoordinator(IJSRuntime js, ISafeAreaService safeArea, IStatusBarService statusBar, ILogger? logger = null)
     {
         _js = js;
         _safeArea = safeArea;
         _statusBar = statusBar;
+        _logger = logger;
     }
 
     /// <summary>加载 JS 模块、推送初始安全区并开始监听页面（只能在首次渲染完成后调用）</summary>
@@ -57,6 +66,10 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsInteropUnavailable(ex))
         {
             // 电路已断开 / 页面已卸载：沉浸式只是外观增强，直接放弃即可
+        }
+        catch (JSException ex)
+        {
+            ReportScriptFailure(ex, "启动");
         }
     }
 
@@ -121,6 +134,10 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsInteropUnavailable(ex))
         {
         }
+        catch (JSException ex)
+        {
+            ReportScriptFailure(ex, "同步安全区");
+        }
         finally
         {
             _pushGate.Release();
@@ -148,12 +165,20 @@ public sealed class ImmersiveCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsInteropUnavailable(ex))
         {
         }
+        catch (JSException ex)
+        {
+            ReportScriptFailure(ex, "停止");
+        }
         finally
         {
             _selfReference?.Dispose();
             _module = null;
         }
     }
+
+    /// <summary>脚本加载 / 执行失败：记一条错误日志后放弃（沉浸式是外观增强，应用其余部分照常可用）</summary>
+    private void ReportScriptFailure(JSException ex, string action) =>
+        _logger?.LogError(ex, "沉浸式脚本（immersive.js）{Action}失败，安全区与状态栏图标风格可能不会自动适配", action);
 
     private static bool IsInteropUnavailable(Exception ex) =>
         ex is JSDisconnectedException or TaskCanceledException or ObjectDisposedException or OperationCanceledException;

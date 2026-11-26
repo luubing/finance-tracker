@@ -71,9 +71,73 @@ public sealed class TabNavigationTests
     [InlineData("https://0.0.0.0/", "/")]
     [InlineData("https://0.0.0.0", "/")]
     [InlineData("https://0.0.0.0/ledgers/abc/members", "/ledgers/abc/members")]
+    // iOS / Mac Catalyst 的 MAUI Blazor 宿主根地址是 app://0.0.0.0/：协议不是 http(s) 也必须按绝对地址取路径
+    [InlineData("app://0.0.0.0/", "/")]
+    [InlineData("app://0.0.0.0", "/")]
+    [InlineData("app://0.0.0.0/Bills/", "/bills")]
+    [InlineData("app://0.0.0.0/statistics?segment=trend", "/statistics")]
+    [InlineData("app://0.0.0.0/profile#top", "/profile")]
+    [InlineData("app://0.0.0.0/ledgers/abc/members", "/ledgers/abc/members")]
+    [InlineData("https://0.0.0.1/bills", "/bills")]
     public void 路径规整_小写_无查询串_无片段_无末尾斜杠(string? input, string expected)
     {
         Assert.Equal(expected, TabNavigation.NormalizePath(input));
+    }
+
+    /// <summary>
+    /// 各宿主给 NavigationManager 的根地址：Web.Server（E2E）是 http，Android 是 https://0.0.0.0/，
+    /// Windows 是 https://0.0.0.1/，iOS / Mac Catalyst 是 app://0.0.0.0/。
+    /// E2E 只能在 Web.Server（http）上跑，其余宿主的根地址只能靠这里守住——iOS 真机上 Tab 栏整个不出现过一次。
+    /// </summary>
+    public static TheoryData<string> HostBaseUris => new()
+    {
+        "http://localhost:5999/",
+        "https://0.0.0.0/",
+        "https://0.0.0.1/",
+        "app://0.0.0.0/",
+    };
+
+    [Theory]
+    [MemberData(nameof(HostBaseUris))]
+    public void 各宿主的根地址上_四个Tab的根页面都认得出_Tab栏随之显示(string baseUri)
+    {
+        foreach (var tab in TabNavigation.Tabs)
+        {
+            var uri = baseUri.TrimEnd('/') + tab.RootPath;
+
+            Assert.Equal(tab.Key, TabNavigation.ResolveRoot(uri)?.Key);
+            Assert.True(TabNavigation.IsTabRoot(uri), $"{uri} 应该是 Tab 根页面");
+            Assert.True(TabNavigation.IsTabRoot(uri + "?x=1#top"), $"{uri} 带查询串 / 片段时也应该是 Tab 根页面");
+        }
+
+        // 宿主的根地址本身（应用刚启动、未带路径时的 Navigation.Uri）就是首页
+        Assert.Equal("home", TabNavigation.ResolveRoot(baseUri)?.Key);
+    }
+
+    [Theory]
+    [MemberData(nameof(HostBaseUris))]
+    public void 各宿主的根地址上_二级页面与登录页不是Tab根页面_Tab栏随之隐藏(string baseUri)
+    {
+        foreach (var path in new[] { "/ledgers", "/ledgers/abc/members", "/bills/123", "/add-bill", "/login", "/statistics/trend" })
+        {
+            var uri = baseUri.TrimEnd('/') + path;
+
+            Assert.Null(TabNavigation.ResolveRoot(uri));
+            Assert.False(TabNavigation.IsTabRoot(uri), $"{uri} 不应该是 Tab 根页面");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(HostBaseUris))]
+    public void 各宿主的根地址上_再次点按当前Tab的决策与应用内路径一致(string baseUri)
+    {
+        var onRoot = TabNavigation.PlanTap(Tab("statistics"), activeKey: "statistics", currentPath: baseUri.TrimEnd('/') + "/statistics");
+        var onSecondary = TabNavigation.PlanTap(Tab("profile"), activeKey: "profile", currentPath: baseUri.TrimEnd('/') + "/ledgers");
+        var other = TabNavigation.PlanTap(Tab("home"), activeKey: "profile", currentPath: baseUri.TrimEnd('/') + "/ledgers");
+
+        Assert.Equal(TabTapKind.ScrollToTop, onRoot.Kind);
+        Assert.Equal(TabTapKind.PopToRoot, onSecondary.Kind);
+        Assert.Equal(TabTapKind.SwitchTab, other.Kind);
     }
 
     [Theory]

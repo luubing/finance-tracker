@@ -6,6 +6,7 @@
 @inject IJSRuntime JS
 @inject ISafeAreaService SafeArea
 @inject IStatusBarService StatusBar
+@inject ILogger<ImmersiveCoordinator> Logger
 
 @code {
     private ImmersiveCoordinator? _coordinator;
@@ -18,7 +19,7 @@
             return;
         }
 
-        _coordinator = new ImmersiveCoordinator(JS, SafeArea, StatusBar);
+        _coordinator = new ImmersiveCoordinator(JS, SafeArea, StatusBar, Logger);
         await _coordinator.StartAsync();
     }
 

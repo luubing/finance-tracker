@@ -104,5 +104,6 @@ server/
 
 - MAUI Blazor 项目需要 Android/iOS 目标框架，Windows 上主要用 Android 模拟器调试
 - FinanceTracker.Web 是共享组件库，同时被 MAUI App 和 Blazor Server 引用
+- 两个宿主（MAUI `src/FinanceTracker.App/wwwroot/index.html`、Web.Server `_Layout.cshtml`）各有一份宿主页，E2E 只访问后者，MAUI 给 `NavigationManager` 的根地址也随平台而异（Android `https://0.0.0.0/`、Windows `https://0.0.0.1/`、**iOS `app://0.0.0.0/`**）：解析 `NavigationManager.Uri` 不得假设 http(s) 协议（统一走 `TabNavigation.NormalizePath`）；宿主页里的样式 / 标记不要各写一份，样式放共用的 `app.css`（`#blazor-error-ui` 的隐藏规则就是漏在 MAUI 宿主页，iOS 真机上才暴露，见 ADR 0007 §28）
 - UI 的自动化验收只覆盖网页层：`tests/e2e` 的 Playwright 脚本用手机视口（390×844、触摸）访问 Web.Server；改 Razor / C# 后要重启 Web.Server 才生效（`wwwroot` 下的 CSS / JS 是实时的），跑 E2E 期间不要重启服务或同时跑别的会改本地库的脚本。玻璃的真实渲染、手势手感、状态栏图标、真机字体放大等只能在真机 / 模拟器人工验收
 - 预设分类和支付渠道在 IMPLEMENTATION-PLAN.md 中有完整列表

@@ -48,3 +48,47 @@ select,
     --ft-safe-bottom: var(--ft-native-safe-bottom, env(safe-area-inset-bottom, 0px));
     --ft-safe-left: var(--ft-native-safe-left, env(safe-area-inset-left, 0px));
 }
+
+/* ============================================
+   Blazor 未处理异常提示条（#blazor-error-ui）
+
+   两个宿主页（MAUI 的 wwwroot/index.html、Web.Server 的 _Layout.cshtml）里各有这个元素，样式只在这里写一份：
+   默认隐藏，只有出现未处理异常时 Blazor 的脚本才把它改成 display: block。
+   曾经这条规则只写在 Web.Server 的 _Layout.cshtml 里——MAUI 宿主页没有，元素成了文档末尾的普通文字：
+   iOS 真机冷启动之后，「An unhandled error has occurred」就一直挂在登录页最底部（还把文档撑出一截可以滚动的高度）。
+   固定在屏幕底部、避让手势条：即使真的显示，也不参与文档流、不被 Home 指示条压住。
+   ============================================ */
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    left: calc(var(--ft-space-page) + var(--ft-safe-left, 0px));
+    right: calc(var(--ft-space-page) + var(--ft-safe-right, 0px));
+    bottom: calc(var(--ft-space-page) + var(--ft-safe-bottom, 0px));
+    z-index: var(--ft-z-toast);
+    box-sizing: border-box;
+    padding: 14px 52px 14px 16px;
+    border-radius: var(--ft-radius-popover);
+    background: var(--ft-card);
+    box-shadow: var(--ft-shadow-popover);
+    color: var(--ft-danger-text);
+    font: var(--ft-type-body);
+}
+
+#blazor-error-ui .reload {
+    margin-left: 8px;
+    color: var(--ft-brand);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+#blazor-error-ui .dismiss {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    color: var(--ft-label-2);
+    cursor: pointer;
+}

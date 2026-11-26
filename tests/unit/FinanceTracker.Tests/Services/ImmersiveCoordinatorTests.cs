@@ -1,5 +1,7 @@
 using FinanceTracker.Tests.TestSupport;
 using FinanceTracker.Web.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.JSInterop;
 using Xunit;
 
 namespace FinanceTracker.Tests.Services;
@@ -18,8 +20,9 @@ public sealed class ImmersiveCoordinatorTests
     private readonly FakeImmersiveJsRuntime _js = new();
     private readonly FakeSafeAreaService _safeArea = new();
     private readonly FakeStatusBarService _statusBar = new();
+    private readonly ListLogger<ImmersiveCoordinator> _logger = new();
 
-    private ImmersiveCoordinator CreateCoordinator() => new(_js, _safeArea, _statusBar);
+    private ImmersiveCoordinator CreateCoordinator() => new(_js, _safeArea, _statusBar, _logger);
 
     private FakeImmersiveModule Module => _js.Module;
 
@@ -200,5 +203,86 @@ public sealed class ImmersiveCoordinatorTests
 
         Assert.Null(exception);
         Assert.Empty(Module.Calls);
+        Assert.Empty(_logger.Entries);
+    }
+
+    // ImmersiveHost 在 Main.razor 根部、不在任何 ErrorBoundary 里：从协调器抛出的 JS 异常会直接变成整个应用的「未处理异常」提示条
+    // （iOS 真机上登录页底部的 error 就是这个提示条的位置）。沉浸式只是外观增强，脚本出错必须被兜住，但要留下错误日志
+
+    [Fact]
+    public async Task 脚本加载失败时启动不抛异常_记一条错误日志()
+    {
+        _js.ThrowScriptErrorOnImport = true;
+
+        var exception = await Record.ExceptionAsync(() => CreateCoordinator().StartAsync());
+
+        Assert.Null(exception);
+        Assert.Empty(Module.Calls);
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.IsType<JSException>(entry.Exception);
+        Assert.Contains("启动", entry.Message);
+    }
+
+    [Fact]
+    public async Task 开始监听页面的脚本函数出错时启动不抛异常_记一条错误日志()
+    {
+        Module.ThrowScriptErrorOn = "start";
+
+        var exception = await Record.ExceptionAsync(() => CreateCoordinator().StartAsync());
+
+        Assert.Null(exception);
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Contains("启动", entry.Message);
+    }
+
+    [Fact]
+    public async Task 推送安全区的脚本函数出错时不抛异常_也不影响后面开始监听页面()
+    {
+        _safeArea.Current = Notch;
+        Module.ThrowScriptErrorOn = "setSafeArea";
+
+        var exception = await Record.ExceptionAsync(() => CreateCoordinator().StartAsync());
+
+        Assert.Null(exception);
+        Assert.Equal(1, Module.CountOf("start"));
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Contains("同步安全区", entry.Message);
+    }
+
+    [Fact]
+    public async Task 原生安全区变化时脚本出错同样不抛异常()
+    {
+        _safeArea.Current = Notch;
+        var coordinator = CreateCoordinator();
+        await coordinator.StartAsync();
+        Module.ThrowScriptErrorOn = "setSafeArea";
+
+        // 系统键盘弹出：底部边距变大，需要重新推送；这一次脚本出错
+        _safeArea.Current = new SafeAreaInsets(47, 0, 336, 0);
+        var exception = await Record.ExceptionAsync(() => coordinator.OnViewportChanged());
+
+        Assert.Null(exception);
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Contains("同步安全区", entry.Message);
+    }
+
+    [Fact]
+    public async Task 停止监听时脚本出错也不抛异常_释放照常完成()
+    {
+        _safeArea.Current = Notch;
+        var coordinator = CreateCoordinator();
+        await coordinator.StartAsync();
+        Module.ThrowScriptErrorOn = "stop";
+
+        var exception = await Record.ExceptionAsync(() => coordinator.DisposeAsync().AsTask());
+
+        Assert.Null(exception);
+        Assert.Equal(0, _safeArea.SubscriberCount);
+        var entry = Assert.Single(_logger.Entries);
+        Assert.Contains("停止", entry.Message);
     }
 }

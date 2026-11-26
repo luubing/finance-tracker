@@ -273,6 +273,23 @@ public class AddBillSheetServiceTests
         Assert.False(AddBillSheetService.IsOpenRequest(uri));
     }
 
+    [Theory]
+    [InlineData("https://0.0.0.0/")]
+    [InlineData("https://0.0.0.1/")]
+    [InlineData("app://0.0.0.0/")]
+    public void 打开请求_各MAUI宿主的根地址上也能读出(string baseUri)
+    {
+        // Android https://0.0.0.0/、Windows https://0.0.0.1/、iOS / Mac Catalyst app://0.0.0.0/；E2E 只能在 Web.Server（http）上跑
+        var create = AddBillSheetService.ReadOpenRequest($"{baseUri}?add-bill=1");
+        var edit = AddBillSheetService.ReadOpenRequest($"{baseUri}statistics?add-bill={BillA:D}#top");
+
+        Assert.NotNull(create);
+        Assert.Null(create.Value.BillId);
+        Assert.NotNull(edit);
+        Assert.Equal(BillA, edit.Value.BillId);
+        Assert.Null(AddBillSheetService.ReadOpenRequest(baseUri));
+    }
+
     [Fact]
     public void 编辑地址_与旧地址302的目标互相对应()
     {

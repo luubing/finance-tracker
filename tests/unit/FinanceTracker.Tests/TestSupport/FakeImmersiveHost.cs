@@ -12,6 +12,9 @@ public sealed class FakeImmersiveJsRuntime : IJSRuntime
     /// <summary>模块被 import 时是否抛出"电路已断开"（模拟页面已卸载 / 连接断开）</summary>
     public bool ThrowDisconnectedOnImport { get; set; }
 
+    /// <summary>模块被 import 时是否抛出 JS 异常（模拟脚本 404 / 语法不被引擎支持 / 模块加载失败）</summary>
+    public bool ThrowScriptErrorOnImport { get; set; }
+
     public List<string> ImportedPaths { get; } = new();
 
     public FakeImmersiveModule Module { get; } = new();
@@ -31,6 +34,11 @@ public sealed class FakeImmersiveJsRuntime : IJSRuntime
             throw new JSDisconnectedException("电路已断开");
         }
 
+        if (ThrowScriptErrorOnImport)
+        {
+            throw new JSException("Importing a module script failed.");
+        }
+
         ImportedPaths.Add((string)args![0]!);
         return new ValueTask<TValue>((TValue)(object)Module);
     }
@@ -43,6 +51,9 @@ public sealed class FakeImmersiveModule : IJSObjectReference
 
     public bool IsDisposed { get; private set; }
 
+    /// <summary>调用到这个函数时抛出 JS 异常（模拟脚本里这个函数执行出错）；调用本身仍会先被记录</summary>
+    public string? ThrowScriptErrorOn { get; set; }
+
     /// <summary>某个函数被调用的次数</summary>
     public int CountOf(string identifier) => Calls.Count(call => call.Identifier == identifier);
 
@@ -52,6 +63,12 @@ public sealed class FakeImmersiveModule : IJSObjectReference
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
     {
         Calls.Add((identifier, args ?? Array.Empty<object?>()));
+
+        if (identifier == ThrowScriptErrorOn)
+        {
+            throw new JSException($"{identifier} 执行出错");
+        }
+
         return new ValueTask<TValue>(default(TValue)!);
     }
 

@@ -5,6 +5,12 @@
 
 > E2E 只能覆盖网页层（Web.Server 与 MAUI 共用的 `FinanceTracker.Web`）。原生能力——状态栏图标颜色、安全区注入、
 > 触感反馈、真机玻璃性能——无法在这里验证，由各 ticket 的人工验收覆盖。
+>
+> **两个宿主的差异也在 E2E 的盲区**：E2E 只访问 Web.Server（`_Layout.cshtml`，地址是 `http://localhost:5999/`），
+> MAUI 的宿主页（`src/FinanceTracker.App/wwwroot/index.html`）与 MAUI 给 `NavigationManager` 的根地址（Android `https://0.0.0.0/`、
+> Windows `https://0.0.0.1/`、iOS / Mac Catalyst `app://0.0.0.0/`）都碰不到。只在其中一个宿主里漏掉的东西——隐藏规则、对协议的假设——
+> E2E 全绿、真机上才暴露（iOS 真机上 Tab 栏整个不出现、登录页底部挂着一行英文错误，就是这两类）。
+> 这类约定靠单元测试守：`HostPageTests` 扫描两个宿主页的源码，`TabNavigationTests` 等用各宿主的根地址跑纯逻辑。
 
 ## 环境准备
 
@@ -124,7 +130,7 @@ python tests/e2e/login_addbill_test.py       # 单个脚本
 | 脚本 | 作用 | 对应历史 Bug |
 |---|---|---|
 | `e2e_base_test.py` | 基座自测（不依赖 Web.Server）：手机视口、触摸手势（用静态页证明确实触发触摸事件）、降级媒体特性模拟、错误采集、状态等待、截图、造数据 helper；假云端协议（登录令牌、成员接口的状态码 / 消息、拉取过滤规则、故障注入、请求记录、`CloudWorld` 两边一致、停止后端口释放） | — |
-| `blazor_smoke_test.py` | 页面加载、SignalR 电路连接、无 404/控制台错误、手机视口无横向溢出 | `blazor.server.js` 404 导致页面一直转圈（缺 `RequiresAspNetWebAssets`） |
+| `blazor_smoke_test.py` | 页面加载、SignalR 电路连接、无 404/控制台错误、手机视口无横向溢出；错误提示条 `#blazor-error-ui` 默认隐藏且不撑高文档、强制显示时固定在底部手势条之上（样式在两个宿主共用的 `app.css`） | `blazor.server.js` 404 导致页面一直转圈（缺 `RequiresAspNetWebAssets`）；MAUI 宿主页没有隐藏规则，iOS 真机上「An unhandled error has occurred」一直挂在登录页最底部 |
 | `login_addbill_test.py` | 全新手机号登录 → localStorage 写入 userId → 点 Tab 栏「记一笔」升起记一笔 Sheet（地址不变，分类与账本 / 支付渠道行渲染） | `IsPrerendering` 判断错误导致 userId 未持久化 → 记账时 `UserId=Guid.Empty` 外键失败 |
 | `voice_addbill_test.py` | 旧地址 `/add-bill` 深链进入后升起记一笔 Sheet，验证标题栏的麦克风渲染（读屏名称含「语音记账」）、`billVoiceInput.js` 可加载、无 Web Speech API 的环境静默降级（置灰 + 点按给一句说明、键盘仍可用）且无页面 JS 错误（真实语音识别无法自动化，解析逻辑由 `BillVoiceParserTests` 覆盖） | — |
 | `voice_overlay_test.py` | 语音记账覆盖层（17 号）：在页面脚本之前注入一个**假的 `SpeechRecognition`**（模拟 Chrome：`stop()` 之后交出已听到的内容作为最终结果、`abort()` 触发 `aborted`、最终结果之后结束），真实的 `billVoiceInput.js` → `BillVoiceInputService` → Sheet → `VoiceOverlay` 全链路照常运行，测试用 `window.__speech.say / fail` 代替「说话 / 识别器出错」。呈现（点麦克风升起全屏覆盖层、盖住 Sheet 的标题栏按钮 / 保存键 / 键盘、层级 127、浅磨砂靛紫 60% + 28px 模糊（第 2 轮评审：贴近设计稿，不再是深靛紫 78%）、直接压在覆盖层上的小字都是大号文字（≥ 18.66px 且 ≥ 700，白字约 4:1 只能按 3:1 要求）、对话框语义与焦点、状态「正在聆听…」、占位提示、25 根钟形波形且动画在跑、芯片区预留、大麦克风 104 居中、自上而下的布局不重叠且都在视口内、整屏玻璃层恰好 3 个）；实时转写（部分结果实时上屏、认出的金额 / 分类 / 渠道 / 时间淡紫 + 下划线高亮并按固定顺序列成芯片、芯片文案与图标、预览不预填表单、识别器修正前面的字后高亮与芯片跟着变、说得很长只显示末尾 30 个字、转写与芯片出现时布局不跳动）；样式分支（取消区泛红、按住形态不接收点按且手指下的麦克风仍收得到事件、淡出——用脚本改标记验证）；最终结果（经过「识别完成，正在预填…」、覆盖层停留后收起、表单预填金额 / 分类 / 渠道 / 时间 / 备注、芯片时间与时间行同一文案、Sheet 里的预填提示、保存后数据来源为语音识别且各字段一致）；点「说完了」（转入「正在识别…」、红点与波形停住、大麦克风置灰、不重复触发、识别器收到 `stop()` 后预填；没说话就点 → Toast）；取消（点「取消」/ Esc 收起、识别器被 `abort()`、静默、迟到的最终结果被丢弃、可重新开始、Esc 不关下面的 Sheet）；失败（麦克风被拒绝 / 启动失败 / 空结果 → Toast、覆盖层收起、麦克风可再用）；缺金额（Toast「未能识别金额」、其余字段仍预填、保存键置灰）；收入（金额芯片带「收入」前缀、类型切换、分类取收入分类）；减弱动态效果（红点 / 波形 / 光圈静态，波形保持钟形）；降低透明度（覆盖层不模糊、不透明底）。**按住形态（MAUI 原生）无法在 Blazor Server 宿主里触发**，由单元测试（阈值与文案）+ 样式分支 + 真机验收覆盖 | 17 号发现：预设分类的口语同义词（「午饭」→ 餐饮）对不上预设名「餐饮美食」，说全名才认得出分类，E2E 的话术因此用全名（既有解析缺陷，按「解析规则不变」未改，见 ticket 17 待判断项） |
@@ -337,7 +343,7 @@ E2E 只依赖三类对外契约，**不依赖内部 CSS 类名与 DOM 层级**�
 | `server.ps1 -Action start` 一直不返回 | 不要把它的输出接到管道（如 `\| Select-Object`）：后台起的服务进程会继承管道句柄，管道永远等不到结束。直接运行即可（服务已就绪时脚本会自己返回） |
 | 改了 Razor / C# 但页面没变 | 进程锁着旧 dll：`server.ps1 -Action restart` |
 | 页面一直转圈 | `blazor.server.js` 是否 200；csproj 是否有 `<RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>` |
-| 底部"发生了未处理的异常" | 浏览器 F12 控制台；`_Layout.cshtml` 的脚本引用是否为 `_content/Masa.Blazor/js/masa-blazor.js` |
+| 底部"发生了未处理的异常" | 浏览器 F12 控制台；`_Layout.cshtml` 的脚本引用是否为 `_content/Masa.Blazor/js/masa-blazor.js`。提示条的样式在共用的 `app.css`（默认隐藏），不要写回宿主页 |
 | 点了没反应 | 是否整页导航后没等电路就绪（用 `open_app` / `wait_circuit_ready`） |
 | 保存账单报 FOREIGN KEY | `python tests/e2e/db_check.py` 查看 Users/Bills 数据 |
 | `SchemaMismatch` | 应用表结构变了：同步更新 `e2e_base.py` 里的 `REQUIRED_SCHEMA` 与造数据 SQL |

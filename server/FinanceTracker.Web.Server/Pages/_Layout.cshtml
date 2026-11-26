@@ -16,27 +16,7 @@
     <link href="_content/FinanceTracker.Web/css/app.css" rel="stylesheet" />
     <link href="_content/FinanceTracker.Web/css/ui.css" rel="stylesheet" />
     <link href="_content/FinanceTracker.Web/css/boot.css" rel="stylesheet" />
-    <style>
-        /* Blazor 错误提示条：默认隐藏，仅在运行时发生未处理异常时由 blazor.server.js 显示 */
-        #blazor-error-ui {
-            background: lightyellow;
-            bottom: 0;
-            box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
-            display: none;
-            left: 0;
-            padding: 0.6rem 1.25rem 0.7rem 1.25rem;
-            position: fixed;
-            width: 100%;
-            z-index: 1000;
-        }
-
-        #blazor-error-ui .dismiss {
-            cursor: pointer;
-            position: absolute;
-            right: 0.75rem;
-            top: 0.5rem;
-        }
-    </style>
+    <!-- 错误提示条（#blazor-error-ui）的样式在共用的 app.css 里，两个宿主不再各写一份：MAUI 宿主页过去漏了这条规则，iOS 真机上提示文字一直挂在登录页最底部 -->
     <!-- 图标字体与 ECharts 来自 CDN，不能放在这里：<head> 里的同步资源会挡住首次绘制，慢网 / 离线时加载页也出不来。
          改由 boot.js 在页面 load 之后注入，见页尾 -->
     <component type="typeof(HeadOutlet)" render-mode="ServerPrerendered" />
@@ -62,7 +42,8 @@
 
     @RenderBody()
 
-    <div id="blazor-error-ui">
+    <!-- 未处理异常提示条：默认隐藏（样式见 app.css），出现未处理异常时由 Blazor 脚本显示。MAUI 宿主（index.html）里是同样的结构 -->
+    <div id="blazor-error-ui" role="alert">
         <environment include="Staging,Production">
             发生错误。
         </environment>
@@ -70,7 +51,7 @@
             发生了未处理的异常。请查看浏览器开发工具了解详细信息。
         </environment>
         <a href="" class="reload">重新加载</a>
-        <a class="dismiss">🗙</a>
+        <a class="dismiss" role="button" aria-label="关闭">✕</a>
     </div>
 
     <!-- 启动脚本：加载页的行为层 + 页面 load 之后才注入的 CDN 资源（图标字体 / ECharts）。放在 Blazor 脚本之前，计时与观察尽早开始 -->

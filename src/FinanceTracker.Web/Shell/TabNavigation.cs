@@ -51,6 +51,7 @@ public static class TabNavigation
 
     /// <summary>
     /// 把绝对 URI 或应用内路径规整成「小写无查询串、无片段、无末尾斜杠的绝对路径」，根路径为 "/"。
+    /// 绝对 URI 不限协议：MAUI Blazor 宿主的根地址随平台而异（见 <see cref="ExtractPath"/>）。
     /// </summary>
     public static string NormalizePath(string? uriOrPath)
     {
@@ -59,10 +60,7 @@ public static class TabNavigation
             return "/";
         }
 
-        // 只把带 http(s) 协议的当作绝对 URI：类 Unix 系统（Android / iOS / Linux）上 "/bills" 会被当成 file:// 绝对路径，查询串会被转义
-        var path = Uri.TryCreate(uriOrPath, UriKind.Absolute, out var absolute) && absolute.Scheme is "http" or "https"
-            ? absolute.AbsolutePath
-            : uriOrPath;
+        var path = ExtractPath(uriOrPath);
 
         var cut = path.IndexOfAny(['?', '#']);
         if (cut >= 0)
@@ -77,6 +75,28 @@ public static class TabNavigation
 
         path = path.TrimEnd('/');
         return path.Length == 0 ? "/" : path.ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 取出地址里的路径部分（带不带查询串 / 片段由调用方接着处理）。
+    /// <list type="bullet">
+    /// <item>以 "/" 开头的是应用内路径，原样返回，不交给 <see cref="Uri"/>：类 Unix 系统（Android / iOS / Linux）上
+    /// <c>Uri.TryCreate("/bills", Absolute)</c> 会把它当成 <c>file://</c> 绝对路径，查询串还会被转义。</item>
+    /// <item>其余能解析成绝对 URI 的取它的路径，<b>协议不能写死 http(s)</b>：MAUI Blazor 宿主给 <c>NavigationManager</c> 的根地址随平台而异——
+    /// Android 是 <c>https://0.0.0.0/</c>、Windows 是 <c>https://0.0.0.1/</c>，而 iOS / Mac Catalyst 是 <c>app://0.0.0.0/</c>。
+    /// 这里曾经只认 http(s)，iOS 真机上 <c>app://0.0.0.0/bills</c> 被当成普通字符串，规整成「/app://0.0.0.0/bills」，
+    /// 不属于任何 Tab：Tab 栏在四个根页面上也一直隐藏，登录之后整个应用壳没法用（Android 与 Web.Server 都正常，E2E 看不出来）。</item>
+    /// <item>都不是（"bills"、"bills?x=1" 这类相对写法）原样返回。</item>
+    /// </list>
+    /// </summary>
+    private static string ExtractPath(string uriOrPath)
+    {
+        if (uriOrPath.StartsWith('/'))
+        {
+            return uriOrPath;
+        }
+
+        return Uri.TryCreate(uriOrPath, UriKind.Absolute, out var absolute) ? absolute.AbsolutePath : uriOrPath;
     }
 
     /// <summary>路径正好是某个 Tab 的根页面时返回该 Tab，否则（二级页面 / 登录页 / 未知路径）返回 null。</summary>
