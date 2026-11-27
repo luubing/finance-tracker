@@ -465,7 +465,7 @@
             var bills = await BillService.GetBillsAsync(_userId, page: 1, pageSize: HomePresentation.RecentBillCount);
 
             // 库里是 UTC：账单行展示应用时区的墙上时间；历史无账本的账单标注「未归属账本」
-            _recentBills = bills.Select(b => BillPresentation.ToRow(b, _nowLocal, includeDate: true)).ToList();
+            _recentBills = bills.Select(b => BillPresentation.ToRow(b, _nowLocal, includeDate: true, viewerId: _userId)).ToList();
             return bills.Count > 0;
         }
         catch (Exception ex)

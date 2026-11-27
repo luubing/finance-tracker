@@ -1,3 +1,5 @@
+using FinanceTracker.Core.Enums;
+
 namespace FinanceTracker.Core.Models;
 
 /// <summary>
@@ -356,4 +358,41 @@ public class CategoryComparisonData
     public decimal? ChangeRate => PreviousAmount == 0
         ? null
         : Math.Round((CurrentAmount - PreviousAmount) / PreviousAmount * 100, 1);
+}
+
+/// <summary>
+/// 被「不计入统计」排除掉的分类，在某个区间里的账单汇总（每个被排除、且区间内有账单的分类一项）。
+/// 统计页据此在底部提示"已忽略 N 笔"，让用户明白统计与账单列表为什么对不上。
+/// </summary>
+public class ExcludedCategoryStatistics
+{
+    /// <summary>
+    /// 分类ID
+    /// </summary>
+    public Guid CategoryId { get; set; }
+
+    /// <summary>
+    /// 分类名称
+    /// </summary>
+    public string CategoryName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 分类图标
+    /// </summary>
+    public string CategoryIcon { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 分类类型（支出 / 收入）：一个分类只有一种类型，金额不带正负号，靠它区分是花出去的还是收进来的
+    /// </summary>
+    public BillType Type { get; set; }
+
+    /// <summary>
+    /// 区间内该分类被排除的账单金额合计
+    /// </summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>
+    /// 区间内该分类被排除的账单数量
+    /// </summary>
+    public int Count { get; set; }
 }

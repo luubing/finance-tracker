@@ -60,6 +60,12 @@ public class CategorySyncDto
     public BillType Type { get; set; }
     public bool IsPreset { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>
+    /// 不计入统计（见 <see cref="Category.ExcludeFromStatistics"/>）。旧客户端的 JSON 里没有这个字段，反序列化成 false——
+    /// 与"整条记录后写入优先"的同步一致：旧客户端推上来的分类就是"计入统计"。
+    /// </summary>
+    public bool ExcludeFromStatistics { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -72,6 +78,7 @@ public class CategorySyncDto
         Type = category.Type,
         IsPreset = category.IsPreset,
         SortOrder = category.SortOrder,
+        ExcludeFromStatistics = category.ExcludeFromStatistics,
         IsDeleted = category.IsDeleted,
         CreatedAt = category.CreatedAt,
         UpdatedAt = category.UpdatedAt
@@ -89,6 +96,7 @@ public class CategorySyncDto
         Type = Type,
         IsPreset = false,
         SortOrder = SortOrder,
+        ExcludeFromStatistics = ExcludeFromStatistics,
         IsDeleted = IsDeleted
     };
 
@@ -101,6 +109,7 @@ public class CategorySyncDto
         category.Icon = Icon;
         category.Type = Type;
         category.SortOrder = SortOrder;
+        category.ExcludeFromStatistics = ExcludeFromStatistics;
         category.IsDeleted = IsDeleted;
     }
 
@@ -112,6 +121,7 @@ public class CategorySyncDto
         category.Icon == Icon &&
         category.Type == Type &&
         category.SortOrder == SortOrder &&
+        category.ExcludeFromStatistics == ExcludeFromStatistics &&
         category.IsDeleted == IsDeleted;
 }
 

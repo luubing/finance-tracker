@@ -24,8 +24,10 @@ const LARGE_TITLE_COLLAPSE_SLACK_PX = 2; // 大标题底边与导航栏底边的
 const SEARCH_DEBOUNCE_MS = 350; // 搜索框停止输入多久后自动提交（不逐字查库；输入法组词期间不提交）
 const HOLD_CLICK_MS = 500; // 长按多久触发「长按动作」（记一笔键盘的退格键：长按清空金额）
 const HOLD_MOVE_TOLERANCE_PX = 12; // 长按期间手指移动超过这个距离就不算长按
-const POPOVER_MARGIN_PX = 12; // 弹出菜单与屏幕边缘的最小距离
+const POPOVER_MARGIN_PX = 12; // 弹出菜单与屏幕边缘的最小距离（上下两边从安全区往里量：状态栏 / 刘海、手势条之外再留这么多）
 const POPOVER_GAP_PX = 6; // 弹出菜单与触发行之间的间距
+const POPOVER_MIN_ROOM_PX = 120; // 菜单一侧空间再小，也至少给这么高（菜单内滚动）
+const POPOVER_PEEK_MIN_ITEMS = 2.5; // 菜单要滚动时，可视区至少有这么多项才做「露半项」的收高（再矮就直接用整个空间）
 const TYPING_SCROLL_DELAYS_MS = [60, 360]; // 聚焦备注后把它滚进可视区的时机：布局稳定后一次、系统键盘动画结束后一次
 const SHEET_OPEN_ATTR = 'data-ft-sheet-open'; // <html> 上「有 Sheet 升起」的标记（玻璃层预算）
 const SOLID_ATTR = 'data-ft-solid'; // <html> 上「材质降级为不透明」的根开关（tokens.css 的覆盖块读它）
@@ -103,11 +105,59 @@ export function scrollPagerTo(pager, page, smooth) {
     }
 }
 
+let safeInsetProbe = null;
+
+/**
+ * 读出当前顶部 / 底部的安全区（CSS 像素）。--ft-safe-* 令牌是 env() / var() / calc() 的组合（app.css），脚本没法直接解算，
+ * 所以放一个看不见的探针元素，让它的 padding 去引用令牌，再读回计算后的像素。探针由脚本自己拥有、只建一次，不在 Blazor 的渲染树里。
+ */
+function readSafeInsets() {
+    if (!safeInsetProbe?.isConnected) {
+        safeInsetProbe = document.createElement('div');
+        safeInsetProbe.setAttribute('aria-hidden', 'true');
+        safeInsetProbe.style.cssText =
+            'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;'
+            + 'padding:var(--ft-safe-top,0px) 0 var(--ft-safe-bottom,0px);';
+        document.body.appendChild(safeInsetProbe);
+    }
+
+    const style = getComputedStyle(safeInsetProbe);
+    return {
+        top: Math.max(0, parseFloat(style.paddingTop) || 0),
+        bottom: Math.max(0, parseFloat(style.paddingBottom) || 0),
+    };
+}
+
+/**
+ * 菜单要滚动时的可视高度：收成「整数项 + 半项」，最后露出的一项只露半截——「下面还有」最直观的提示。
+ * 不收的话，空间只差一点点放下整数项时，被截掉的那一项完全看不见，用户会以为列表到头了。
+ */
+function peekHeight(menu, room) {
+    const itemHeight = menu.firstElementChild?.getBoundingClientRect().height ?? 0;
+    if (itemHeight <= 0 || room < itemHeight * POPOVER_PEEK_MIN_ITEMS) {
+        return room;
+    }
+
+    return (Math.floor(room / itemHeight - 0.5) + 0.5) * itemHeight;
+}
+
+/** 菜单要滚动时，把当前选中的那一项（aria-checked）滚到可视区中间，免得对勾落在看不见的那一截。 */
+function revealSelectedItem(menu) {
+    const selected = menu.querySelector('[aria-checked="true"]');
+    if (selected) {
+        menu.scrollTop = Math.max(0, selected.offsetTop - (menu.clientHeight - selected.offsetHeight) / 2);
+    }
+}
+
 /**
  * 弹出菜单（PopoverMenu）定位：优先放在触发行下方、右缘对齐触发行（iOS 上下文菜单的位置）；下方放不下就放上方；
  * 两边都放不下就选空间大的一侧，并限制最大高度、菜单内部滚动。位置用 fixed 坐标写在菜单上，菜单因此不受 Sheet 内容区
  * 的滚动裁剪（Sheet 的 body 是 overflow: auto）。写完后标记 data-positioned，样式据此显示菜单（之前是 visibility: hidden，
  * 避免在原点闪一下）。
+ *
+ * 竖向范围从安全区往里量：上沿 = 顶部安全区 + 12（与全高 Sheet 自己的上沿同一条线，菜单不会越过 Sheet 冲进状态栏 / 刘海），
+ * 下沿 = 屏高 − 底部安全区 − 12（不压手势条）。菜单最终一定落在这个范围里：上下两侧都不够 POPOVER_MIN_ROOM_PX 的极小视口
+ * （横屏、分屏）里，菜单宁可压住触发行，也不越出范围。
  */
 export function positionPopover(menu, anchor) {
     if (!menu || !anchor) {
@@ -119,28 +169,42 @@ export function positionPopover(menu, anchor) {
     const viewHeight = viewport ? viewport.height : window.innerHeight;
     const rect = anchor.getBoundingClientRect();
 
+    const insets = readSafeInsets();
+    const minTop = insets.top + POPOVER_MARGIN_PX;
+    const maxBottom = viewHeight - insets.bottom - POPOVER_MARGIN_PX;
+
     menu.style.maxHeight = '';
     const width = menu.offsetWidth;
     const naturalHeight = menu.offsetHeight;
 
-    const below = viewHeight - POPOVER_MARGIN_PX - (rect.bottom + POPOVER_GAP_PX);
-    const above = rect.top - POPOVER_GAP_PX - POPOVER_MARGIN_PX;
+    const below = maxBottom - (rect.bottom + POPOVER_GAP_PX);
+    const above = rect.top - POPOVER_GAP_PX - minTop;
     const placeBelow = naturalHeight <= below || below >= above;
-    const room = Math.max(120, placeBelow ? below : above);
-    const height = Math.min(naturalHeight, room);
+    // 一侧再小也给 POPOVER_MIN_ROOM_PX；但不超过安全区内的总高度（视口小到装不下时，整个范围都给菜单）
+    const room = Math.max(POPOVER_MIN_ROOM_PX, Math.min(maxBottom - minTop, placeBelow ? below : above));
+    const scrolls = naturalHeight > room;
+    const height = scrolls ? peekHeight(menu, room) : naturalHeight;
 
-    const top = placeBelow ? rect.bottom + POPOVER_GAP_PX : rect.top - POPOVER_GAP_PX - height;
+    // 先按放在哪一侧算，再夹进 [minTop, maxBottom − height]：侧边空间不够 POPOVER_MIN_ROOM_PX 时，下方放置会越过下沿、上方放置会越过上沿
+    const top = Math.max(minTop, Math.min(
+        placeBelow ? rect.bottom + POPOVER_GAP_PX : rect.top - POPOVER_GAP_PX - height,
+        maxBottom - height,
+    ));
     // 右缘对齐触发行（留出行的内边距），再夹进屏幕
     const left = Math.min(
         Math.max(POPOVER_MARGIN_PX, rect.right - POPOVER_MARGIN_PX - width),
         Math.max(POPOVER_MARGIN_PX, viewWidth - POPOVER_MARGIN_PX - width),
     );
 
-    menu.style.top = `${Math.max(POPOVER_MARGIN_PX, top)}px`;
+    menu.style.top = `${top}px`;
     menu.style.left = `${left}px`;
-    menu.style.maxHeight = naturalHeight > room ? `${room}px` : '';
+    menu.style.maxHeight = scrolls ? `${height}px` : '';
     menu.style.transformOrigin = `${Math.max(0, rect.right - POPOVER_MARGIN_PX - left)}px ${placeBelow ? '0' : '100%'}`;
     menu.dataset.placement = placeBelow ? 'below' : 'above';
+    if (scrolls) {
+        revealSelectedItem(menu);
+    }
+
     menu.dataset.positioned = 'true';
 }
 

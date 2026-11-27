@@ -142,7 +142,9 @@ def seed_world(db: LocalDb, login_phone: str) -> World:
     expense_cats = db.preset_category_names(BILL_TYPE_EXPENSE)
     income_cats = db.preset_category_names(BILL_TYPE_INCOME)
     channels = db.preset_channel_names()
-    custom_category = db.seed_category(user_id, "我的自定义分类名称特别特别长")
+    # 超长名称的自定义分类同时开着「不计入统计」：账单行的小标签、分类页副标题、统计页底部的「已忽略」提示
+    # 都以最长的内容出现在每一屏里，让 Z（字号放大 130%）与窄屏扫描一并覆盖它们
+    custom_category = db.seed_category(user_id, "我的自定义分类名称特别特别长", exclude_from_statistics=True)
     custom_channel = db.seed_channel(user_id, "我的自定义支付渠道")
     db.set_user_defaults(user_id, ledger_id=main_id)
 

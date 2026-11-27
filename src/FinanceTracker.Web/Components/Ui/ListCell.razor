@@ -4,6 +4,8 @@
     列表单元格（设计稿 06 · 列表单元格）：图标块 + 标题 + 副标题 + 右值 / 徽标 / 开关 / 箭头。
     - 给了 OnClick 就渲染成 <button>（可聚焦、可读屏、整行可点）；否则是普通 <div>（例如右侧放开关的设置行）。
     - 高度：无副标题 56，有副标题 66；分隔线从标题左缘开始（有图标块时缩进到图标块之后）。
+    - 标题后可以跟一段灰色附注（TitleNote，账单行里是账本），副标题前可以带一枚小标记（SubtitleTag，账单行里是「不计入统计」，
+      E2E 钩子 cell-tag）；两者都只是排版，文字内容由调用方（BillPresentation）决定。
     - 只暴露内容插槽与事件，不含业务逻辑。
 *@
 @if (OnClick.HasDelegate)
@@ -40,11 +42,14 @@ else
     /// <summary>标题</summary>
     [Parameter] public string? Title { get; set; }
 
-    /// <summary>标题后面的备注：与标题同一行，前面带「 · 」，灰色常规字重（账单行：分类加粗 + 备注灰色）；放不下时它先被省略。读屏名称请用 AriaLabel 给整句</summary>
+    /// <summary>标题后面的附注：与标题同一行，前面带「 · 」，灰色常规字重（账单行：分类加粗 + 账本灰色）；放不下时它先被省略。读屏名称请用 AriaLabel 给整句</summary>
     [Parameter] public string? TitleNote { get; set; }
 
     /// <summary>副标题（有它时单元格变高）</summary>
     [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>副标题前面的小标记（账单行的「不计入统计」）：中性底色的小药丸，不收缩；只在有副标题时显示。读屏名称请用 AriaLabel 给整句</summary>
+    [Parameter] public string? SubtitleTag { get; set; }
 
     /// <summary>右侧的值文本</summary>
     [Parameter] public string? Value { get; set; }
@@ -106,12 +111,20 @@ else
             }
             else
             {
-                @* 标题 + 备注：两段各是标题盒里的一个 flex 子项（分类名按内容宽、放不下才省略；备注占剩下的宽度并自己省略），子项之间不能有空白文本节点 *@
+                @* 标题 + 附注（账单行里是账本）：两段各是标题盒里的一个 flex 子项（分类名按内容宽、放不下才省略；附注占剩下的宽度并自己省略），子项之间不能有空白文本节点 *@
                 <span class="ft-cell__title ft-cell__title--noted"><span class="ft-cell__title-text">@Title</span><span class="ft-cell__title-note"> · @TitleNote</span></span>
             }
             @if (!string.IsNullOrEmpty(Subtitle))
             {
-                <span class="ft-cell__subtitle">@Subtitle</span>
+                if (string.IsNullOrEmpty(SubtitleTag))
+                {
+                    <span class="ft-cell__subtitle">@Subtitle</span>
+                }
+                else
+                {
+                    @* 带标记的副标题：标记不收缩，文字占剩下的宽度并自己省略（子项之间不能有空白文本节点） *@
+                    <span class="ft-cell__subtitle ft-cell__subtitle--tagged"><span class="ft-cell__tag" data-testid="cell-tag">@SubtitleTag</span><span class="ft-cell__subtitle-text">@Subtitle</span></span>
+                }
             }
         </span>
         @if (Badges != null || Trailing != null || !string.IsNullOrEmpty(Value) || Chevron)

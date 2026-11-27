@@ -11,13 +11,14 @@
       KPI 单卡（支出 / 收入 / 结余）
       → 支出构成（圆环 + 图例；标题旁的小按钮切换看支出 / 收入，右侧「按账本 / 按分类」切换汇总口径）
       → 预算执行（当月有预算才显示）→ 分类排行 → 支出日历 → 累计收支。
-    数据口径与以前完全一致（ADR 0005）：月份是应用时区的自然月、区间左闭右开；统计只算当前用户自己记的账单；
+    数据口径与以前完全一致（ADR 0005）：月份是应用时区的自然月、区间左闭右开；统计只算当前用户自己记的账单（开着「不计入统计」的分类除外，ADR 0008，底部有提示）；
     无账本的历史账单在「按账本」里归「未归属账本」；预算的账本口径随账本筛选（null = 全部账本的预算）。
     一次加载把本页要用的数据全取回来（含支出 / 收入两套、分类 / 账本两种汇总），所以切换「支出 ↔ 收入」「按账本 ↔ 按分类」不再查库。
     观察属性（E2E）：根 data-testid="stats-monthly"（data-year / data-month / data-state = loading | ready | reloading | failed）；
     KPI stats-kpi 与 stats-kpi-expense / -income / -balance；构成 stats-comp-title / stats-comp-switch（data-target）/ stats-comp-dimension（data-mode）、
     stats-composition、stats-donut（donut-arc）、stats-donut-total、stats-legend（legend-row）、stats-composition-empty；
-    预算 stats-budget-header / stats-budget-manage / stats-budget-group（budget-row）；图表容器 stats-rank / stats-calendar / stats-cumulative。
+    预算 stats-budget-header / stats-budget-manage / stats-budget-group（budget-row）；图表容器 stats-rank / stats-calendar / stats-cumulative；
+    底部的「已忽略 N 笔不计入统计的账单」提示 stats-excluded（本月没有这样的账单时不渲染）。
 *@
 <div class="ft-stats-view"
      data-testid="stats-monthly"
@@ -125,6 +126,9 @@
                     TestId="stats-cumulative">
             <CumulativeNetChart DailyData="_daily" Year="Year" Month="Month" />
         </ChartPanel>
+
+        @* 本月有「不计入统计」的账单时，在页面底部说明它们没有算进上面的数字 *@
+        <ExcludedNote Text="@_excludedNote" TestId="stats-excluded" />
     }
 </div>
 
@@ -153,6 +157,7 @@
     private IReadOnlyList<LegendRow> _incomeLedgerRows = [];
     private IReadOnlyList<BudgetRowModel> _budgetRows = [];
     private List<TrendData> _daily = [];
+    private string? _excludedNote;
 
     protected override object? LoadKey => (Year, Month, LedgerCount > 0);
 
@@ -206,6 +211,10 @@
         var daily = await StatisticsService.GetTrendDataAsync(
             userId, new DateTime(year, month, 1), TimeBoundaries.EndOfMonth(year, month), TrendDimension.Day, ledgerId);
 
+        // 被「不计入统计」排除的账单（底部提示用）：区间与上面的月度汇总一致——应用时区的自然月，左闭右开
+        var monthStart = new DateTime(year, month, 1);
+        var excluded = await StatisticsService.GetExcludedStatisticsAsync(userId, monthStart, monthStart.AddMonths(1), ledgerId);
+
         _totalExpense = monthly.TotalExpense;
         _totalIncome = monthly.TotalIncome;
         _kpi = BuildKpi(monthly.TotalExpense, monthly.TotalIncome);
@@ -216,6 +225,7 @@
         _incomeLedgerRows = StatisticsPresentation.LegendOfLedgers(incomeLedgers);
         _budgetRows = budgets.Select(BudgetPresentation.ToRow).ToList();
         _daily = daily;
+        _excludedNote = ExcludedFromStatisticsPresentation.NoteText(excluded);
     }
 
     private static IReadOnlyList<KpiItem> BuildKpi(decimal expense, decimal income) =>

@@ -1,0 +1,23 @@
+@namespace FinanceTracker.Web.Components.Ui
+
+@*
+    统计页底部的「已忽略」提示：一行小字（图标 + 文案），说明有几笔「不计入统计」的账单没有算进上面的数字。
+    - 文案由 ExcludedFromStatisticsPresentation.NoteText 拼好传进来；没有文案（区间内没有被排除的账单）时整行不画。
+    - 统计 Tab 的月度 / 趋势 / 年度三个视图与自定义报表共用；读屏按 role="note" 当作补充说明读出。
+    - 观察属性（E2E）：data-testid（调用方给，各视图带自己的前缀）。
+*@
+@if (!string.IsNullOrEmpty(Text))
+{
+    <div class="ft-excluded-note" role="note" data-testid="@TestId">
+        <i class="mdi mdi-eye-off-outline ft-excluded-note__icon" aria-hidden="true"></i>
+        <span class="ft-excluded-note__text">@Text</span>
+    </div>
+}
+
+@code {
+    /// <summary>提示文案；为空时不画</summary>
+    [Parameter] public string? Text { get; set; }
+
+    /// <summary>E2E 钩子</summary>
+    [Parameter] public string? TestId { get; set; }
+}

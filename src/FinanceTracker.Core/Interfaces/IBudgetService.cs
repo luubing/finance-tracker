@@ -47,7 +47,9 @@ public interface IBudgetService
     Task<bool> DeleteBudgetAsync(Guid budgetId, Guid userId);
 
     /// <summary>
-    /// 获取预算执行情况（预算额、已用额、剩余额、使用百分比）
+    /// 获取预算执行情况（预算额、已用额、剩余额、使用百分比）。
+    /// 已用额不含「不计入统计」分类的账单（<see cref="Entities.Category.ExcludeFromStatistics"/>），
+    /// 首页概览 <see cref="GetOverviewBudgetStatusAsync"/> 同口径。
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="year">年份</param>
@@ -79,7 +81,7 @@ public interface IBudgetService
     /// <param name="month">月份</param>
     /// <param name="ledgerId">账单归属的账本ID（可空）</param>
     /// <param name="categoryId">账单的分类ID</param>
-    /// <returns>无相关预算或未达到预警阈值（80%）时返回 null</returns>
+    /// <returns>无相关预算或未达到预警阈值（80%）时返回 null；账单属于「不计入统计」的分类时恒为 null（它不占用预算，无从提醒）</returns>
     Task<BudgetAlert?> GetBudgetAlertAsync(Guid userId, int year, int month, Guid? ledgerId, Guid? categoryId);
 }
 

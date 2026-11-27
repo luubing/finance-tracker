@@ -158,6 +158,10 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 - **账单查询、总数与汇总共用一份条件**：`BillFilter`（时间范围 / 分类 / 支付渠道 / 账本 / 未归属账本 / 类型；10 号会加关键字）→ `BillService` 里唯一的
   `BuildBillQueryAsync`，列表、总数、汇总都从它取「符合条件的账单」，口径一致由结构保证而不是两处各写一遍再人工对齐。汇总在库里按类型分组求和
   （至多读回两行），不受分页影响。**两种口径刻意并存**：汇总卡是全量口径，按日分组头的合计仍基于已加载账单（沿用旧口径，spec 保留的差异）。
+- **账单行 `BillRow` 的信息分布**：第一行 =「分类（加粗）· 账本（灰色常规）」，第二行 =「支付渠道 · 备注」（备注折成单行，没有备注就只剩支付渠道，不留多余的「 · 」；
+  历史上没有账本的账单，第一行尾段是「未归属账本」）。最初的版本相反（第一行尾段是备注、第二行是「支付渠道 · 账本」），后来按用户要求把账本与备注的位置互换，
+  行的文案规则只在 `BillPresentation`。分类名与账本名各是标题盒里的 flex 子项，放不下时账本先省略（见 §26 的大字号约定）。
+  分类开着「不计入统计」（ADR 0008）的账单，第二行前多一枚小标签「不计入统计」，读屏名称末尾也会说；账单 Tab 的汇总卡仍是全量口径，被排除的账单也算在里面。
 - **左滑「删除」的等价入口是点按行进入编辑页**（里面有删除）；删除前用 `GlassAlert` 确认。Alert 关闭有 180ms 退出动画，期间遮罩仍盖着页面、
   会吞掉触摸——E2E 在确认 / 取消后要等 `alert-host` 消失再继续操作页面。没有写权限的行（共享账本里别人记的账单，`CanModify = false`）
   不渲染滑动操作，点按只给「这笔账单由账本里的其他成员记录，只有记录它的人可以修改或删除」的本地提示（不发请求、不会登出）。
@@ -357,7 +361,11 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 - **账本必选，界面只做前置拦截**：默认账本 = 用户设为默认的自己的账本，否则第一个自己的账本（沿用旧记账页），所以「缺账本」只发生在**一个自己的账本都没有**的用户身上；账本菜单 = 自己的账本 + 有写权限（Owner / Editor）的共享账本（带「共享」徽标），
   末项「新建账本…」复用 05 号的 `LedgerFormSheet`，保存后自动选中。账本必填、写权限、UTC 换算仍由 `BillService` / `LedgerMemberService` 统一负责，`ForbiddenAccessException` 只弹警告 Toast（**不登出**，CLAUDE.md 第 7 条）。
 - **弹出菜单 `PopoverMenu` 是实色白底，不是玻璃**（玻璃层预算，§3）：层级 `--ft-z-popover` 125，介于 Sheet 120 与 Alert 130 之间；定位由 `ui.js` 的 `positionPopover` 完成——优先放在触发行下方、右缘对齐，放不下放上方，
-  两边都不够选空间大的一侧并限高、内部滚动；脚本写好位置前 `visibility: hidden`，写完置 `data-positioned`（避免在原点闪一下），脚本失败回退成底部列表（`data-fallback`）。
+  两边都不够选空间大的一侧并限高、内部滚动。**竖向范围从安全区往里量**：上沿 = 顶部安全区 + 12（与全高 Sheet 自己的上沿同一条线，菜单不会越过 Sheet 冲进状态栏 / 刘海），下沿 = 屏高 − 底部安全区 − 12（不压手势条）；
+  安全区由脚本放一个看不见的探针元素、让它的 `padding` 引用 `--ft-safe-*` 令牌再读回像素（不直接用 `env()`）。需要滚动时可视区收成「整数项 + 半项」——最后露出的一项只露半截，是「下面还有」最直观的提示——并把选中项滚到可视区中间
+  （改前上下只留屏幕边缘 12，支付渠道菜单一长就顶到离屏幕顶 12 的位置、越过 Sheet 上沿；用例见 `addbill_sheet_test.py` 的 P 节）。极小视口（横屏 / 分屏，触发行上下两侧都不足 120）下菜单仍给至少 120 的高度，但宁可压住一部分触发行，也始终落在上述范围里（P 节第 5 例用 270px 高的视口守住）；
+  只有范围本身不足 120（可用高度 < 144）时才会越出——不为这种几乎不存在的视口再缩。
+  脚本写好位置前 `visibility: hidden`，写完置 `data-positioned`（避免在原点闪一下），脚本失败回退成底部列表（`data-fallback`）。
   点菜单外面只收起菜单、**不穿透**到下面的行，Esc 收起。账本菜单（`LedgerMenu`）是后续待确认账单 / 导入账单复用的共用件。
 - **分类网格 `CategoryGrid`**：5 列、每页两行（10 格）、末尾虚线圆的「新建分类」；超过一页横向滚动 + `scroll-snap`，页码由 `ui.js` 的滚动监听写在容器的 `data-page` 上，分页点高亮靠 CSS 兄弟选择器，翻页不经 Blazor 往返。
   选中项变化后（新建分类、语音识别选中了第二页的分类、切换账单类型）组件调 `scrollPagerTo` 滚到选中项所在页（同类型内平滑，切换类型直接就位）；选中项不在列表里时不翻页（新建分类时「选中」先于「列表刷新」到达，按找不到处理会误翻回第一页）。
@@ -573,7 +581,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   底色、Logo 的位置与大小全程不变，每一步只多长出一层内容。系统启动画面只能是「底色 + 一张静态图」，做不了渐变与模糊，所以那块方块是实色——取值是深色玻璃压在渐变上的实测色，
   也正是降级路径下加载页方块的颜色（见下）。
 - **两个新令牌，散在多处的取值必须一致**：`--ft-splash-bg` / `--ft-splash-tile`。底色在 `tokens.css`、`FinanceTracker.App.csproj` 的 `MauiSplashScreen` 与 `MauiIcon` 的 `Color`、`MainPage.xaml` 的 `BackgroundColor`
-  （WebView 画出来之前露出来的就是它）各写一份；方块在 `splash.svg` 与 `.ft-boot__logo`（96 / 30）；钱包图形（MDI `wallet-outline`）在应用图标前景、`splash.svg`、两个宿主页里各抄一份——
+  （页面容器的底色；原生 WebView 的底色也取自它，见下「原生部分」的白屏修复）各写一份；方块在 `splash.svg` 与 `.ft-boot__logo`（96 / 30）；钱包图形（MDI `wallet-outline`）在应用图标前景、`splash.svg`、两个宿主页里各抄一份——
   改一处漏另一处，真机上就是一道色差或一次跳变，`DesignTokensTests` 逐项守住。应用图标一并换成同一个 Logo（渐变背景层 + 白色钱包前景层），点开图标不再变色；旧的 `appicon.png` 删除。
 - **加载页是纯 HTML + CSS，标记写在 `#app` 之外**：`#ft-boot` 放在两个宿主页（MAUI `index.html`、Web.Server `_Layout.cshtml`，标记一字不差，单元测试逐字比对）里 `#app` 的旁边，不依赖网络与脚本就能出现；
   Blazor 一启动就接管 `#app`，所以加载页必须由 `wwwroot/js/boot.js` 在首屏就绪之后才收走。样式 `boot.css` 加载在 `ui.css` 之后（§2 的加载顺序在末尾追加这一项）；层级盖过 Toast（`--ft-z-toast + 1`）；旧的「正在加载…」文字删除。
@@ -606,6 +614,17 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
 - **原生部分**：`splash.svg` 画布 108×108、方块四周各留 6（Android 12+ 的启动图 drawable 由 MAUI 生成，固定把图拉成 108dp，画布正好 108 才没有尺寸跳变；csproj 的 `BaseSize="108,108"`，Resizetizer 把 `Color` 直接烤进启动图）；
   Android 启动主题 `Ft.SplashTheme`（`Platforms/Android/Resources/values/styles.xml`，继承 MAUI 生成的 `Maui.SplashTheme`，只把状态栏图标改成白色，`MainActivity` 的 `Theme` 指向它；XML 注释里不能出现 `--`）；
   iOS `Info.plist` 的 `UIStatusBarStyle = UIStatusBarStyleLightContent`（只管启动那一刻，启动后仍由 `StatusBarService` 按页面接管，§5）；`MainPage.xaml` 的 `BackgroundColor` 取启动底色、`SafeAreaEdges="None"`（沿用 02 号 ticket）。
+  **原生层的「一帧白屏」与修法**（用户反馈冷启动仍有一帧白屏闪动）：最初的设计假设「`MainPage` 的紫底是 WebView 画出来之前露出来的」是错的——原生 WebView 在网页第一次绘制之前画的是它**自己的默认底色**，会盖住下面的 `MainPage`：
+  Android 是 Chromium 的白色（对着 `Microsoft.AspNetCore.Components.WebView.Maui` 10.0.30 的 Android 程序集核实过：里面没有任何 `SetBackgroundColor` 调用）；
+  iOS 的 `WKWebView` 默认不透明，MAUI 只把 `BackgroundColor` 设成 `Clear`、没有关 `Opaque`（iOS 程序集里有 `set_BackgroundColor`、没有 `set_Opaque`）。
+  Android 还有第二处：`MauiAppCompatActivity.OnCreate` 会把启动主题 `Ft.SplashTheme` 换成 `Maui.MainTheme`，窗口背景随之变成主题默认的白色（深色模式下是黑色），
+  系统启动画面一结束、网页还没出第一帧时露出的就是窗口背景（Android 11 及以下由 `windowBackground` 承担启动画面，换主题那一刻同样是白）。
+  修法（都不在 Web 层，不改页面样式）：`MainPage.xaml.cs` 在 `BlazorWebViewInitialized`（WebView 已创建、尚未开始加载页面，所以赶在第一帧之前）里把 WebView 底色设成页面背景色——
+  Android `SetBackgroundColor`；iOS `Opaque = false` + `BackgroundColor` / `ScrollView.BackgroundColor` / iOS 15+ 的 `UnderPageBackgroundColor`（最低支持 iOS 14，要判断系统版本）；
+  `MainActivity.ApplyLaunchBackground` 紧跟 `base.OnCreate` 把窗口背景压成 `maui_splash_color`（MAUI 按 csproj 里 `MauiSplashScreen` 的 `Color` 生成的资源，与系统启动画面是同一个）。
+  颜色一律取自已有的单一来源（页面背景 / 启动资源），代码里不再写第二份十六进制；`DesignTokensTests` 的两条「冷启动不闪白」守住「两个平台都接了事件、调用齐全、顺序在 `base.OnCreate` 之后、不写死颜色」
+  （做过变异检查：还原成旧代码两条都红）。网页第一次绘制之后，加载页与页面自己的背景会盖住这些底色，常态下看不到它们。
+  **已知取舍（未在真机验证）**：iOS 15+ 显式设置 `UnderPageBackgroundColor` 之后，整页橡皮筋回弹时露出来的会是紫色（原先由 WebKit 按页面背景自动取色）；应用里没有给整页回弹做任何处理，这一点没有在真机上拉过，露出紫色是否可以接受要人工看一眼（见下方未验证清单 ⑥）。
 - **观察接口**：`<html data-ft-boot="booting|handoff-login|handoff-home|handoff-fade|failed|done">`（同值写在 `#ft-boot[data-state]`）、`window.FtBoot.state` / `assetsSettled` / `chartsReady()`，均登记在 `tests/e2e/README.md`。
   E2E 基座的 `wait_circuit_ready` 现在等到加载页收走且 CDN 资源都已加载完或失败，各脚本此后看到的与以往一样是干净的首屏；`boot_test.py` 覆盖慢启动 / 失败兜底 / 两种交接 / 深链接 / 慢 CDN / 图表等待 / 减弱动态效果。
 
@@ -645,7 +664,7 @@ ADR 0001 把 UI 描述为「MASA Blazor（Material Design 风格）」。这次 
   在 390 与 320 两个宽度下扫描四个 Tab、记一笔 Sheet、各二级页面、登录页：没有横向溢出、没有元素越出视口、没有文字被固定高度裁掉、可点击元素仍 ≥ 44 × 44。
   为此做过的调整：Hero 主指标与小卡金额按字符数收缩（`--ft-amount-fit-xl` / `--ft-amount-fit-card`，系数里已含 1.3 倍余量，装得下 ¥99,999,999.99 这种最宽的数字）；
   `ui.css` 开头加了 `.m-application p { margin-bottom: 0 }`——MASA 给全局 `<p>` 写了下外边距，本应用的文字块都按「X 0 0」写，之前每个页面各自绕开（`p.ft-…` 选择器、「不用 `<p>`」的约定），现在全局归零，那些绕开的写法留着无害（24 号评估后不收回，§27）。
-  验收阶段（24 号）按设计稿改完版面后，这一节扫描又抓到两处回归，修法成了约定：①「标题 + 灰色备注」这类要省略的尾段，写成标题盒里的 flex 子项（`ListCell` 的 `TitleNote`，前一段按内容宽、后一段占剩余宽度并自己省略），不要写成行内元素——行内元素的盒子会比被 `overflow` 裁住的标题盒还宽，大字号下会被「没有元素越出视口」抓到；②设计稿给了行高的网格（记一笔的分类网格 77pt），行高写成 `minmax(令牌, auto)`、名称行不收缩——固定行高在 130% 字号下会裁掉名称下沿，100% 字号下像素不变。
+  验收阶段（24 号）按设计稿改完版面后，这一节扫描又抓到两处回归，修法成了约定：①「标题 + 灰色附注」这类要省略的尾段（账单行当时是备注，现在是账本，见 §10 的账单行小节），写成标题盒里的 flex 子项（`ListCell` 的 `TitleNote`，前一段按内容宽、后一段占剩余宽度并自己省略），不要写成行内元素——行内元素的盒子会比被 `overflow` 裁住的标题盒还宽，大字号下会被「没有元素越出视口」抓到；②设计稿给了行高的网格（记一笔的分类网格 77pt），行高写成 `minmax(令牌, auto)`、名称行不收缩——固定行高在 130% 字号下会裁掉名称下沿，100% 字号下像素不变。
 - **状态不只靠颜色**：T 节逐项验证——Tab 栏（文字标签 + `aria-selected` + 选中项下的高光块）、统计分段（文字 + `aria-pressed` + 滑块）、多选（`role=checkbox` / `aria-checked` + 圈内对勾，未选是空心圈）、
   金额（收入带 +、支出带 -）、预算三档（「剩余 / 仅剩 / 超支」文字 + 读屏文案「接近上限 / 已超支」，总预算圆环超支时标签是「超支」）、云端同步行（「N 条待同步」文字 + 云图标）、
   账本成员角色（文字徽标）、日志级别（文字里写着级别名）、登录表单错误（文字 + `role=alert` + `aria-invalid`）。圆环与图例的色点是装饰（`aria-hidden`），名称、占比、金额都以文字呈现。
@@ -822,12 +841,15 @@ iOS 真机验收后用户反馈：**Tab 栏离屏幕底部的安全区间距太�
   假云端镜像真实控制器的状态码 / 消息 / 过滤规则，但不是真实的 Api + PostgreSQL，真实联调留给（可选的）人工验收。
 - 冷启动只有「加载页之后」的 Web 层被自动化验证（`boot_test.py`，Chromium）；**原生部分与真机时序没有验证过，必须真机 / 模拟器人工验收**：
   ① Android 12+ 的系统启动画面（图标是否被圆形遮罩裁切、底色是否与加载页首帧无色差）与 Android 11 及以下的 `windowBackground` 路径、各厂商 ROM 的表现；iOS 启动图（`splash.svg` 生成）到加载页首帧是否有一帧色差或跳变。
-  本次只在本机构建验证过 Android 目标（生成的资源与尺寸），没有构建 iOS，也没有在真机 / 模拟器上点开过。
+  本次只在本机构建验证过 Android 目标（生成的资源与尺寸）；iOS 目标在本机（Windows，对着 `Microsoft.iOS` 参考程序集）能编译通过（修白屏闪动时补测），但没有链接 / 签名 / 运行过，也没有在真机 / 模拟器上点开过。
   ② `Ft.SplashTheme` 与 `UIStatusBarStyle` 对「启动那一刻状态栏图标是白色」的实际效果；应用图标（Android 自适应图标、iOS 圆角蒙版）的实际观感，以及删除 `appicon.png` 之后各平台的图标生成。
   ③ 三个时间常量（`spinnerMs` 600 / `capMs` 1500 / `watchdogMs` 12000）是建议值，需要在真机上量过「点图标 → 外壳就绪」的分布再调；加载页在低端 Android WebView 上的帧率
   （幕布收拢是 `height` + `border-radius` 过渡，虽然只发生在 `position: fixed` 的加载页里，但没有在低端机上测过）。
   ④ MAUI Blazor Hybrid 下「页面 load 之后注入 CDN 资源」是否确实让 Blazor 更早启动：Chromium 里验证过 CDN 被拖慢时加载页照常出现、应用照常启动（`boot_test.py` G 节），WebView 里 `load` 的实际时点没有量过；离线启动时图标缺失、图表位置给出说明属于预期降级。
   ⑤ CDN 连得上却一直不返回（挂起）时，统计页图表位置会一直是骨架直到浏览器自己判定超时——只验证过「脚本加载失败」与「脚本很晚才到」两种情形。
+  ⑥ **「一帧白屏」的原生修复（WebView 底色 + Android 窗口背景）是否真的消除了那一帧**：只做了源码层证据（对着 MAUI 包核实默认行为）、两个平台的编译与守卫单测，**没有在真机 / 模拟器上逐帧看过**。
+  需要看：Android 12+（系统启动画面 → 第一帧 → 加载页）、Android 11 及以下（`windowBackground` 路径，换主题那一刻）、系统深色模式开着时、iOS 14 与 15+（`UnderPageBackgroundColor` 只在 15+ 生效）；
+  录屏逐帧（Android：`adb shell screenrecord`；iOS：Xcode 的 Metal / Core Animation 帧调试或慢动作录屏）确认启动画面到加载页首帧之间没有非紫色的帧；iOS 上顺带拉一下整页看橡皮筋露出的颜色是否可以接受。
 - 无障碍与降级只有 Web 层被自动扫描过（`a11y_degradation_test.py`，Chromium 手机视口）；**以下必须真机 / 模拟器人工验收（23 号 ticket 的人工验收清单，均未完成）**：
   ① Android 系统「字体大小」调到最大 / 「显示大小」放大后的各页面（自动扫描用的是样式改写模拟，与真实 `fontScale` 不等价）；iOS 的 Dynamic Type（更大字体）同理；
   ② 低端 Android 设备上降级是否触发（3 GiB / 低内存标记的门槛是建议值）、降级后滚动与 Tab 切换是否真的更流畅；

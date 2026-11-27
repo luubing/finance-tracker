@@ -5,6 +5,7 @@
     「名称 + 图标 + 排序」的新建 / 编辑底部 Sheet（分类与支付渠道共用；账本的表单是 LedgerFormSheet，结构相同）。
     - Editing 为空是新建，否则是编辑；名称校验、图标选择、保存中状态、成功 / 失败提示都在这里，
       真正落库交给调用方的 Save（它调用各自的服务，服务层校验不变；失败时抛出异常即可，这里负责提示）。
+    - FormExtras 插槽放表单自有的附加设置（新建、编辑都显示，例如分类的「不计入统计」开关），状态由调用方持有、随 Save 落库。
     - 编辑模式下 EditingExtras 插槽放页面自己的操作（设为默认、删除）：它们依赖页面状态与回调，不属于表单本身。
     - 观察属性（E2E）：{前缀}-sheet、{前缀}-name、{前缀}-sort、{前缀}-form-error、{前缀}-save，
       以及 BottomSheet 自带的 sheet-title / sheet-close、IconPicker 的 icon-picker。
@@ -50,6 +51,8 @@
             <IconPicker Choices="IconChoices" @bind-Value="_icon" />
         </GroupedList>
 
+        @FormExtras
+
         @if (Editing is not null)
         {
             @EditingExtras
@@ -92,6 +95,12 @@
 
     /// <summary>要编辑的条目；为空表示新建。打开 Sheet 时按它初始化表单</summary>
     [Parameter] public NameIconTarget? Editing { get; set; }
+
+    /// <summary>
+    /// 表单自有的附加设置（新建、编辑都显示；例如分类的「不计入统计」开关），放在图标之后、编辑操作之前。
+    /// 它们的状态属于调用方（随 Save 一起落库），这里只提供位置
+    /// </summary>
+    [Parameter] public RenderFragment? FormExtras { get; set; }
 
     /// <summary>编辑模式下表单末尾的页面自有操作（设为默认、删除）</summary>
     [Parameter] public RenderFragment? EditingExtras { get; set; }

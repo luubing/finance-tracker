@@ -8,7 +8,8 @@ E2E 测试：首页重做（iOS UI 重构 · 07 号 ticket）。
 
   A. 新用户（没有账本、没有账单）：Hero（标题 / 日期星期 / 本月支出 / 收入 / 结余 / 通知入口，没有刷新按钮）；整块「新建账本」引导；
      新建账本 Sheet 盖住 Tab 栏；创建后变为「记第一笔」引导 + 「设置本月预算」引导；从预算页回来自动重新加载
-  B. 有数据的首页：本月支出 / 收入 / 结余 = 造的账单；最近账单 5 行（内容、金额颜色、时间、未归属账本、点按升起编辑 Sheet）；
+  B. 有数据的首页：本月支出 / 收入 / 结余 = 造的账单（这里的数据不含「不计入统计」分类的账单，那一块的口径见 exclude_from_statistics_test.py）；
+     最近账单 5 行（内容、金额颜色、时间、未归属账本、点按升起编辑 Sheet）；
      本月预算三种状态（正常 / 接近上限 / 超支）与文字线索、进度条无障碍属性、脚注；超支提示；
      待确认横幅与角标（有 / 无）；「快捷操作」宫格已移除；「全部」切换到账单 Tab；布局（滚动、底部让出 Tab 栏、无横向溢出、玻璃层 ≤ 3）；
      沉浸式（模拟刘海 / Home 指示条：Tab 栏压住指示条，留白不再额外加 34）
@@ -110,6 +111,14 @@ BILL_ROWS_JS = """() => [...document.querySelectorAll('[data-testid="home-recent
     tag: el.tagName,
     title: text('.ft-cell__title'),
     subtitle: text('.ft-cell__subtitle'),
+    // 标题的两段盒子：分类名（加粗）+「 · 账本」（灰色常规）；颜色 / 字重取计算后的值
+    head: (el.querySelector('.ft-cell__title-text') || {}).textContent,
+    tail: (el.querySelector('.ft-cell__title-note') || {}).textContent,
+    headWeight: el.querySelector('.ft-cell__title-text') ? getComputedStyle(el.querySelector('.ft-cell__title-text')).fontWeight : null,
+    tailWeight: el.querySelector('.ft-cell__title-note') ? getComputedStyle(el.querySelector('.ft-cell__title-note')).fontWeight : null,
+    headColor: el.querySelector('.ft-cell__title-text') ? getComputedStyle(el.querySelector('.ft-cell__title-text')).color : null,
+    tailColor: el.querySelector('.ft-cell__title-note') ? getComputedStyle(el.querySelector('.ft-cell__title-note')).color : null,
+    subtitleColor: el.querySelector('.ft-cell__subtitle') ? getComputedStyle(el.querySelector('.ft-cell__subtitle')).color : null,
     amount: amount ? amount.textContent.trim() : '',
     amountColor: amount ? getComputedStyle(amount).color : '',
     time: text('[data-testid="bill-time"]'),
@@ -397,9 +406,23 @@ def check_recent_bills(run: TestRun, page, expected: dict, ledger_name: str) -> 
         str([r["title"] for r in rows]),
     )
     legacy, lunch, rent, salary, yesterday = rows
-    run.check("行标题是「分类 · 备注」", [r["title"] for r in rows] == ["交通出行 · 老账单", "餐饮美食 · 午饭", "居住生活 · 房租", "工资薪酬 · 工资", "其他支出 · 昨日"], str([r["title"] for r in rows]))
-    run.check("行副标题是「支付渠道 · 账本」", lunch["subtitle"].endswith(f"· {ledger_name}") and " · " in lunch["subtitle"], lunch["subtitle"])
-    run.check("历史无账本的账单副标题标注「未归属账本」", legacy["subtitle"].endswith("· 未归属账本"), legacy["subtitle"])
+    run.check(
+        "行标题是「分类 · 账本」（账本在标题里，灰色常规字重；备注不在标题里）",
+        [r["title"] for r in rows] == ["交通出行 · 未归属账本", f"餐饮美食 · {ledger_name}", f"居住生活 · {ledger_name}", f"工资薪酬 · {ledger_name}", f"其他支出 · {ledger_name}"],
+        str([r["title"] for r in rows]),
+    )
+    run.check(
+        "行副标题是「支付渠道 · 备注」（默认渠道是第一个预设渠道「微信支付」）",
+        [r["subtitle"] for r in rows] == ["微信支付 · 老账单", "微信支付 · 午饭", "微信支付 · 房租", "微信支付 · 工资", "微信支付 · 昨日"],
+        str([r["subtitle"] for r in rows]),
+    )
+    run.check("历史无账本的账单标题标注「未归属账本」，备注照常在副标题里", legacy["title"].endswith("· 未归属账本") and legacy["subtitle"].endswith("· 老账单"), f"{legacy['title']} / {legacy['subtitle']}")
+    run.check(
+        "标题分两段排：分类名加粗；「 · 账本」灰色常规字重、与副标题同色（拼起来就是整句标题）",
+        lunch["head"] == "餐饮美食" and lunch["tail"] == f" · {ledger_name}" and int(lunch["headWeight"]) > 400 and lunch["tailWeight"] == "400"
+        and lunch["tailColor"] == lunch["subtitleColor"] and lunch["tailColor"] != lunch["headColor"],
+        f"{lunch['head']!r} {lunch['tail']!r} {lunch['headWeight']}/{lunch['tailWeight']} {lunch['headColor']}/{lunch['tailColor']}/{lunch['subtitleColor']}",
+    )
     run.check("支出金额带负号、千分位、两位小数", [lunch["amount"], rent["amount"], legacy["amount"]] == ["-¥35.00", "-¥1,200.50", "-¥18.00"], str([lunch["amount"], rent["amount"], legacy["amount"]]))
     run.check("收入金额带正号", salary["amount"] == "+¥12,000.00" and salary["income"] == "true", salary["amount"])
     run.check("金额颜色：支出是常规文字色（不用红色），收入是加深的绿色", lunch["amountColor"] == RGB_LABEL and salary["amountColor"] == RGB_INCOME_TEXT, f"{lunch['amountColor']} / {salary['amountColor']}")

@@ -1225,6 +1225,57 @@ public sealed class DesignTokensTests
         Assert.Equal(expected, mainPage.Groups["color"].Value, ignoreCase: true);
     }
 
+    /// <summary>去掉 C# 的 // 与 /* */ 注释（只给下面两个原生宿主文件用，这两个文件里没有含 // 的字符串）。</summary>
+    private static string CSharpWithoutComments(string relativePath) =>
+        Regex.Replace(ReadRepoFile(relativePath), @"//[^\r\n]*|/\*.*?\*/", string.Empty, RegexOptions.Singleline);
+
+    // 冷启动白屏闪动的原生根因：启动画面是紫色，但系统换主题 / WebView 自己画默认底色时会各露出一帧白色——
+    // Android：MauiAppCompatActivity.OnCreate 把窗口换成 Maui.MainTheme（窗口背景变白），WebView 在网页首次绘制前画 Chromium 的白色；
+    // iOS：WKWebView 默认不透明，MAUI 只把背景色设成 Clear，首次绘制前画的是白色。
+    // 这些只能在真机 / 模拟器上看到，自动化只能守住「做了、顺序对、颜色取自同一处、没有写死」。
+    [Fact]
+    public void 冷启动不闪白_原生WebView的底色取自MainPage的启动底色_两个平台都处理()
+    {
+        var code = CSharpWithoutComments("src/FinanceTracker.App/MainPage.xaml.cs");
+
+        // 事件两个平台都要接（曾经只接了 iOS，Android 的 WebView 一直是白底）
+        Assert.Matches(@"#if ANDROID \|\| IOS\s+blazorWebView\.BlazorWebViewInitialized \+= OnBlazorWebViewInitialized;", code);
+
+        // Android：WebView 底色（分支以单独一行的 #if ANDROID 开头，区别于构造函数里的 #if ANDROID || IOS）
+        var android = Regex.Match(code, @"#if ANDROID\r?\n.*?#elif IOS\b", RegexOptions.Singleline).Value;
+        Assert.False(string.IsNullOrEmpty(android), "MainPage.xaml.cs 里找不到 Android 分支");
+        Assert.Matches(@"e\.WebView\.SetBackgroundColor\(", android);
+
+        // iOS：关掉不透明，并把 WebView / ScrollView / 页面下方（iOS 15+）的底色都设上
+        var ios = Regex.Match(code, @"#elif IOS\b.*?#endif", RegexOptions.Singleline).Value;
+        Assert.False(string.IsNullOrEmpty(ios), "MainPage.xaml.cs 里找不到 iOS 分支");
+        Assert.Matches(@"\.Opaque\s*=\s*false\s*;", ios);
+        Assert.Matches(@"webView\.BackgroundColor\s*=\s*color\s*;", ios);
+        Assert.Matches(@"webView\.ScrollView\.BackgroundColor\s*=\s*color\s*;", ios);
+        Assert.Matches(@"IsIOSVersionAtLeast\(15\)\)\s*webView\.UnderPageBackgroundColor\s*=\s*color\s*;", ios);
+
+        // 颜色一律取自页面自己的背景色（MainPage.xaml 的 BackgroundColor，上一个测试已把它与令牌 / 启动图钉在同一个值），代码里不再写第二份
+        Assert.Equal(2, Regex.Matches(code, @"BackgroundColor is (?:not )?\{ \} launchColor").Count);
+        Assert.Equal(2, Regex.Matches(code, @"launchColor\.ToPlatform\(\)").Count);
+        Assert.DoesNotMatch(@"#[0-9A-Fa-f]{6}\b|0x[0-9A-Fa-f]{6}|Color\.FromRgb|Color\.FromArgb|UIColor\.(?:FromRGB|FromRGBA)|Color\.Rgb\(|Color\.Argb\(", code);
+    }
+
+    [Fact]
+    public void 冷启动不闪白_Android窗口背景在主题切换之后立刻压成启动画面的底色()
+    {
+        var code = CSharpWithoutComments("src/FinanceTracker.App/Platforms/Android/MainActivity.cs");
+
+        // 顺序：主题切换发生在 base.OnCreate 里，之后立刻压窗口背景（早于边到边设置，也早于第一帧）
+        Assert.Matches(@"base\.OnCreate\(savedInstanceState\)\s*;\s*ApplyLaunchBackground\(\)\s*;", code);
+
+        // 颜色来自 MAUI 按 csproj 的 MauiSplashScreen Color 生成的 maui_splash_color——与系统启动画面是同一个资源，不写第二份
+        var method = Regex.Match(code, @"private void ApplyLaunchBackground\(\)\s*\{(?<body>.*?)\n\t\}", RegexOptions.Singleline);
+        Assert.True(method.Success, "找不到 ApplyLaunchBackground");
+        Assert.Matches(@"Resources\?\.GetColor\(Resource\.Color\.maui_splash_color,\s*Theme\)", method.Groups["body"].Value);
+        Assert.Matches(@"Window\?\.SetBackgroundDrawable\(new ColorDrawable\(", method.Groups["body"].Value);
+        Assert.DoesNotMatch(@"#[0-9A-Fa-f]{6}\b|0x[0-9A-Fa-f]{6}|Color\.Rgb\(|Color\.Argb\(|Color\.ParseColor", code);
+    }
+
     [Fact]
     public void 启动画面里的Logo方块与加载页的Logo同色同尺寸同圆角()
     {

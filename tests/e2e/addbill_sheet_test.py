@@ -29,6 +29,8 @@ E2E 测试：记一笔 Sheet（iOS UI 重构 · 15 号 ticket，手机视口）�
   M. 来源页状态保留：Sheet 是覆盖层不是路由页——从账单 Tab 升起、关闭、保存之后，分段、滚动位置、大标题折叠、地址都原样
   N. 用户默认值：默认账本 / 支出分类 / 收入分类 / 支付渠道打开时预选，切类型时换成对应类型的默认；默认账本不可用时退回第一个自己的账本
   O. 玻璃层预算：四个 Tab 上打开 Sheet，屏幕上只剩标题栏的两个玻璃圆钮（≤ 3 层），收起后页面与 Tab 栏的毛玻璃恢复
+  P. 弹出菜单避开安全区：支付渠道菜单（9 个预设 + 6 个自建）在刘海 47 / 手势条 34 下不越过 Sheet 上沿、不压手势条，放不下就在菜单内滚动；极小视口（上下两侧都不足 120px）下菜单仍落在安全区范围内（压住触发行）
+     （可视区收成整数项 + 半项、选中项在可视区、滚到底能选到最后一项）；短菜单不限高；没有安全区时仍留 12px 边距
 
 只覆盖网页层——Android / iOS 上的真机手感（Sheet 升起与背景缩放、系统键盘与自定义键盘的切换、麦克风按住说话）见 ticket 15 的人工验收清单。
 """
@@ -921,6 +923,163 @@ def check_defaults(run: TestRun, page, db: LocalDb, user_id: str, ledger_name: s
         db.set_user_defaults(user_id)  # 默认值清空，别影响之后的用例
 
 
+# ---------------------------------------------------------------------------------------------- P. 弹出菜单避开安全区
+
+# 模拟 iPhone：刘海（顶 47）+ Home 指示条（底 34）——与账单页等脚本同一写法（顶 47 / 底 34 是 iPhone 典型值）
+SAFE_TOP, SAFE_BOTTOM = 47, 34
+POPOVER_MARGIN = 12  # ui.js 的 POPOVER_MARGIN_PX：菜单与安全区边缘的最小距离
+
+SET_SAFE_JS = """([top, bottom]) => {
+  const style = document.documentElement.style;
+  style.setProperty('--ft-safe-top', top + 'px');
+  style.setProperty('--ft-safe-bottom', bottom + 'px');
+  style.setProperty('--ft-safe-indicator', bottom + 'px');
+}"""
+
+CLEAR_SAFE_JS = """() => {
+  const style = document.documentElement.style;
+  ['--ft-safe-top', '--ft-safe-bottom', '--ft-safe-indicator'].forEach((name) => style.removeProperty(name));
+}"""
+
+# 弹出菜单的几何：菜单矩形、所在 Sheet 的上沿、可视高度 / 内容高度 / 滚动位置、第一项高度、行内限高、选中项（aria-checked）是否整个在可视区里
+POPOVER_GEOMETRY_JS = """(testid) => {
+  const menu = document.querySelector(`[data-testid="${testid}"]`);
+  const sheet = document.querySelector('[data-testid="addbill-sheet"]');
+  if (!menu || !sheet) return null;
+  const m = menu.getBoundingClientRect();
+  const selected = menu.querySelector('[aria-checked="true"]');
+  const s = selected ? selected.getBoundingClientRect() : null;
+  return {
+    top: m.top, bottom: m.bottom, sheetTop: sheet.getBoundingClientRect().top,
+    clientHeight: menu.clientHeight, scrollHeight: menu.scrollHeight, scrollTop: menu.scrollTop,
+    itemHeight: menu.firstElementChild.getBoundingClientRect().height, maxHeight: menu.style.maxHeight,
+    selectedInView: !!s && s.top >= m.top - 1 && s.bottom <= m.bottom + 1,
+  };
+}"""
+
+
+def open_popover_geometry(page, row_testid: str, menu_testid: str) -> dict:
+    """点开某一行的弹出菜单，等位置写完、动画停稳，返回 POPOVER_GEOMETRY_JS 量到的几何。"""
+    tid(page, row_testid).click()
+    menu = tid(page, menu_testid)
+    menu.wait_for(state="visible")
+    wait_animations_settled(page)
+    return page.evaluate(POPOVER_GEOMETRY_JS, menu_testid)
+
+
+def check_popover_safe_area(run: TestRun, page, db: LocalDb, user_id: str) -> None:
+    """弹出菜单的竖向范围从安全区往里量（修复前：菜单上沿只留 12px 边距，9 个预设渠道就会顶到离屏幕顶 12px，越过 Sheet 上沿冲进状态栏 / 刘海）。
+
+    模拟 iPhone（刘海 47 / 手势条 34），9 个预设 + 6 个自建 = 15 个渠道一定放不下：菜单上沿不越过 Sheet 上沿（安全区 + 12）、下沿不压手势条；
+    在菜单内滚动，可视区收成「整数项 + 半项」（最后露出的一项只露半截 = 「还能滚」的提示）；当前选中项在可视区里（选中的是最后一项也一样）；
+    滚到底仍能选到最后一项。短菜单（账本菜单）放得下：不限高、不滚动。没有安全区（浏览器默认 0）时仍留 12px 边距、不越过 Sheet 上沿。
+    """
+    custom_ids = [db.seed_channel(user_id, unique_name("长列表渠道"), sort_order=900 + i) for i in range(6)]
+    page.evaluate(SET_SAFE_JS, [SAFE_TOP, SAFE_BOTTOM])
+    try:
+        # 1. 选中的是列表最后一项：打开时必须已滚进可视区
+        db.set_user_defaults(user_id, channel_id=custom_ids[-1])
+        open_add_bill_sheet(page)
+        geometry = open_popover_geometry(page, "channel-row", "channel-menu")
+        detail = str(geometry)
+        run.check("长列表：菜单上沿不越过 Sheet 上沿（安全区 47 + 12 = 59），没有冲进状态栏 / 刘海", geometry["top"] >= SAFE_TOP + POPOVER_MARGIN - 0.5 and geometry["top"] >= geometry["sheetTop"] - 0.5, detail)
+        run.check("长列表：菜单下沿不压手势条（屏高 − 34 − 12）", geometry["bottom"] <= VIEW_H - SAFE_BOTTOM - POPOVER_MARGIN + 0.5, detail)
+        run.check("放不下：限高并在菜单内滚动（内容比可视区高）", geometry["maxHeight"].endswith("px") and geometry["scrollHeight"] > geometry["clientHeight"] + 1, detail)
+        run.check("可视区收成「整数项 + 半项」（最后露出的一项只露半截，提示还能滚）", abs((geometry["clientHeight"] / geometry["itemHeight"]) % 1 - 0.5) < 0.03, detail)
+        run.check("选中的是最后一项：打开时已滚进可视区（对勾看得见）", geometry["selectedInView"] and geometry["scrollTop"] > 0, detail)
+        shot(page, "addbill-channel-menu-safe-area")
+
+        options = tid(page, "channel-menu").get_by_test_id("channel-option")
+        first_name = options.first.inner_text().strip()
+        options.first.click()
+        run.check("滚回顶部能选到第一项", gone(tid(page, "channel-menu")) and row_value(page, "channel-row") == first_name, row_value(page, "channel-row"))
+
+        # 2. 选中的是第一项：从顶部开始；滚到底仍能选到最后一项
+        geometry = open_popover_geometry(page, "channel-row", "channel-menu")
+        run.check("选中的是第一项：菜单停在顶部、选中项在可视区", geometry["scrollTop"] == 0 and geometry["selectedInView"], str(geometry))
+        options = tid(page, "channel-menu").get_by_test_id("channel-option")
+        last_name = options.last.inner_text().strip()
+        options.last.click()  # Playwright 会先把它滚进菜单的可视区
+        run.check("滚到底选最后一项：菜单收起，行显示所选渠道", gone(tid(page, "channel-menu")) and row_value(page, "channel-row") == last_name != first_name, f"{row_value(page, 'channel-row')} / {last_name}")
+
+        # 3. 短菜单放得下：不限高、不滚动，也不越过 Sheet 上沿
+        geometry = open_popover_geometry(page, "ledger-row", "ledger-menu")
+        run.check("短菜单（账本菜单）放得下：不限高、不滚动", geometry["maxHeight"] == "" and geometry["scrollHeight"] <= geometry["clientHeight"] + 1, str(geometry))
+        run.check("短菜单同样不越过 Sheet 上沿", geometry["top"] >= geometry["sheetTop"] - 0.5, str(geometry))
+        page.keyboard.press("Escape")
+        gone(tid(page, "ledger-menu"))
+        close_add_bill_sheet(page)
+
+        # 4. 没有安全区（浏览器默认 0）：仍留 12px 边距，不越过 Sheet 上沿（Sheet 上沿 = 12）
+        page.evaluate(CLEAR_SAFE_JS)
+        open_add_bill_sheet(page)
+        geometry = open_popover_geometry(page, "channel-row", "channel-menu")
+        run.check("没有安全区：菜单上沿 ≥ 12 且不越过 Sheet 上沿", geometry["top"] >= POPOVER_MARGIN - 0.5 and geometry["top"] >= geometry["sheetTop"] - 0.5, str(geometry))
+        run.check("没有安全区：同样限高滚动、选中项可见", geometry["scrollHeight"] > geometry["clientHeight"] + 1 and geometry["selectedInView"], str(geometry))
+        page.keyboard.press("Escape")
+        gone(tid(page, "channel-menu"))
+        close_add_bill_sheet(page)
+
+        # 5. 极小视口（上下两侧都不足 120px）：菜单宁可压住触发行，也不越出安全区范围
+        check_popover_tiny_viewport(run, page)
+    finally:
+        page.evaluate(CLEAR_SAFE_JS)
+        db.set_user_defaults(user_id)  # 默认值清空，别影响之后的用例
+
+
+TINY_VIEW_H = 270  # 触发行（52）放在正中间时上下两侧各只剩 91px，都不够菜单的最小高度 120
+
+# 在页面里用真实的 positionPopover 给一个造出来的触发行 + 15 项菜单（每项 44px）定位：几何完全可控，不依赖 Sheet 里行落在哪
+TINY_POPOVER_JS = """async (anchorTop) => {
+  const mod = await import('/_content/FinanceTracker.Web/js/ui.js');
+  const anchor = document.createElement('div');
+  anchor.style.cssText = `position:fixed;left:12px;right:12px;top:${anchorTop}px;height:52px;`;
+  const menu = document.createElement('div');
+  menu.style.cssText = 'position:fixed;width:200px;overflow-y:auto;';
+  for (let i = 0; i < 15; i++) {
+    const item = document.createElement('div');
+    item.style.cssText = 'height:44px;';
+    menu.appendChild(item);
+  }
+  document.body.append(anchor, menu);
+  try {
+    mod.positionPopover(menu, anchor);
+    const m = menu.getBoundingClientRect();
+    return {
+      top: m.top, bottom: m.bottom, placement: menu.dataset.placement, maxHeight: menu.style.maxHeight,
+      viewH: window.visualViewport ? window.visualViewport.height : window.innerHeight,
+    };
+  } finally {
+    anchor.remove();
+    menu.remove();
+  }
+}"""
+
+
+def check_popover_tiny_viewport(run: TestRun, page) -> None:
+    """极小视口（横屏、分屏）：触发行上下两侧都不足 120px 时，菜单落在 [12, 屏高 − 12] 里、压住一部分触发行，而不是越出范围。
+
+    修复前：放在下方时 room 被抬到 120、菜单下沿越过「屏高 − 12」（比屏幕还低 19px）。这里没有安全区（浏览器默认 0），范围就是 [12, 屏高 − 12]。
+    """
+    page.set_viewport_size({"width": PHONE_VIEWPORT["width"], "height": TINY_VIEW_H})
+    try:
+        for label, anchor_top, placement in (
+            ("触发行在正中间：两侧各 91px，放下方", 109, "below"),
+            ("触发行略偏下：上侧 94px、下侧 88px，放上方", 112, "above"),
+        ):
+            geometry = page.evaluate(TINY_POPOVER_JS, anchor_top)
+            detail = str(geometry)
+            run.check(f"极小视口·{label}：菜单上沿 ≥ 12", geometry["top"] >= POPOVER_MARGIN - 0.5, detail)
+            run.check(f"极小视口·{label}：菜单下沿 ≤ 屏高 − 12", geometry["bottom"] <= geometry["viewH"] - POPOVER_MARGIN + 0.5, detail)
+            run.check(
+                f"极小视口·{label}：仍限高并给足高度（≥ 100px，菜单内滚动）",
+                geometry["placement"] == placement and geometry["maxHeight"].endswith("px") and geometry["bottom"] - geometry["top"] >= 100,
+                detail,
+            )
+    finally:
+        page.set_viewport_size(PHONE_VIEWPORT)
+
+
 # ---------------------------------------------------------------------------------------------- 主流程
 
 
@@ -949,8 +1108,9 @@ def main() -> int:
         check_state_preserved(run, page, db, user_id, ledger_name)
         check_glass_budget(run, page)
         check_defaults(run, page, db, user_id, ledger_name)
+        check_popover_safe_area(run, page, db, user_id)
 
-        run.check_clean(s.errors, "A–I、L–O 节会话无页面异常 / 控制台错误 / 失败请求")
+        run.check_clean(s.errors, "A–I、L–P 节会话无页面异常 / 控制台错误 / 失败请求")
 
     check_shared_ledgers(run, db)
     check_reduced_motion(run)

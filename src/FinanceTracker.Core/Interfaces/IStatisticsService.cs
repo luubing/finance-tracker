@@ -103,4 +103,17 @@ public interface IStatisticsService
     /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
     /// <returns>分类环比对比列表（按变化绝对值降序）</returns>
     Task<List<CategoryComparisonData>> GetCategoryComparisonAsync(Guid userId, DateTime startDate, DateTime endDate, Guid? ledgerId = null);
+
+    /// <summary>
+    /// 获取区间内被「不计入统计」排除掉的账单汇总：每个被排除、且区间内有账单的分类一项（金额降序，同额按名称）。
+    /// 上面所有统计方法（以及首页本月概览）都不含这些账单；统计页据此在底部提示"已忽略 N 笔"，
+    /// 让用户明白统计与账单列表为什么对不上。没有被排除的账单时返回空列表。
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="startLocal">区间起点（应用时区，含）</param>
+    /// <param name="endLocalExclusive">区间终点（应用时区，<b>不含</b>）：与月度 / 年度 / 自定义统计同一个左闭右开口径，
+    /// 趋势窗口那种含端点的终点，调用方自己加一个 tick 换算</param>
+    /// <param name="ledgerId">账本ID（null 表示全部账本）</param>
+    /// <returns>被排除的分类汇总列表</returns>
+    Task<List<ExcludedCategoryStatistics>> GetExcludedStatisticsAsync(Guid userId, DateTime startLocal, DateTime endLocalExclusive, Guid? ledgerId = null);
 }

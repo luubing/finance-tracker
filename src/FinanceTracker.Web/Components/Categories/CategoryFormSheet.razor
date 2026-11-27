@@ -11,7 +11,10 @@
     - 表单本身（名称校验、图标网格、保存中、提示）是通用的 NameIconFormSheet，这里只负责落库：调用 CategoryService，服务层校验不变。
     - 编辑模式下 EditingExtras 插槽放页面自己的操作（设为默认、删除）。
     - 数据库里的分类没有颜色字段，色块由分类 Id 稳定取色（见 CategoryPresentation.ToneFor），所以表单里没有颜色选择。
-    - 观察属性（E2E）：category-sheet、category-name、category-sort、category-form-error、category-save。
+    - 「不计入统计」开关（新建、编辑都有）：开着时这个分类下的账单不进统计 / 首页本月概览 / 预算，账单列表照常显示（规则见 ADR 0008）。
+      开关的状态由本组件持有：打开 Sheet 的那一刻按 Editing / EditingExcludeFromStatistics 初始化，保存时随分类一起落库。
+    - 观察属性（E2E）：category-sheet、category-name、category-sort、category-form-error、category-save、
+      category-exclude-row（开关所在行）、category-exclude-switch（开关本身，aria-checked）。
 *@
 <NameIconFormSheet Visible="Visible"
                    VisibleChanged="VisibleChanged"
@@ -25,7 +28,20 @@
                    EditingExtras="EditingExtras"
                    Save="SaveAsync"
                    OnSaved="HandleSavedAsync"
-                   OnClosed="OnClosed" />
+                   OnClosed="OnClosed">
+    <FormExtras>
+        <GroupedList Footer="@ExcludedFromStatisticsPresentation.SwitchFooter(Type)" TestId="category-exclude-group">
+            <ListCell Icon="mdi-eye-off-outline" Tone="gray" Title="@ExcludedFromStatisticsPresentation.Label" TestId="category-exclude-row">
+                <Trailing>
+                    <ToggleSwitch Value="_exclude"
+                                  ValueChanged="OnExcludeChanged"
+                                  AriaLabel="@ExcludedFromStatisticsPresentation.Label"
+                                  TestId="category-exclude-switch" />
+                </Trailing>
+            </ListCell>
+        </GroupedList>
+    </FormExtras>
+</NameIconFormSheet>
 
 @code {
     /// <summary>是否显示</summary>
@@ -42,6 +58,9 @@
     /// <summary>要编辑的分类；为空表示新建。打开 Sheet 时按它初始化表单</summary>
     [Parameter] public NameIconTarget? Editing { get; set; }
 
+    /// <summary>正在编辑的分类当前是否「不计入统计」：打开 Sheet 时初始化开关；新建（Editing 为空）时忽略，开关从关开始</summary>
+    [Parameter] public bool EditingExcludeFromStatistics { get; set; }
+
     /// <summary>编辑模式下表单末尾的页面自有操作（设为默认分类、删除）</summary>
     [Parameter] public RenderFragment? EditingExtras { get; set; }
 
@@ -53,6 +72,22 @@
 
     private Category? _saved;
 
+    // 「不计入统计」开关的状态：只在「从隐藏变为显示」的那一刻按 Editing 初始化；之后页面重绘不能冲掉用户刚拨的开关
+    private bool _exclude;
+    private bool _wasVisible;
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_wasVisible)
+        {
+            _exclude = Editing is not null && EditingExcludeFromStatistics;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void OnExcludeChanged(bool value) => _exclude = value;
+
     /// <summary>预览色块：编辑时与列表里该分类的颜色一致；新建时分类还没有 Id，用灰色，保存后按 Id 取色</summary>
     private string PreviewTone => Editing is { } editing ? CategoryPresentation.ToneFor(editing.Name, editing.Id) : "gray";
 
@@ -60,6 +95,7 @@
     {
         // 写库也排进页面数据闸门：此时别的 Tab 根页面可能正在后台重新加载，同一个 DbContext 不允许并行执行
         var editing = Editing;
+        var exclude = _exclude;
         _saved = await DataGate.RunAsync(async () => editing is not null
             ? await CategoryService.UpdateCategoryAsync(new Category
             {
@@ -69,6 +105,7 @@
                 Icon = values.Icon,
                 Type = Type,
                 SortOrder = values.SortOrder,
+                ExcludeFromStatistics = exclude,
             })
             : await CategoryService.CreateCategoryAsync(new Category
             {
@@ -77,6 +114,7 @@
                 Icon = values.Icon,
                 Type = Type,
                 SortOrder = values.SortOrder,
+                ExcludeFromStatistics = exclude,
             }));
     }
 

@@ -215,15 +215,21 @@ public class BudgetService : IBudgetService
         // 注意：账单一次性加载且不按 ledgerId 过滤——"全部账本"预算(LedgerId=null)的
         // 已用额必须统计所有账单，按账本预算(LedgerId=X)只统计 X 的账单，各自独立匹配
         // 预算月份按应用时区的自然月划分，库里的 TransactionTime 是 UTC：边界先换算再比较（左闭右开）
+        // 「不计入统计」分类的账单不占用预算（口径与统计、首页本月概览同一处：StatisticsScope）：
+        // 总预算、账本预算、分类预算一视同仁——给被排除的分类设的分类预算，已用额恒为 0
         var monthStartLocal = new DateTime(year, month, 1);
         var startDate = AppTimeZone.ToUtc(monthStartLocal);
         var endDate = AppTimeZone.ToUtc(monthStartLocal.AddMonths(1));
+
+        // 被排除的分类单独查（不能拼成账单查询的子查询，会连带关掉账单的软删除过滤器，见 StatisticsScope）
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
         var bills = await _context.Bills
             .Where(bill => bill.UserId == userId
                            && bill.Type == BillType.Expense
                            && bill.TransactionTime >= startDate
                            && bill.TransactionTime < endDate)
+            .WithoutExcluded(excluded)
             .ToListAsync();
 
         // 加载预算关联的分类与账本名称
@@ -254,7 +260,7 @@ public class BudgetService : IBudgetService
 
         foreach (var budget in budgets)
         {
-            // 已用金额：总预算统计全部支出；按账本预算只统计该账本支出；分类预算只统计该分类支出
+            // 已用金额（bills 已经去掉了「不计入统计」分类的账单）：总预算统计全部计入的支出；按账本预算只统计该账本支出；分类预算只统计该分类支出
             var usedAmount = bills
                 .Where(bill => (budget.LedgerId == null || bill.LedgerId == budget.LedgerId)
                                && (budget.CategoryId == null || bill.CategoryId == budget.CategoryId))
@@ -291,6 +297,13 @@ public class BudgetService : IBudgetService
     /// <inheritdoc />
     public async Task<BudgetAlert?> GetBudgetAlertAsync(Guid userId, int year, int month, Guid? ledgerId, Guid? categoryId)
     {
+        // 这笔账单属于「不计入统计」的分类：它没有占用任何预算，就没有什么可提醒的
+        // （否则月初存一笔钱，会因为别的支出已经接近上限而弹出一条与这笔账单无关的超支提醒）
+        if (categoryId.HasValue && await StatisticsScope.IsExcludedAsync(_context, userId, categoryId.Value))
+        {
+            return null;
+        }
+
         var statuses = await GetBudgetStatusAsync(userId, year, month, ledgerId);
 
         // 与该账单相关的预算：总预算 + 该分类的分类预算

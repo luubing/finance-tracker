@@ -742,10 +742,10 @@ button.ft-cell {
     font: var(--ft-type-cell-title);
 }
 
-/* 标题后面的备注（账单行：「餐饮美食」加粗 + 「 · 午餐」灰色常规，设计稿 02）。
-   分类名与备注各是标题盒里的一个 flex 子项：分类名按内容宽度（放不下才省略），备注占剩下的宽度并自己省略——
-   两个盒子都不会比标题盒宽（把备注写成行内元素，它的盒子会比标题盒还宽，只是被 overflow 裁掉，系统字号放大时会被「越出视口」体检抓到）。
-   备注框用 white-space: pre 保住「 · 」前面的空格（flex 子项的行首空白会被折叠）；备注里的换行 / 连续空白已在 BillPresentation.NoteText 折成一个空格 */
+/* 标题后面的附注（账单行：「餐饮美食」加粗 + 「 · 日常开销」灰色常规——后面这段是账本名，设计稿 02 原来放的是备注）。
+   分类名与附注各是标题盒里的一个 flex 子项：分类名按内容宽度（放不下才省略），附注占剩下的宽度并自己省略——
+   两个盒子都不会比标题盒宽（把附注写成行内元素，它的盒子会比标题盒还宽，只是被 overflow 裁掉，系统字号放大时会被「越出视口」体检抓到）。
+   附注框用 white-space: pre 保住「 · 」前面的空格（flex 子项的行首空白会被折叠）；账本名里的换行 / 连续空白已在 BillPresentation.SingleLine 折成一个空格 */
 .ft-cell__title--noted {
     display: flex;
 }
@@ -775,6 +775,32 @@ button.ft-cell {
     white-space: nowrap;
     font: var(--ft-type-caption);
     color: var(--ft-label-2);
+}
+
+/* 副标题前面的小标记（账单行的「不计入统计」）：标记不收缩，文字占剩下的宽度并自己省略。
+   标记高 16，小于副标题的行高 18，加了它行高不变；底色与中性徽标（.ft-badge--neutral）同一组令牌，对比度同口径 */
+.ft-cell__subtitle--tagged {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ft-cell__tag {
+    flex: none;
+    padding: 0 6px;
+    border-radius: var(--ft-radius-pill);
+    font: 600 12px/16px var(--ft-font);
+    white-space: nowrap;
+    color: var(--ft-label-2);
+    background: var(--ft-fill);
+}
+
+.ft-cell__subtitle-text {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .ft-cell__trail {
@@ -3200,6 +3226,28 @@ p.ft-panel__note {
     text-align: center;
     font: var(--ft-type-caption);
     color: var(--ft-label-2);
+}
+
+/* 统计页底部的「已忽略」提示（ExcludedNote）：一行小字，图标 + 文案；与分组列表的页脚（.ft-group__footer）同字号、同色、同左右缩进 */
+.ft-excluded-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: var(--ft-space-group) 0 0;
+    padding: 0 20px;
+    font: var(--ft-type-caption);
+    color: var(--ft-label-2);
+}
+
+.ft-excluded-note__icon {
+    flex: none;
+    font-size: 16px;
+    line-height: 18px;
+}
+
+.ft-excluded-note__text {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* 构成圆环：SVG 画环，中心叠一层文字（环的孔直径 = 外径的 68%，文字左右留 16% 不贴环） */

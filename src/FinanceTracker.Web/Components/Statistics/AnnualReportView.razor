@@ -14,7 +14,8 @@
     同比 annual-yoy（ChartPanel）→ annual-yoy-scope / annual-yoy-period、annual-yoy-expense / annual-yoy-income（data-tone = good | bad | flat）
     → {id}-rate（变化率文字）、{id}-base（去年同期金额，data-amount）、{id}-nobase（无对比基数的说明）；
     月度趋势 annual-monthly（ChartPanel）；构成按类型各一套：annual-{expense|income}-header、annual-{expense|income}-composition（ChartPanel）
-    → annual-{key}-donut（donut-arc）、annual-{key}-total（data-amount）、annual-{key}-legend（legend-row）、annual-{key}-empty。
+    → annual-{key}-donut（donut-arc）、annual-{key}-total（data-amount）、annual-{key}-legend（legend-row）、annual-{key}-empty；
+    底部的「已忽略 N 笔不计入统计的账单」提示 annual-excluded（这一年没有这样的账单时不渲染）。
 *@
 <div class="ft-stats-view"
      data-testid="stats-annual"
@@ -57,6 +58,9 @@
 
         @Composition(BillType.Expense)
         @Composition(BillType.Income)
+
+        @* 全年有「不计入统计」的账单时，在页面底部说明它们没有算进上面的数字 *@
+        <ExcludedNote Text="@_excludedNote" TestId="annual-excluded" />
     }
 </div>
 
@@ -73,6 +77,7 @@
     private decimal _totalIncome;
     private IReadOnlyList<LegendRow> _expenseLegend = [];
     private IReadOnlyList<LegendRow> _incomeLegend = [];
+    private string? _excludedNote;
 
     protected override object? LoadKey => Year;
 
@@ -86,6 +91,10 @@
         // 整年同比：已结束的年份比整年；当年比「年初至今 vs 去年同期」，避免拿不完整的今年和去年全年比
         var yoy = await StatisticsService.GetAnnualYearOverYearDataAsync(UserId, year, LedgerId);
 
+        // 被「不计入统计」排除的账单（底部提示用）：区间与上面的年度汇总一致——应用时区的自然年，左闭右开
+        var yearStart = new DateTime(year, 1, 1);
+        var excluded = await StatisticsService.GetExcludedStatisticsAsync(UserId, yearStart, yearStart.AddYears(1), LedgerId);
+
         _kpi = BuildKpi(annual.TotalExpense, annual.TotalIncome, "annual-total-expense", "annual-total-income", "annual-total-net");
         _yoy = yoy;
         _billCount = annual.BillCount;
@@ -94,6 +103,7 @@
         _totalIncome = annual.TotalIncome;
         _expenseLegend = StatisticsPresentation.LegendOfCategories(annual.ExpenseCategoryStats);
         _incomeLegend = StatisticsPresentation.LegendOfCategories(annual.IncomeCategoryStats);
+        _excludedNote = ExcludedFromStatisticsPresentation.NoteText(excluded);
     }
 
     /// <summary>

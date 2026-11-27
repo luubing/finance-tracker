@@ -15,7 +15,8 @@
     观察属性（E2E）：根 stats-trend（data-range / data-dimension / data-state = loading | ready | reloading | failed）；
     时间维度分段 trend-dimension（data-value，每段 segment）；KPI trend-kpi 与 trend-total-expense / -income / -net（data-amount）；
     三张图 trend-expense / trend-income / trend-net（ChartPanel：data-state、{id}-empty）；
-    明细 trend-table-panel / trend-table → 表头 trend-sort（data-column、所在 th 的 aria-sort）、行 trend-row（data-date / data-expense / data-income / data-net）、trend-more。
+    明细 trend-table-panel / trend-table → 表头 trend-sort（data-column、所在 th 的 aria-sort）、行 trend-row（data-date / data-expense / data-income / data-net）、trend-more；
+    底部的「已忽略 N 笔不计入统计的账单」提示 trend-excluded（窗口内没有这样的账单时不渲染；窗口与上面的折线 / 明细是同一个）。
 *@
 <div class="ft-stats-view"
      data-testid="stats-trend"
@@ -118,6 +119,9 @@
                 <button type="button" class="ft-table__more" data-testid="trend-more" @onclick="ShowMore">@StatisticsPresentation.ShowMoreText(Remaining)</button>
             }
         </ChartPanel>
+
+        @* 窗口内有「不计入统计」的账单时，在页面底部说明它们没有算进上面的数字 *@
+        <ExcludedNote Text="@_excludedNote" TestId="trend-excluded" />
     }
 </div>
 
@@ -140,6 +144,7 @@
     private object? _expenseOption;
     private object? _incomeOption;
     private object? _netOption;
+    private string? _excludedNote;
 
     // 明细表的视图状态：排序列（null = 数据原顺序）与显示的行数
     private (string? Column, bool Descending) _sort = (null, false);
@@ -159,7 +164,12 @@
         var dimension = StatisticsPresentation.ParseTrendDimension(Dimension);
         var (start, end) = StatisticsPresentation.TrendRangeBounds(Range, AppTimeZone.ToLocal(DateTime.UtcNow));
 
-        var data = await StatisticsService.GetTrendDataAsync(UserId, start, end, dimension, LedgerId);
+        var userId = UserId;
+        var ledgerId = LedgerId;
+        var data = await StatisticsService.GetTrendDataAsync(userId, start, end, dimension, ledgerId);
+
+        // 被「不计入统计」排除的账单（底部提示用）。趋势窗口的终点含端点（「现在」），而这个接口的终点是不含的：加一个 tick 换算成同一个区间
+        var excluded = await StatisticsService.GetExcludedStatisticsAsync(userId, start, end.AddTicks(1), ledgerId);
 
         // 全部取到再一起写入，避免渲染到「新的汇总 + 旧的明细」
         // 折线图的横轴补成连续的时间桶（没有账单的日 / 周 / 月补 0）；明细表与 KPI 仍用服务返回的原始数据（补的全是 0，合计不变）
@@ -175,6 +185,7 @@
         _incomeOption = StatisticsChartOptions.Line(StatisticsPresentation.TrendIncomeTitle, labels, points.Select(t => t.Income).ToArray(), StatisticsChartOptions.IncomeColor);
         _netOption = StatisticsChartOptions.Line(StatisticsPresentation.TrendNetTitle, labels, points.Select(t => t.NetIncome).ToArray(), StatisticsChartOptions.NetColor);
         _visibleCount = StatisticsPresentation.TrendTablePageSize;
+        _excludedNote = ExcludedFromStatisticsPresentation.NoteText(excluded);
     }
 
     private Task OnDimensionChanged(string value) => DimensionChanged.InvokeAsync(value);

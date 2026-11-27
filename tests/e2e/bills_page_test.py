@@ -171,6 +171,14 @@ ROWS_JS = """() => [...document.querySelectorAll('[data-testid="bills-page"] [da
     disabled: el.disabled === true,
     title: text('.ft-cell__title'),
     subtitle: text('.ft-cell__subtitle'),
+    // 标题的两段盒子：分类名（加粗）+「 · 账本」（灰色常规）；颜色 / 字重取计算后的值
+    head: (el.querySelector('.ft-cell__title-text') || {}).textContent,
+    tail: (el.querySelector('.ft-cell__title-note') || {}).textContent,
+    headWeight: el.querySelector('.ft-cell__title-text') ? getComputedStyle(el.querySelector('.ft-cell__title-text')).fontWeight : null,
+    tailWeight: el.querySelector('.ft-cell__title-note') ? getComputedStyle(el.querySelector('.ft-cell__title-note')).fontWeight : null,
+    headColor: el.querySelector('.ft-cell__title-text') ? getComputedStyle(el.querySelector('.ft-cell__title-text')).color : null,
+    tailColor: el.querySelector('.ft-cell__title-note') ? getComputedStyle(el.querySelector('.ft-cell__title-note')).color : null,
+    subtitleColor: el.querySelector('.ft-cell__subtitle') ? getComputedStyle(el.querySelector('.ft-cell__subtitle')).color : null,
     amount: amount ? amount.textContent.trim() : '',
     amountColor: amount ? getComputedStyle(amount).color : '',
     time: text('[data-testid="bill-time"]'),
@@ -893,9 +901,24 @@ def check_rows(run: TestRun, page, expected: dict, bills: dict, ledger_name: str
 
     lunch, salary, legacy, dinner = row("lunch"), row("salary"), row("legacy"), row("dinner")
     titles = {k: row(k)["title"] for k in items}
-    run.check("行标题是「分类 · 备注」", all(titles[k] == f"{items[k]['category']} · {items[k]['note']}" for k in items), str(titles))
-    run.check("行副标题是「支付渠道 · 账本」", lunch["subtitle"].endswith(f"· {ledger_name}") and " · " in lunch["subtitle"], lunch["subtitle"])
-    run.check("历史无账本的账单副标题标注「未归属账本」", legacy["subtitle"].endswith("· 未归属账本"), legacy["subtitle"])
+    subtitles = {k: row(k)["subtitle"] for k in items}
+    run.check(
+        "行标题是「分类 · 账本」（历史无账本的账单标注「未归属账本」；备注不在标题里）",
+        all(titles[k] == f"{items[k]['category']} · {ledger_name if items[k]['in_ledger'] else '未归属账本'}" for k in items),
+        str(titles),
+    )
+    run.check(
+        "行副标题是「支付渠道 · 备注」（默认渠道是第一个预设渠道「微信支付」）",
+        all(subtitles[k] == f"微信支付 · {items[k]['note']}" for k in items),
+        str(subtitles),
+    )
+    run.check("历史无账本的账单标题标注「未归属账本」，备注照常在副标题里", legacy["title"].endswith("· 未归属账本") and legacy["subtitle"].endswith("· 老账单"), f"{legacy['title']} / {legacy['subtitle']}")
+    run.check(
+        "标题分两段排：分类名加粗；「 · 账本」灰色常规字重、与副标题同色",
+        lunch["head"] == "餐饮美食" and lunch["tail"] == f" · {ledger_name}" and int(lunch["headWeight"]) > 400 and lunch["tailWeight"] == "400"
+        and lunch["tailColor"] == lunch["subtitleColor"] and lunch["tailColor"] != lunch["headColor"],
+        f"{lunch['head']!r} {lunch['tail']!r} {lunch['headWeight']}/{lunch['tailWeight']} {lunch['headColor']}/{lunch['tailColor']}/{lunch['subtitleColor']}",
+    )
     run.check("支出金额带负号、千分位、两位小数", [lunch["amount"], dinner["amount"], legacy["amount"]] == ["-¥35.00", "-¥18.50", "-¥18.00"], str([lunch["amount"], dinner["amount"], legacy["amount"]]))
     run.check("收入金额带正号、千分位", salary["amount"] == "+¥12,000.00" and salary["income"] == "true" and lunch["income"] == "false", salary["amount"])
     run.check("金额颜色：支出是常规文字色（不用红色），收入是加深的绿色", lunch["amountColor"] == RGB_LABEL and salary["amountColor"] == RGB_INCOME_TEXT, f"{lunch['amountColor']} / {salary['amountColor']}")
@@ -2202,7 +2225,7 @@ def check_batch_assign(run: TestRun, db: LocalDb) -> None:
         wait_summary(page, 100, 0, 4)
         wait_rows(page, 4)
         rows = {r["id"]: r for r in page.evaluate(ROWS_JS)}
-        run.check("移除账本条件后：这两行不再标注「未归属账本」，副标题变成目标账本", all(rows[b.lower()]["subtitle"].endswith(f"· {ledger_name}") for b in (old1, old2)), str([rows[b.lower()]["subtitle"] for b in (old1, old2)]))
+        run.check("移除账本条件后：这两行不再标注「未归属账本」，标题里的账本变成目标账本", all(rows[b.lower()]["title"].endswith(f"· {ledger_name}") for b in (old1, old2)), str([rows[b.lower()]["title"] for b in (old1, old2)]))
         run.check("汇总不变（归属只改账本，不改金额）", amount_of(page, "bills-total-expense") == "100.00" and count_of(page) == 4)
 
         # ---- 只剩一个自有账本：打开即预选；没有自有账本：给出说明 ----

@@ -1,17 +1,21 @@
 @namespace FinanceTracker.Web.Components.Ui
 
 @*
-    账单行（设计稿 06 / screens 01-home、02-bills）：分类图标块 + 「分类 · 备注」+「支付渠道 · 账本」+ 金额与时间。
+    账单行（设计稿 06 / screens 01-home、02-bills）：分类图标块 + 「分类 · 账本」+「支付渠道 · 备注」+ 金额与时间。
     - 渲染所需的文字、金额、时间、配色都在 BillRowModel 里（BillPresentation 取数时一次算好）；本组件只负责排版与点按。
-    - 金额：支出用常规文字色带负号，收入用绿色带正号；历史无账本的账单副标题里标注「未归属账本」。
+    - 金额：支出用常规文字色带负号，收入用绿色带正号；历史无账本的账单标题里标注「未归属账本」；没有备注时副标题只有支付渠道。
     - 点按整行（OnClick 给出账单 Id）；读屏读 BillRowModel.AriaLabel（把一行里的信息连成一句话）。
     - 批量选择模式（账单 Tab）：Selectable 时行首多一个圆形勾选框，整行变成 role="checkbox"（aria-checked 随 Selected）；
       Disabled 时整行置灰不可点（批量选择里不能选的行，例如共享账本里其他成员记的账单）。
-    - 观察属性（E2E）：data-testid（默认 bill-row）、data-bill-id、data-income、data-selected（仅 Selectable 时）；金额 bill-amount、时间 bill-time。
+    - 账单的分类开着「不计入统计」时（BillRowModel.ExcludedFromStatistics，规则见 ADR 0008），副标题前多一枚小标签「不计入统计」，行上带 data-excluded="true"：
+      账单本身照常显示，标签只是告诉用户它不参与统计 / 首页本月概览 / 预算。
+    - 观察属性（E2E）：data-testid（默认 bill-row）、data-bill-id、data-income、data-excluded（仅不计入统计的账单有，值 true）、data-selected（仅 Selectable 时）；
+      金额 bill-amount、时间 bill-time、标签 cell-tag。
 *@
 <ListCell Title="@(Model.CategoryName ?? Model.Title)"
-          TitleNote="@Model.NoteText"
+          TitleNote="@Model.LedgerText"
           Subtitle="@Model.Subtitle"
+          SubtitleTag="@(Model.ExcludedFromStatistics ? ExcludedFromStatisticsPresentation.Label : null)"
           AriaLabel="@Model.AriaLabel"
           Class="@CssClass"
           TestId="@TestId"
@@ -19,6 +23,7 @@
           OnClick="HandleClick"
           data-bill-id="@Model.Id"
           data-income="@(Model.IsIncome ? "true" : "false")"
+          data-excluded="@(Model.ExcludedFromStatistics ? "true" : null)"
           role="@(Selectable ? "checkbox" : null)"
           aria-checked="@(Selectable ? (Selected ? "true" : "false") : null)"
           data-selected="@(Selectable ? (Selected ? "true" : "false") : null)">

@@ -94,6 +94,7 @@ public class CategoryService : ICategoryService
             existingCategory.Icon = category.Icon;
             existingCategory.Type = category.Type;
             existingCategory.SortOrder = category.SortOrder;
+            existingCategory.ExcludeFromStatistics = category.ExcludeFromStatistics;
 
             await _context.SaveChangesAsync();
 

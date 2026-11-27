@@ -26,7 +26,7 @@ public class BillListPresentationTests
     {
         var local = DateTime.Parse(localTime, System.Globalization.CultureInfo.InvariantCulture);
         var row = new BillRowModel(
-            Guid.NewGuid(), title, "微信支付 · 日常开销",
+            Guid.NewGuid(), title, "微信支付 · 工作日午餐",
             MoneyPresentation.Signed(amount, income), income, local.ToString("HH:mm"), "mdi-tag", "orange", title);
 
         return new BillListItem(row, local, amount, income, canModify);
@@ -274,8 +274,8 @@ public class BillListPresentationTests
         var item = BillListPresentation.ToItem(bill, Now, Me);
 
         Assert.Equal("09:32", item.Row.TimeText);
-        Assert.Equal("餐饮美食 · 咖啡", item.Row.Title);
-        Assert.Equal("微信支付 · 未归属账本", item.Row.Subtitle);
+        Assert.Equal("餐饮美食 · 未归属账本", item.Row.Title);
+        Assert.Equal("微信支付 · 咖啡", item.Row.Subtitle);
         Assert.Equal("-¥28.00", item.Row.AmountText);
         Assert.False(item.IsIncome);
         Assert.Equal(28m, item.Amount);
@@ -383,6 +383,35 @@ public class BillListPresentationTests
 
         Assert.Equal("删除这笔账单？", BillListPresentation.DeleteTitle);
         Assert.Equal("餐饮美食 · 午餐，-¥35.00。删除后不再显示，并会随同步传播到其他设备。", BillListPresentation.DeleteMessage(item));
+    }
+
+    [Theory]
+    [InlineData("咖啡", "餐饮美食 · 咖啡，-¥28.00。删除后不再显示，并会随同步传播到其他设备。")]
+    [InlineData("  咖啡\n拿铁 ", "餐饮美食 · 咖啡 拿铁，-¥28.00。删除后不再显示，并会随同步传播到其他设备。")]
+    [InlineData(null, "餐饮美食，-¥28.00。删除后不再显示，并会随同步传播到其他设备。")]
+    [InlineData("   ", "餐饮美食，-¥28.00。删除后不再显示，并会随同步传播到其他设备。")]
+    public void 删除确认点名是分类加备注_不用行标题里的账本(string? note, string expected)
+    {
+        using var _ = AppTimeZone.UseZone(TestZones.UtcPlus8);
+        var bill = new Bill
+        {
+            Id = Guid.NewGuid(),
+            UserId = Me,
+            Amount = 28m,
+            Type = BillType.Expense,
+            TransactionTime = AppTimeZone.ToUtc(new DateTime(2026, 11, 20, 9, 32, 0)),
+            CategoryId = Guid.NewGuid(),
+            Category = new Category { Name = "餐饮美食", Icon = "mdi-silverware-fork-knife" },
+            PaymentChannel = new PaymentChannel { Name = "微信支付" },
+            Ledger = new Ledger { Name = "日常开销" },
+            Note = note,
+        };
+
+        var item = BillListPresentation.ToItem(bill, Now, Me);
+
+        Assert.Equal("餐饮美食 · 日常开销", item.Row.Title);
+        Assert.Equal(expected, BillListPresentation.DeleteMessage(item));
+        Assert.DoesNotContain("日常开销", BillListPresentation.DeleteMessage(item));
     }
 
     // ───────────────────────── 筛选状态 ─────────────────────────

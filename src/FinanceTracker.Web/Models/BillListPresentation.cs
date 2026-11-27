@@ -97,11 +97,11 @@ public static class BillListPresentation
     /// </summary>
     /// <param name="bill">账单（需带上 Category / PaymentChannel / Ledger 导航属性）；TransactionTime 是 UTC</param>
     /// <param name="nowLocal">应用时区的「现在」</param>
-    /// <param name="currentUserId">当前用户：只有自己记的账单可以编辑 / 删除</param>
+    /// <param name="currentUserId">当前用户：只有自己记的账单可以编辑 / 删除；也是「不计入统计」标记的查看者（只标自己的分类）</param>
     /// <param name="readOnlyLedgerIds">当前用户是只读成员的共享账本（没读到 / 没有共享账本时传 null）：自己记在里面的账单不能删除 / 批量归属</param>
     public static BillListItem ToItem(Bill bill, DateTime nowLocal, Guid currentUserId, IReadOnlySet<Guid>? readOnlyLedgerIds = null)
     {
-        var row = BillPresentation.ToRow(bill, nowLocal, includeDate: false);
+        var row = BillPresentation.ToRow(bill, nowLocal, includeDate: false, viewerId: currentUserId);
         var local = AppTimeZone.ToLocal(bill.TransactionTime);
         var inReadOnlyLedger = bill.LedgerId is { } ledgerId && readOnlyLedgerIds?.Contains(ledgerId) == true;
 
@@ -384,8 +384,12 @@ public static class BillListPresentation
     /// <summary>删除确认 Alert 的标题</summary>
     public const string DeleteTitle = "删除这笔账单？";
 
-    /// <summary>删除确认 Alert 的说明：点名是哪一笔（标题与金额），并告诉用户删除会随同步传播</summary>
-    public static string DeleteMessage(BillListItem item) => DeleteMessage(item.Row.Title, item.Row.AmountText);
+    /// <summary>
+    /// 删除确认 Alert 的说明：点名是哪一笔（分类 · 备注，与金额），并告诉用户删除会随同步传播。
+    /// 点名用备注而不是行标题里的账本——备注比账本更能认出是哪一笔
+    /// </summary>
+    public static string DeleteMessage(BillListItem item) =>
+        DeleteMessage(BillPresentation.Describe(item.Row.CategoryName ?? item.Row.Title, item.Row.NoteText), item.Row.AmountText);
 
     /// <summary>同一句说明，由调用方给出标题与金额（记一笔 Sheet 的编辑模式里的「删除」用，与账单页左滑删除的措辞一致）</summary>
     public static string DeleteMessage(string title, string amountText) =>

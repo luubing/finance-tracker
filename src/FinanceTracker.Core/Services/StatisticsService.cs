@@ -15,6 +15,13 @@ namespace FinanceTracker.Core.Services;
 /// 查询时先把本地边界换算成 UTC（统一左闭右开），分组时先把 UTC 转回本地时间再取日期/月份。
 /// 否则东八区用户 3 月 1 日凌晨记的账（UTC 为 2 月 28 日）会被算进 2 月。
 /// </para>
+/// <para>
+/// 「不计入统计」（<see cref="Category.ExcludeFromStatistics"/>）：除 <see cref="GetExcludedStatisticsAsync"/> 之外的所有统计，
+/// 取账单时都经 <see cref="StatisticsScope"/> 去掉被排除分类的账单，规则只写在那一处：每个公开方法先单独取一次被排除的分类 Id，
+/// 再交给区间查询 <c>BillsInRange</c>（趋势查询直接用 <c>WithoutExcluded</c>）。
+/// 之所以不把"被排除的分类"作为子查询拼进账单查询，见 <see cref="StatisticsScope"/>：那样会连带关掉账单的软删除过滤器。
+/// 首页本月概览直接调用 <see cref="GetMonthlyStatisticsAsync"/>，所以与统计页同口径。
+/// </para>
 /// </summary>
 public class StatisticsService : IStatisticsService
 {
@@ -32,8 +39,9 @@ public class StatisticsService : IStatisticsService
     public async Task<MonthlyStatistics> GetMonthlyStatisticsAsync(Guid userId, int year, int month, Guid? ledgerId = null)
     {
         var monthStart = new DateTime(year, month, 1);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
-        var bills = await BillsInRange(userId, monthStart, monthStart.AddMonths(1), ledgerId)
+        var bills = await BillsInRange(userId, monthStart, monthStart.AddMonths(1), ledgerId, excluded)
             .ToListAsync();
 
         return new MonthlyStatistics
@@ -49,9 +57,10 @@ public class StatisticsService : IStatisticsService
     public async Task<List<CategoryStatistics>> GetCategoryStatisticsAsync(Guid userId, int year, int month, BillType type, Guid? ledgerId = null)
     {
         var monthStart = new DateTime(year, month, 1);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
         // 与月度统计共用同一个区间查询（用户/账本/左闭右开的自然月），两处的月份边界不会各自漂移
-        var query = from b in BillsInRange(userId, monthStart, monthStart.AddMonths(1), ledgerId)
+        var query = from b in BillsInRange(userId, monthStart, monthStart.AddMonths(1), ledgerId, excluded)
                     join c in _context.Categories on b.CategoryId equals c.Id
                     where b.Type == type
                     group b by new { b.CategoryId, c.Name, c.Icon } into g
@@ -81,10 +90,11 @@ public class StatisticsService : IStatisticsService
     public async Task<List<LedgerStatistics>> GetLedgerStatisticsAsync(Guid userId, int year, int month, BillType type)
     {
         var monthStart = new DateTime(year, month, 1);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
         // 与月度/分类统计共用同一个区间查询：同样只统计当前用户自己的账单、同样的左闭右开自然月。
         // "按账本汇总"本身就是在全部账本之上分组，所以不接受 ledgerId 过滤
-        var groups = await BillsInRange(userId, monthStart, monthStart.AddMonths(1), null)
+        var groups = await BillsInRange(userId, monthStart, monthStart.AddMonths(1), null, excluded)
             .Where(b => b.Type == type)
             .GroupBy(b => b.LedgerId)
             .Select(g => new { LedgerId = g.Key, Amount = g.Sum(b => b.Amount), Count = g.Count() })
@@ -158,12 +168,14 @@ public class StatisticsService : IStatisticsService
         // 取最后一个 tick——手写"减 1 秒"会漏掉最后一秒内的账单，而月度/分类汇总是左闭右开的，两处口径就对不上
         var startUtc = AppTimeZone.ToUtc(startDate);
         var endUtc = AppTimeZone.ToUtc(endDate);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
         var bills = await _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= startUtc &&
                        b.TransactionTime <= endUtc &&
                        (!ledgerId.HasValue || b.LedgerId == ledgerId))
+            .WithoutExcluded(excluded)
             .ToListAsync();
 
         return bills
@@ -190,8 +202,9 @@ public class StatisticsService : IStatisticsService
     public async Task<AnnualStatistics> GetAnnualStatisticsAsync(Guid userId, int year, Guid? ledgerId = null)
     {
         var yearStart = new DateTime(year, 1, 1);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
-        var bills = await BillsInRange(userId, yearStart, yearStart.AddYears(1), ledgerId)
+        var bills = await BillsInRange(userId, yearStart, yearStart.AddYears(1), ledgerId, excluded)
             .Include(b => b.Category)
             .ToListAsync();
 
@@ -279,10 +292,12 @@ public class StatisticsService : IStatisticsService
         DateTime previousStart,
         DateTime previousEndExclusive)
     {
-        var currentBills = await BillsInRange(userId, currentStart, currentEndExclusive, ledgerId)
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
+
+        var currentBills = await BillsInRange(userId, currentStart, currentEndExclusive, ledgerId, excluded)
             .ToListAsync();
 
-        var previousBills = await BillsInRange(userId, previousStart, previousEndExclusive, ledgerId)
+        var previousBills = await BillsInRange(userId, previousStart, previousEndExclusive, ledgerId, excluded)
             .ToListAsync();
 
         return new YearOverYearData
@@ -306,8 +321,9 @@ public class StatisticsService : IStatisticsService
         // 归一化为"含当天"的日期范围（应用时区的自然日）
         var start = startDate.Date;
         var endExclusive = endDate.Date.AddDays(1);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
-        var bills = await BillsInRange(userId, start, endExclusive, ledgerId)
+        var bills = await BillsInRange(userId, start, endExclusive, ledgerId, excluded)
             .Include(b => b.Category)
             .ToListAsync();
 
@@ -345,13 +361,14 @@ public class StatisticsService : IStatisticsService
         var dayCount = (int)(endDate.Date - startDate.Date).TotalDays + 1;
         var currentEnd = start.AddDays(dayCount);
         var previousStart = start.AddDays(-dayCount);
+        var excluded = await StatisticsScope.ExcludedCategoryIdsAsync(_context, userId);
 
-        var currentBills = await BillsInRange(userId, start, currentEnd, ledgerId)
+        var currentBills = await BillsInRange(userId, start, currentEnd, ledgerId, excluded)
             .Where(b => b.Type == BillType.Expense)
             .Include(b => b.Category)
             .ToListAsync();
 
-        var previousBills = await BillsInRange(userId, previousStart, start, ledgerId)
+        var previousBills = await BillsInRange(userId, previousStart, start, ledgerId, excluded)
             .Where(b => b.Type == BillType.Expense)
             .Include(b => b.Category)
             .ToListAsync();
@@ -390,11 +407,71 @@ public class StatisticsService : IStatisticsService
             .ToList();
     }
 
+    /// <inheritdoc />
+    public async Task<List<ExcludedCategoryStatistics>> GetExcludedStatisticsAsync(Guid userId, DateTime startLocal, DateTime endLocalExclusive, Guid? ledgerId = null)
+    {
+        // 先单独取被排除的分类（含展示信息），一个都没有就不必再查账单（见 StatisticsScope：不能拼成子查询）
+        var excludedCategories = await StatisticsScope.ExcludedCategoriesAsync(_context, userId);
+        if (excludedCategories.Count == 0)
+        {
+            return new List<ExcludedCategoryStatistics>();
+        }
+
+        var startUtc = AppTimeZone.ToUtc(startLocal);
+        var endUtc = AppTimeZone.ToUtc(endLocalExclusive);
+        var excludedIds = excludedCategories.Select(c => c.Id).ToList();
+
+        // 与 BillsInRange 同一个区间 / 用户 / 账本口径，只是反过来取"被排除的那部分"；软删除的账单由 Bill 的全局过滤器排除
+        var bills = _context.Bills
+            .Where(b => b.UserId == userId &&
+                       b.TransactionTime >= startUtc &&
+                       b.TransactionTime < endUtc &&
+                       excludedIds.Contains(b.CategoryId));
+
+        if (ledgerId.HasValue)
+        {
+            bills = bills.Where(b => b.LedgerId == ledgerId.Value);
+        }
+
+        var sums = await bills
+            .GroupBy(b => b.CategoryId)
+            .Select(g => new { CategoryId = g.Key, Amount = g.Sum(b => b.Amount), Count = g.Count() })
+            .ToListAsync();
+
+        var categoryById = excludedCategories.ToDictionary(c => c.Id);
+
+        // 金额在内存里排（SQLite 不支持对 decimal 排序）
+        return sums
+            .Select(s =>
+            {
+                var category = categoryById[s.CategoryId];
+                return new ExcludedCategoryStatistics
+                {
+                    CategoryId = category.Id,
+                    CategoryName = category.Name,
+                    CategoryIcon = category.Icon,
+                    Type = category.Type,
+                    Amount = s.Amount,
+                    Count = s.Count
+                };
+            })
+            .OrderByDescending(s => s.Amount)
+            .ThenBy(s => s.CategoryName, StringComparer.CurrentCulture)
+            .ToList();
+    }
+
     /// <summary>
-    /// 查询应用时区区间 [startLocal, endLocalExclusive)（左闭右开）内的账单。
-    /// 边界在这里统一换算成 UTC，与库中的 UTC 时间直接比较；软删除由 Bill 的全局查询过滤器排除。
+    /// 查询应用时区区间 [startLocal, endLocalExclusive)（左闭右开）内<b>计入统计</b>的账单。
+    /// 边界在这里统一换算成 UTC，与库中的 UTC 时间直接比较；软删除由 Bill 的全局查询过滤器排除；
+    /// 「不计入统计」分类的账单经 <see cref="StatisticsScope"/> 排除。
     /// </summary>
-    private IQueryable<Bill> BillsInRange(Guid userId, DateTime startLocal, DateTime endLocalExclusive, Guid? ledgerId)
+    /// <param name="excludedCategoryIds">被排除的分类 Id（调用方用 <see cref="StatisticsScope.ExcludedCategoryIdsAsync"/> 取一次，同一个统计里的多个区间共用）</param>
+    private IQueryable<Bill> BillsInRange(
+        Guid userId,
+        DateTime startLocal,
+        DateTime endLocalExclusive,
+        Guid? ledgerId,
+        List<Guid> excludedCategoryIds)
     {
         var startUtc = AppTimeZone.ToUtc(startLocal);
         var endUtc = AppTimeZone.ToUtc(endLocalExclusive);
@@ -402,7 +479,8 @@ public class StatisticsService : IStatisticsService
         var query = _context.Bills
             .Where(b => b.UserId == userId &&
                        b.TransactionTime >= startUtc &&
-                       b.TransactionTime < endUtc);
+                       b.TransactionTime < endUtc)
+            .WithoutExcluded(excludedCategoryIds);
 
         if (ledgerId.HasValue)
         {

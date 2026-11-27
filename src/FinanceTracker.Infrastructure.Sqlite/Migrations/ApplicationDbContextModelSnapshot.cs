@@ -135,6 +135,9 @@ namespace FinanceTracker.Infrastructure.Sqlite.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ExcludeFromStatistics")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Icon")
                         .IsRequired()
                         .HasMaxLength(100)

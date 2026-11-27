@@ -9,6 +9,7 @@
     固定在底部的是数字键盘，右侧高大的「保存」键就是保存按钮（与「记一笔」同一套键盘）。
     - 预算规则不变：总预算 = 不选分类，分类预算 = 选一个支出分类；账本不选 = 全部账本；同一年月、同一账本范围、同一分类只能有一条
       （重复由服务层校验，提示「该月份已存在相同的预算，请直接编辑」显示在表单里，Sheet 保持打开，改一下再保存）。
+    - 开着「不计入统计」的分类不在分类选项里（它的账单不计入预算，设了也累计不到；ADR 0008）；正在编辑的预算自己的分类除外，选中它时下面有一行说明（budget-form-excluded）。
     - 校验提示分两类：表单内提示（缺金额 / 缺分类 / 重复 / 金额不合法这类用户能立刻改的）与 Toast（保存失败这类意外错误，文案沿用旧页面「操作失败: …」）。
     - 表单只在 Sheet 由隐藏变为显示的那一刻按 Target 初始化；之后页面重绘（例如编辑中列表刷新了）不会冲掉用户正在输入的内容。
     - 保存成功后收起 Sheet，并把保存下来的预算交给页面（OnSaved）：页面据此切到该预算所在的月份与账本，用户一定看得到刚保存的预算。
@@ -82,7 +83,7 @@
                 <section class="ft-filtersec" aria-labelledby="@_categoryTitleId" data-testid="budget-form-category">
                     <h3 class="ft-filtersec__title" id="@_categoryTitleId">分类</h3>
                     <div class="ft-chips" role="group" aria-labelledby="@_categoryTitleId">
-                        @foreach (var category in Categories)
+                        @foreach (var category in PickableCategories)
                         {
                             var current = category;
                             <ChoiceChip @key="current.Id"
@@ -95,11 +96,17 @@
                                         OnClick="() => ChooseCategory(current.Id)" />
                         }
                     </div>
-                    @if (Categories.Count == 0)
+                    @if (!PickableCategories.Any())
                     {
                         <div class="ft-filtersec__empty" role="status" data-testid="budget-form-category-empty">暂无支出分类</div>
                     }
                 </section>
+
+                @* 正在编辑的预算，它的分类后来开了「不计入统计」：这笔预算不会再累计，说明一下（新建时选不到这样的分类） *@
+                @if (IsSelectedCategoryExcluded)
+                {
+                    <ExcludedNote Text="@ExcludedFromStatisticsPresentation.BudgetNote" TestId="budget-form-excluded" />
+                }
             }
 
             @if (IsEditing)
@@ -169,6 +176,16 @@
     [Parameter] public EventCallback OnClosed { get; set; }
 
     private bool IsEditing => Target?.IsEditing == true;
+
+    /// <summary>
+    /// 分类预算里能新选的分类：开着「不计入统计」的分类，它的账单不计入预算，设了预算也永远累计不到，所以不让新选；
+    /// 正在编辑的预算自己的分类照常显示（否则表单里看不到它当前选的是什么），选中它时下面会有一行说明
+    /// </summary>
+    private IEnumerable<Category> PickableCategories =>
+        Categories.Where(c => !c.ExcludeFromStatistics || c.Id == Target?.CategoryId);
+
+    private bool IsSelectedCategoryExcluded =>
+        _categoryId is { } id && Categories.Any(c => c.Id == id && c.ExcludeFromStatistics);
 
     private bool CanSave => BudgetFormPresentation.Validate(AmountInput.Parse(_amount), _isCategory, _categoryId) is null;
 

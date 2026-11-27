@@ -277,7 +277,7 @@ def test_error_collector(run: TestRun) -> None:
 
 def make_temp_db(path: str) -> None:
     """按 REQUIRED_SCHEMA 建临时库，并放入一条预设分类 / 支付渠道。"""
-    int_columns = {"IsDeleted", "IsPreset", "SortOrder", "Type", "Source", "SyncStatus", "Role", "Status"}
+    int_columns = {"IsDeleted", "IsPreset", "SortOrder", "Type", "Source", "SyncStatus", "Role", "Status", "ExcludeFromStatistics"}
     con = sqlite3.connect(path)
     for table, columns in REQUIRED_SCHEMA.items():
         cols = ", ".join(f'"{c}" {"INTEGER" if c in int_columns else "TEXT"}' for c in columns)
@@ -485,6 +485,20 @@ def test_local_db(run: TestRun) -> None:
             str(cat),
         )
         run.check("custom_categories 只含自己未删除的", [c["Name"] for c in db.custom_categories(user_id)] == ["自测分类"])
+        # 「不计入统计」开关：造数据默认关；exclude_from_statistics=True 造开着的；set_category_excluded 直接改库里的开关
+        excluded_cat = db.seed_category(user_id, "自测不计入统计", exclude_from_statistics=True)
+        run.check(
+            "seed_category 默认不开「不计入统计」；exclude_from_statistics=True 开着（库里是 1）",
+            cat["ExcludeFromStatistics"] == 0 and db.category_row(excluded_cat)["ExcludeFromStatistics"] == 1,
+            f"{cat['ExcludeFromStatistics']} {db.category_row(excluded_cat)['ExcludeFromStatistics']}",
+        )
+        db.set_category_excluded(excluded_cat, False)
+        off = db.category_row(excluded_cat)["ExcludeFromStatistics"]
+        db.set_category_excluded(excluded_cat, True)
+        on = db.category_row(excluded_cat)["ExcludeFromStatistics"]
+        run.check("set_category_excluded 能把开关改关 / 改开", off == 0 and on == 1, f"{off} {on}")
+        with db._connect() as con:
+            con.execute('DELETE FROM "Categories" WHERE Id = ?', (excluded_cat,))  # 不影响下面按数量断言的检查
         run.check(
             "visible_category_count = 预设 2 + 自己未删除的自定义 1（别人的、已删的不算）；可按类型只数一种",
             db.visible_category_count(user_id) == 3 and db.visible_category_count(user_id, BILL_TYPE_INCOME) == 2

@@ -15,7 +15,7 @@
       · 报表范围分组：开始日期、结束日期（点按唤起系统的日期选择器，盖在整行上的透明 date 输入，与短信识别页同一套做法）、账本（有账本时才出现；全部账本 / 单个账本）
       · 起止日期不合法（没选 / 结束早于开始 / 超出可选范围）：分组下面用红字说明原因，「生成报表」置灰——不等到点击以后才用 Snackbar 提示
       · 结果（点「生成报表」后）：KPI 单卡（支出 / 收入 / 结余，与统计 Tab 同一张卡）→ 区间 · 账本 · 账单数量 → 分类支出环比（对比上一等长周期）
-        → 分类支出排行（Top 8）→ 支出构成 / 收入构成（圆环 + 图例）→ 导出 CSV、分享摘要
+        → 分类支出排行（Top 8）→ 支出构成 / 收入构成（圆环 + 图例）→ 「已忽略 N 笔不计入统计的账单」提示（有才显示）→ 导出 CSV、分享摘要
       · 主按钮「生成报表」固定在页面底部（生成中禁用，防止重复生成）
     口径不变（ADR 0005）：起止日期是应用时区的自然日、含当天，统计服务换成 UTC 的左闭右开区间查库，本页不做任何时区换算；
     「今天」取应用时区（旧页面用 DateTime.Now，运行环境时区与应用时区不一致时会差一天）；账本筛选 null = 全部账本（含没有账本的历史账单）。
@@ -26,7 +26,8 @@
       report-error、report-generate、report-idle / report-failed / report-skeleton、
       report-results（data-start / data-end / data-ledger / data-count）、report-kpi（-expense / -income / -balance）、report-caption、
       report-comparison（report-comparison-row：data-name / data-current / data-previous / data-kind / data-tone，report-delta）、report-comparison-footer、
-      report-rank、report-expense-* / report-income-*（header / composition / donut / total / legend / empty）、report-actions、report-export、report-share。
+      report-rank、report-expense-* / report-income-*（header / composition / donut / total / legend / empty）、
+      report-excluded（区间内有「不计入统计」的账单时的「已忽略 N 笔」提示，没有就不渲染）、report-actions、report-export、report-share。
 *@
 
 <SecondaryPage Title="@CustomReportPresentation.Title" TestId="report-page">
@@ -170,6 +171,9 @@
 
                     @Composition((result, BillType.Expense))
                     @Composition((result, BillType.Income))
+
+                    @* 区间内有「不计入统计」的账单时，说明它们没有算进上面的数字（导出 / 分享的内容与屏幕上的数字一致，同样不含它们） *@
+                    <ExcludedNote Text="@result.ExcludedNote" TestId="report-excluded" />
 
                     <GroupedList Header="@CustomReportPresentation.ActionsTitle" TestId="report-actions">
                         <ListCell Icon="mdi-file-delimited-outline"
@@ -366,10 +370,12 @@
 
         try
         {
-            // 两次查询在同一把闸门里依次执行（同一个 DbContext 不能并行）
+            // 三次查询在同一把闸门里依次执行（同一个 DbContext 不能并行）；
+            // 被「不计入统计」排除的账单只用来写底部提示：报表的结束日期含当天，这个接口的终点不含，所以加一天换算成同一个区间
             var data = await DataGate.RunAsync(async () => (
                 Stats: await StatisticsService.GetCustomStatisticsAsync(userId, start.Date, end.Date, ledgerId),
-                Comparisons: await StatisticsService.GetCategoryComparisonAsync(userId, start.Date, end.Date, ledgerId)));
+                Comparisons: await StatisticsService.GetCategoryComparisonAsync(userId, start.Date, end.Date, ledgerId),
+                Excluded: await StatisticsService.GetExcludedStatisticsAsync(userId, start.Date, end.Date.AddDays(1), ledgerId)));
 
             var stats = data.Stats;
             _result = new ReportResult(
@@ -381,7 +387,8 @@
                 StatisticsPresentation.LegendOfCategories(stats.IncomeCategoryStats),
                 ledgerId,
                 ledgerLabel,
-                ledgerId is null ? null : ledgerLabel);
+                ledgerId is null ? null : ledgerLabel,
+                ExcludedFromStatisticsPresentation.NoteText(data.Excluded));
         }
         catch (Exception ex)
         {
@@ -520,7 +527,8 @@
         IReadOnlyList<LegendRow> IncomeLegend,
         Guid? LedgerId,
         string LedgerLabel,
-        string? LedgerName)
+        string? LedgerName,
+        string? ExcludedNote)
     {
         public string Caption => CustomReportPresentation.Caption(Stats.StartDate, Stats.EndDate, LedgerLabel, Stats.BillCount);
 

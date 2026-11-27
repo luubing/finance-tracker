@@ -14,7 +14,8 @@
     分类管理（二级页面模板，设计稿 05 / screens 11-categories）：
       · 顶部「支出 / 收入」分段（每个分类只属于一种账单类型）
       · 「自定义」组：左滑出现「编辑」「删除」；点按整行进入编辑 Sheet（含设为默认、删除——左滑操作的非滑动等价入口）；
-        右侧是该分类下的账单数；末尾「新建分类」行
+        右侧是该分类下的账单数；末尾「新建分类」行；
+        开着「不计入统计」的分类（开关在新建 / 编辑 Sheet 里，规则见 ADR 0008）名称下面多一行「不计入统计」，行上带 data-excluded="true"
       · 「预设分类」组：只读（不能改名、不能删除），右侧标注「预设」；点按弹出菜单，可设为 / 取消默认
       · 「默认」徽标：默认支出分类与默认收入分类各有一个，设置沿用「用户默认值」服务，记一笔默认选中它
     右上角「＋」与「新建分类」行都打开底部 Sheet（面板是共用的 CategoryFormSheet，「记一笔」的新建分类用同一个）；
@@ -71,9 +72,11 @@
                         </Actions>
                         <ChildContent>
                             <ListCell Title="@category.Name"
+                                      Subtitle="@(category.ExcludeFromStatistics ? ExcludedFromStatisticsPresentation.Label : null)"
                                       Value="@ManagedItemPresentation.UsageText(category.BillCount)"
                                       Chevron
                                       TestId="category-cell"
+                                      data-excluded="@(category.ExcludeFromStatistics ? "true" : null)"
                                       OnClick="() => OpenEdit(category)">
                                 <Leading>
                                     <span class="ft-tile ft-tile--soft ft-tile--@category.Tone" aria-hidden="true"><i class="mdi @category.Icon"></i></span>
@@ -127,6 +130,7 @@
                    UserId="_userId"
                    Type="_sheetType"
                    Editing="FormTarget"
+                   EditingExcludeFromStatistics="@(_editing?.ExcludeFromStatistics ?? false)"
                    OnSaved="OnCategorySavedAsync"
                    OnClosed="OnSheetClosed">
     <EditingExtras>
@@ -179,7 +183,8 @@
         BillType Type,
         bool IsPreset,
         bool IsDefault,
-        int BillCount);
+        int BillCount,
+        bool ExcludeFromStatistics);
 
     private static readonly IReadOnlyList<SegmentOption> SegmentOptions =
         CategoryPresentation.Segments.Select(s => new SegmentOption(s.Value, s.Label)).ToList();
@@ -259,7 +264,8 @@
                         category.Type,
                         category.IsPreset,
                         isDefault,
-                        billCount));
+                        billCount,
+                        ExcludedFromStatisticsPresentation.IsExcluded(category, _userId)));
                 }
 
                 return loaded;

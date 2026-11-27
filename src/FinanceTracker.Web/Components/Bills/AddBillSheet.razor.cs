@@ -390,7 +390,7 @@ public partial class AddBillSheet
 
         _categoryMemory[_type] = _categoryId;
         _deleteMessage = BillListPresentation.DeleteMessage(
-            BillPresentation.Title(string.IsNullOrWhiteSpace(bill.Category?.Name) ? BillPresentation.UnknownCategoryLabel : bill.Category!.Name, bill.Note),
+            BillPresentation.Describe(string.IsNullOrWhiteSpace(bill.Category?.Name) ? BillPresentation.UnknownCategoryLabel : bill.Category!.Name, bill.Note),
             MoneyPresentation.Signed(bill.Amount, bill.Type == BillType.Income));
         _original = CurrentDraft();
         return true;

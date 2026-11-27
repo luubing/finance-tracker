@@ -79,7 +79,16 @@ public sealed class FakeCloud : IAsyncDisposable
             }
         };
 
-        var result = await action(controller, wireRequest);
+        // 云端在生产里是另一个进程：客户端的同步作用域（SyncTimestampScope，基于 AsyncLocal）不能流进"服务端"。
+        // 否则服务端保存时也不会盖 UpdatedAt，与生产不一致——生产里服务端每次写库都盖写入当时的时间，
+        // 后写入优先的裁决（例如"另一台设备带着旧版本推上来，必须被云端的新版本挡回去"）才成立。
+        Task<IActionResult> pending;
+        using (ExecutionContext.SuppressFlow())
+        {
+            pending = Task.Run(() => action(controller, wireRequest));
+        }
+
+        var result = await pending;
         var ok = Assert.IsType<OkObjectResult>(result);
         return RoundTrip((TResponse)ok.Value!);
     }

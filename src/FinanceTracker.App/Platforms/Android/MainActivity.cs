@@ -1,5 +1,6 @@
 ﻿using Android.App;
 using Android.Content.PM;
+using Android.Graphics.Drawables;
 using Android.OS;
 using AndroidX.Core.View;
 using FinanceTracker.App.Platforms.Android.Services;
@@ -15,6 +16,8 @@ public class MainActivity : MauiAppCompatActivity
 	{
 		base.OnCreate(savedInstanceState);
 
+		ApplyLaunchBackground();
+
 		EnableEdgeToEdge();
 		AttachSafeAreaService();
 	}
@@ -23,6 +26,20 @@ public class MainActivity : MauiAppCompatActivity
 	{
 		GetSafeAreaService()?.Detach();
 		base.OnDestroy();
+	}
+
+	/// <summary>
+	/// 冷启动不闪白：<c>MauiAppCompatActivity.OnCreate</c> 会把启动主题（Ft.SplashTheme）换成 Maui.MainTheme，窗口背景随之变成主题默认的白色（深色模式下是黑色）。
+	/// 系统启动画面一结束、网页还没画出第一帧，露出来的就是窗口背景，这是白屏闪动的来源之一（另一处是原生 WebView 自己的底色，见 MainPage）。
+	/// 这里把窗口背景压成启动画面的底色（MAUI 按 csproj 里 MauiSplashScreen 的 Color 生成的 maui_splash_color）：
+	/// 启动画面 → 窗口 → 页面 → WebView → 加载页，全程是同一个颜色。
+	/// 必须紧跟在 base.OnCreate 之后（主题切换发生在里面），并且赶在第一帧之前——在 OnCreate 里两者都满足。
+	/// </summary>
+	private void ApplyLaunchBackground()
+	{
+		var color = Resources?.GetColor(Resource.Color.maui_splash_color, Theme);
+		if (color is { } launchColor)
+			Window?.SetBackgroundDrawable(new ColorDrawable(launchColor));
 	}
 
 	/// <summary>

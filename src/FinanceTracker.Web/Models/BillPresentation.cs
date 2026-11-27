@@ -9,16 +9,18 @@ namespace FinanceTracker.Web.Models;
 /// 账单行（首页「最近账单」、账单 Tab 的列表共用）渲染所需的全部文字与配色，取数时一次性算好，渲染时不再查库。
 /// </summary>
 /// <param name="Id">账单 Id</param>
-/// <param name="Title">标题：分类 · 备注（没有备注时只有分类）</param>
-/// <param name="Subtitle">副标题：支付渠道 · 账本（历史无账本的账单标注「未归属账本」）</param>
+/// <param name="Title">标题：分类 · 账本（历史无账本的账单标注「未归属账本」）</param>
+/// <param name="Subtitle">副标题：支付渠道 · 备注（没有备注时只有支付渠道）</param>
 /// <param name="AmountText">金额：支出 -¥35.00，收入 +¥12,000.00</param>
 /// <param name="IsIncome">是否收入（决定金额颜色）</param>
 /// <param name="TimeText">时间文案（应用时区）</param>
 /// <param name="Icon">分类图标（已校验）</param>
 /// <param name="Tone">图标块配色（.ft-tile--soft.ft-tile--{色}）</param>
 /// <param name="AriaLabel">读屏名称：把一行里的信息连成一句话</param>
-/// <param name="CategoryName">分类名（标题的前半段）；给了就让账单行把分类名和备注分成两段排版（设计稿 02：分类加粗、「 · 备注」灰色常规），不给就按整句 Title 显示</param>
-/// <param name="NoteText">备注（已去首尾空白）；没有备注为空</param>
+/// <param name="CategoryName">分类名（标题的前半段）；给了就让账单行把分类名和账本分成两段排版（设计稿 02：分类加粗、「 · 账本」灰色常规），不给就按整句 Title 显示</param>
+/// <param name="LedgerText">账本文字（标题的后半段）：账本名（已折成单行），历史无账本的账单是「未归属账本」；不给就不画「 · 账本」那一段</param>
+/// <param name="NoteText">备注（已折成单行）；没有备注为空。行里不单独画它（副标题里已经拼好了「支付渠道 · 备注」），留着给删除确认这类要点名是哪一笔的文案用（<see cref="BillPresentation.Describe"/>）</param>
+/// <param name="ExcludedFromStatistics">这笔账单的分类开着「不计入统计」（<see cref="ExcludedFromStatisticsPresentation.IsExcluded"/>）：行里副标题前画一个小标记，读屏名称末尾也会说；账单仍照常显示在列表里</param>
 public sealed record BillRowModel(
     Guid Id,
     string Title,
@@ -30,7 +32,9 @@ public sealed record BillRowModel(
     string Tone,
     string AriaLabel,
     string? CategoryName = null,
-    string? NoteText = null);
+    string? LedgerText = null,
+    string? NoteText = null,
+    bool ExcludedFromStatistics = false);
 
 /// <summary>
 /// 账单行的展示规则（纯函数，单元测试覆盖）：标题 / 副标题 / 金额 / 时间文案、分类图标与配色。
@@ -38,7 +42,7 @@ public sealed record BillRowModel(
 /// </summary>
 public static class BillPresentation
 {
-    /// <summary>历史上没有账本的账单在副标题里的标注（与统计里的「未归属账本」同名）</summary>
+    /// <summary>历史上没有账本的账单在行标题里的标注（与统计里的「未归属账本」同名）</summary>
     public const string UnassignedLedgerLabel = "未归属账本";
 
     /// <summary>账单的分类被删除 / 缺失时的名称</summary>
@@ -79,15 +83,24 @@ public static class BillPresentation
     /// <param name="bill">账单；TransactionTime 是 UTC</param>
     /// <param name="nowLocal">应用时区的「现在」（用于判断今天 / 昨天；由调用方传入以便测试）</param>
     /// <param name="includeDate">是否带日期：按天分组的列表只显示时分，首页的混合列表要带日期</param>
-    public static BillRowModel ToRow(Bill bill, DateTime nowLocal, bool includeDate)
+    /// <param name="viewerId">当前登录用户：用来判断「不计入统计」的标记（只标查看者自己的分类，见 <see cref="ExcludedFromStatisticsPresentation.IsExcluded"/>）；不传就不标</param>
+    public static BillRowModel ToRow(Bill bill, DateTime nowLocal, bool includeDate, Guid? viewerId = null)
     {
         var isIncome = bill.Type == BillType.Income;
         var categoryName = string.IsNullOrWhiteSpace(bill.Category?.Name) ? UnknownCategoryLabel : bill.Category!.Name;
+        var ledgerLabel = LedgerLabel(bill.Ledger?.Name);
 
-        var title = Title(categoryName, bill.Note);
-        var subtitle = Subtitle(bill.PaymentChannel?.Name, bill.Ledger?.Name);
+        var title = Title(categoryName, ledgerLabel);
+        var subtitle = Subtitle(bill.PaymentChannel?.Name, bill.Note);
         var amountText = MoneyPresentation.Signed(bill.Amount, isIncome);
         var timeText = TimeText(AppTimeZone.ToLocal(bill.TransactionTime), nowLocal, includeDate);
+        var excluded = ExcludedFromStatisticsPresentation.IsExcluded(bill.Category, viewerId);
+
+        var ariaLabel = $"{title}，{subtitle}，{(isIncome ? "收入" : "支出")} {MoneyPresentation.Format(Math.Abs(bill.Amount))}，{timeText}";
+        if (excluded)
+        {
+            ariaLabel += $"，{ExcludedFromStatisticsPresentation.Label}";
+        }
 
         return new BillRowModel(
             bill.Id,
@@ -98,39 +111,53 @@ public static class BillPresentation
             timeText,
             CategoryIcon(bill.Category?.Icon),
             CategoryTone(bill.Category?.Name, bill.CategoryId),
-            $"{title}，{subtitle}，{(isIncome ? "收入" : "支出")} {MoneyPresentation.Format(Math.Abs(bill.Amount))}，{timeText}",
+            ariaLabel,
             categoryName,
-            NoteText(bill.Note));
+            ledgerLabel,
+            SingleLine(bill.Note),
+            excluded);
     }
 
     /// <summary>
-    /// 备注文字：去首尾空白，中间的换行 / 连续空白折成一个空格（与 HTML 单行显示的空白折叠一致；
-    /// 账单行的备注框用 <c>white-space: pre</c> 保住「 · 」前面的空格，不折叠的换行会把一行撑成两行）；
-    /// 没有备注（空或全是空白）为空，账单行据此决定要不要画「 · 备注」那一段
+    /// 单行文字：去首尾空白，中间的换行 / 连续空白折成一个空格（与 HTML 单行显示的空白折叠一致；
+    /// 账单行标题里灰色的那一段用 <c>white-space: pre</c> 保住「 · 」前面的空格，不折叠的换行会把一行撑成两行）。
+    /// 账本名与备注都是用户写的文字，进账单行之前都要过这一道；没有文字（空或全是空白）为空
     /// </summary>
-    public static string? NoteText(string? note)
+    public static string? SingleLine(string? text)
     {
-        if (string.IsNullOrWhiteSpace(note)) return null;
-        return string.Join(' ', note.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>
-    /// 行标题：分类 · 备注；备注为空（或全是空白）时只显示分类
+    /// 账单行里的账本文字：账本名（单行）；没有账本的历史账单标注「未归属账本」，不显示成空
     /// </summary>
-    public static string Title(string categoryName, string? note)
-    {
-        var trimmed = NoteText(note);
-        return trimmed is null ? categoryName : $"{categoryName} · {trimmed}";
-    }
+    public static string LedgerLabel(string? ledgerName) => SingleLine(ledgerName) ?? UnassignedLedgerLabel;
 
     /// <summary>
-    /// 行副标题：支付渠道 · 账本。没有账本的历史账单标注「未归属账本」，不显示成空
+    /// 行标题：分类 · 账本（账本文字见 <see cref="LedgerLabel"/>；账本一栏永远有内容）
     /// </summary>
-    public static string Subtitle(string? channelName, string? ledgerName)
+    public static string Title(string categoryName, string? ledgerName) =>
+        $"{categoryName} · {LedgerLabel(ledgerName)}";
+
+    /// <summary>
+    /// 行副标题：支付渠道 · 备注；备注为空（或全是空白）时只显示支付渠道。渠道缺失标注「未知渠道」，不显示成空
+    /// </summary>
+    public static string Subtitle(string? channelName, string? note)
     {
         var channel = string.IsNullOrWhiteSpace(channelName) ? UnknownChannelLabel : channelName.Trim();
-        var ledger = string.IsNullOrWhiteSpace(ledgerName) ? UnassignedLedgerLabel : ledgerName.Trim();
-        return $"{channel} · {ledger}";
+        var text = SingleLine(note);
+        return text is null ? channel : $"{channel} · {text}";
+    }
+
+    /// <summary>
+    /// 指代某一笔账单的文字（删除确认等要「点名是哪一笔」的文案）：分类 · 备注；备注为空（或全是空白）时只有分类。
+    /// 账单行自己的标题是「分类 · 账本」（<see cref="Title"/>），这里仍用备注——备注比账本更能认出是哪一笔
+    /// </summary>
+    public static string Describe(string categoryName, string? note)
+    {
+        var text = SingleLine(note);
+        return text is null ? categoryName : $"{categoryName} · {text}";
     }
 
     /// <summary>

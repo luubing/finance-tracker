@@ -44,24 +44,36 @@ public class BillPresentationTests
     // ---- 标题 / 副标题 ----
 
     [Theory]
+    [InlineData("餐饮美食", "日常开销", "餐饮美食 · 日常开销")]
+    [InlineData("餐饮美食", "  日常开销  ", "餐饮美食 · 日常开销")]
+    [InlineData("餐饮美食", "日常\n开销", "餐饮美食 · 日常 开销")]
+    [InlineData("餐饮美食", null, "餐饮美食 · 未归属账本")]
+    [InlineData("餐饮美食", "", "餐饮美食 · 未归属账本")]
+    [InlineData("餐饮美食", "   ", "餐饮美食 · 未归属账本")]
+    public void 标题是分类加账本_历史无账本的账单标注未归属账本(string category, string? ledger, string expected) =>
+        Assert.Equal(expected, BillPresentation.Title(category, ledger));
+
+    [Theory]
+    [InlineData("微信支付", "午饭", "微信支付 · 午饭")]
+    [InlineData("微信支付", "  午饭  ", "微信支付 · 午饭")]
+    [InlineData("微信支付", "午饭\n晚饭", "微信支付 · 午饭 晚饭")]
+    [InlineData("微信支付", null, "微信支付")]
+    [InlineData("微信支付", "", "微信支付")]
+    [InlineData("微信支付", "  ", "微信支付")]
+    [InlineData(null, "午饭", "未知渠道 · 午饭")]
+    [InlineData(null, null, "未知渠道")]
+    public void 副标题是支付渠道加备注_没有备注时只有支付渠道(string? channel, string? note, string expected) =>
+        Assert.Equal(expected, BillPresentation.Subtitle(channel, note));
+
+    [Theory]
     [InlineData("餐饮美食", "午饭", "餐饮美食 · 午饭")]
     [InlineData("餐饮美食", "  午饭  ", "餐饮美食 · 午饭")]
     [InlineData("餐饮美食", "午饭\n晚饭", "餐饮美食 · 午饭 晚饭")]
     [InlineData("餐饮美食", null, "餐饮美食")]
     [InlineData("餐饮美食", "", "餐饮美食")]
     [InlineData("餐饮美食", "   ", "餐饮美食")]
-    public void 标题是分类加备注_没有备注时只有分类(string category, string? note, string expected) =>
-        Assert.Equal(expected, BillPresentation.Title(category, note));
-
-    [Theory]
-    [InlineData("微信支付", "日常开销", "微信支付 · 日常开销")]
-    [InlineData("微信支付", null, "微信支付 · 未归属账本")]
-    [InlineData("微信支付", "", "微信支付 · 未归属账本")]
-    [InlineData("微信支付", "  ", "微信支付 · 未归属账本")]
-    [InlineData(null, "日常开销", "未知渠道 · 日常开销")]
-    [InlineData(null, null, "未知渠道 · 未归属账本")]
-    public void 副标题是支付渠道加账本_历史无账本的账单标注未归属账本(string? channel, string? ledger, string expected) =>
-        Assert.Equal(expected, BillPresentation.Subtitle(channel, ledger));
+    public void 指代账单的文字是分类加备注_没有备注时只有分类(string category, string? note, string expected) =>
+        Assert.Equal(expected, BillPresentation.Describe(category, note));
 
     // ---- 时间 ----
 
@@ -153,39 +165,57 @@ public class BillPresentationTests
         var row = BillPresentation.ToRow(bill, Now, includeDate: true);
 
         Assert.Equal(bill.Id, row.Id);
-        Assert.Equal("餐饮美食 · 午饭", row.Title);
-        Assert.Equal("微信支付 · 日常开销", row.Subtitle);
+        Assert.Equal("餐饮美食 · 日常开销", row.Title);
+        Assert.Equal("微信支付 · 午饭", row.Subtitle);
         Assert.Equal("-¥35.00", row.AmountText);
         Assert.False(row.IsIncome);
         // UTC 06:30 在 UTC+8 是 14:30（今天，所以只显示时分）
         Assert.Equal("14:30", row.TimeText);
         Assert.Equal("mdi-silverware-fork-knife", row.Icon);
         Assert.Equal("orange", row.Tone);
-        Assert.Equal("餐饮美食 · 午饭，微信支付 · 日常开销，支出 ¥35.00，14:30", row.AriaLabel);
+        Assert.Equal("餐饮美食 · 日常开销，微信支付 · 午饭，支出 ¥35.00，14:30", row.AriaLabel);
     }
 
     [Fact]
-    public void 行里把分类名和备注分开给_账单行据此排成分类加粗_备注灰色()
+    public void 行里把分类名和账本分开给_账单行据此排成分类加粗_账本灰色()
     {
         using var _ = AppTimeZone.UseZone(TestZones.UtcPlus8);
 
-        var withNote = BillPresentation.ToRow(NewBill(note: "  午饭  "), Now, includeDate: true);
-        var noNote = BillPresentation.ToRow(NewBill(note: "   "), Now, includeDate: true);
+        var withLedger = BillPresentation.ToRow(NewBill(ledger: "  日常开销  "), Now, includeDate: true);
+        var noLedger = BillPresentation.ToRow(NewBill(ledger: null), Now, includeDate: true);
         var unknown = NewBill();
         unknown.Category = null!;
         var unknownCategory = BillPresentation.ToRow(unknown, Now, includeDate: true);
 
         // 分开的两段拼回去就是整句标题（E2E 与读屏看到的文字不变）
-        Assert.Equal("餐饮美食", withNote.CategoryName);
-        Assert.Equal("午饭", withNote.NoteText);
-        Assert.Equal(withNote.Title, $"{withNote.CategoryName} · {withNote.NoteText}");
-        // 没有备注：只有分类，不画「 · 」那一段
-        Assert.Equal("餐饮美食", noNote.CategoryName);
-        Assert.Null(noNote.NoteText);
-        Assert.Equal(noNote.Title, noNote.CategoryName);
-        // 分类缺失：分类名是「未知分类」，备注照常
+        Assert.Equal("餐饮美食", withLedger.CategoryName);
+        Assert.Equal("日常开销", withLedger.LedgerText);
+        Assert.Equal(withLedger.Title, $"{withLedger.CategoryName} · {withLedger.LedgerText}");
+        // 没有账本（历史账单）：账本那一段标注「未归属账本」，不留空
+        Assert.Equal("餐饮美食", noLedger.CategoryName);
+        Assert.Equal(BillPresentation.UnassignedLedgerLabel, noLedger.LedgerText);
+        Assert.Equal(noLedger.Title, $"{noLedger.CategoryName} · {noLedger.LedgerText}");
+        // 分类缺失：分类名是「未知分类」，账本照常
         Assert.Equal(BillPresentation.UnknownCategoryLabel, unknownCategory.CategoryName);
-        Assert.Equal("午饭", unknownCategory.NoteText);
+        Assert.Equal("日常开销", unknownCategory.LedgerText);
+    }
+
+    [Fact]
+    public void 备注只出现在副标题里_不再跟在分类后面()
+    {
+        using var _ = AppTimeZone.UseZone(TestZones.UtcPlus8);
+
+        var withNote = BillPresentation.ToRow(NewBill(note: "  午饭  "), Now, includeDate: true);
+        var noNote = BillPresentation.ToRow(NewBill(note: "   "), Now, includeDate: true);
+
+        Assert.Equal("微信支付 · 午饭", withNote.Subtitle);
+        Assert.DoesNotContain("午饭", withNote.Title);
+        // 行里不单独画备注，但模型留着它（折成单行）给删除确认点名用
+        Assert.Equal("午饭", withNote.NoteText);
+        Assert.Null(noNote.NoteText);
+        // 没有备注：副标题只有支付渠道，不留悬空的「 · 」
+        Assert.Equal("微信支付", noNote.Subtitle);
+        Assert.Equal("餐饮美食 · 日常开销", noNote.Title);
     }
 
     [Theory]
@@ -196,8 +226,18 @@ public class BillPresentationTests
     [InlineData("  午饭 \n", "午饭")]
     [InlineData("午饭\n晚饭", "午饭 晚饭")]
     [InlineData("午饭  \t 晚饭\r\n夜宵", "午饭 晚饭 夜宵")]
-    public void 备注文字去首尾空白_中间空白折成一个空格_空白备注当没有(string? note, string? expected) =>
-        Assert.Equal(expected, BillPresentation.NoteText(note));
+    public void 单行文字去首尾空白_中间空白折成一个空格_空白当没有(string? text, string? expected) =>
+        Assert.Equal(expected, BillPresentation.SingleLine(text));
+
+    [Theory]
+    [InlineData("日常开销", "日常开销")]
+    [InlineData("  日常开销\n", "日常开销")]
+    [InlineData("日常\n开销", "日常 开销")]
+    [InlineData(null, "未归属账本")]
+    [InlineData("", "未归属账本")]
+    [InlineData("  \t", "未归属账本")]
+    public void 账本文字是账本名折成单行_没有账本时标注未归属账本(string? ledger, string expected) =>
+        Assert.Equal(expected, BillPresentation.LedgerLabel(ledger));
 
     [Fact]
     public void 收入账单转成行_金额正号_读屏名称写收入()
@@ -207,7 +247,8 @@ public class BillPresentationTests
 
         var row = BillPresentation.ToRow(bill, Now, includeDate: true);
 
-        Assert.Equal("工资薪酬", row.Title);
+        Assert.Equal("工资薪酬 · 日常开销", row.Title);
+        Assert.Equal("银行卡", row.Subtitle);
         Assert.Equal("+¥12,000.00", row.AmountText);
         Assert.True(row.IsIncome);
         Assert.Equal("green", row.Tone);
@@ -221,7 +262,8 @@ public class BillPresentationTests
 
         var row = BillPresentation.ToRow(NewBill(ledger: null), Now, includeDate: true);
 
-        Assert.Equal("微信支付 · 未归属账本", row.Subtitle);
+        Assert.Equal("餐饮美食 · 未归属账本", row.Title);
+        Assert.Equal("微信支付 · 午饭", row.Subtitle);
         Assert.Contains("未归属账本", row.AriaLabel);
     }
 
@@ -246,8 +288,8 @@ public class BillPresentationTests
 
         var row = BillPresentation.ToRow(bill, Now, includeDate: false);
 
-        Assert.Equal("未知分类 · 午饭", row.Title);
-        Assert.Equal("未知渠道 · 日常开销", row.Subtitle);
+        Assert.Equal("未知分类 · 日常开销", row.Title);
+        Assert.Equal("未知渠道 · 午饭", row.Subtitle);
         Assert.Equal("mdi-tag", row.Icon);
     }
 }

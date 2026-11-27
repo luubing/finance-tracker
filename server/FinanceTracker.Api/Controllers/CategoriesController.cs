@@ -71,7 +71,8 @@ public class CategoriesController : BaseApiController
             Name = request.Name,
             Icon = request.Icon ?? "mdi-tag",
             Type = request.Type,
-            SortOrder = request.SortOrder
+            SortOrder = request.SortOrder,
+            ExcludeFromStatistics = request.ExcludeFromStatistics ?? false
         };
 
         var createdCategory = await _categoryService.CreateCategoryAsync(category);
@@ -114,7 +115,9 @@ public class CategoriesController : BaseApiController
             Name = request.Name,
             Icon = request.Icon ?? "mdi-tag",
             Type = request.Type,
-            SortOrder = request.SortOrder
+            SortOrder = request.SortOrder,
+            // 请求里没带这个字段（老调用方）= 保持原样，不能悄悄把用户设好的开关改回"计入统计"
+            ExcludeFromStatistics = request.ExcludeFromStatistics ?? existingCategory.ExcludeFromStatistics
         };
 
         try
@@ -170,7 +173,8 @@ public class CategoriesController : BaseApiController
         icon = category.Icon,
         type = category.Type.ToString(),
         isPreset = category.IsPreset,
-        sortOrder = category.SortOrder
+        sortOrder = category.SortOrder,
+        excludeFromStatistics = category.ExcludeFromStatistics
     };
 }
 
@@ -198,4 +202,10 @@ public class CategoryRequest
     /// 排序顺序
     /// </summary>
     public int SortOrder { get; set; }
+
+    /// <summary>
+    /// 不计入统计（可选）：该分类的账单不参与统计 / 首页本月概览 / 预算已用金额，账单列表照常显示。
+    /// 创建时缺省为 false；更新时缺省 = 保持原值
+    /// </summary>
+    public bool? ExcludeFromStatistics { get; set; }
 }

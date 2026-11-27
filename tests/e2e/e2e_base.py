@@ -817,7 +817,7 @@ REQUIRED_SCHEMA = {
     ],
     "PendingBills": ["Id", "Amount", "Type", "Channel", "Note", "TransactionTime", "Source", "CapturedAt"],
     "Budgets": ["Id", "UserId", "LedgerId", "Year", "Month", "CategoryId", "Amount", "IsDeleted", "CreatedAt", "UpdatedAt"],
-    "Categories": ["Id", "Name", "Icon", "Type", "IsPreset", "IsDeleted", "SortOrder", "UserId", "CreatedAt", "UpdatedAt"],
+    "Categories": ["Id", "Name", "Icon", "Type", "IsPreset", "IsDeleted", "SortOrder", "UserId", "ExcludeFromStatistics", "CreatedAt", "UpdatedAt"],
     "PaymentChannels": ["Id", "Name", "Icon", "IsPreset", "IsDeleted", "SortOrder", "UserId", "CreatedAt", "UpdatedAt"],
     "LedgerMembers": ["Id", "LedgerId", "UserId", "Role", "Status", "IsDeleted", "CreatedAt", "UpdatedAt"],
     "UserDefaults": [
@@ -1297,13 +1297,14 @@ class LocalDb:
         ledger_id: Optional[str] = None,
         year: Optional[int] = None,
         month: Optional[int] = None,
+        category_id: Optional[str] = None,
     ) -> str:
         """造一条预算。category_name 为 None 是总预算，否则是该预设支出分类的预算；ledger_id 为 None 是「全部账本」。
-        年月缺省为本月（运行环境本地时区，即应用时区默认值）。"""
+        自定义分类的预算传 category_id（优先于 category_name）。年月缺省为本月（运行环境本地时区，即应用时区默认值）。"""
         budget_id = new_guid()
         now = to_db_time(datetime.now(timezone.utc))
         today = datetime.now()
-        category_id = self.category_id_by_name(category_name) if category_name else None
+        category_id = _gid(category_id) if category_id else (self.category_id_by_name(category_name) if category_name else None)
         with self._connect() as con:
             con.execute(
                 'INSERT INTO "Budgets" (Id, UserId, LedgerId, Year, Month, CategoryId, Amount, IsDeleted, CreatedAt, UpdatedAt) '
@@ -1331,17 +1332,35 @@ class LocalDb:
         icon: str = "mdi-tag",
         sort_order: int = 100,
         deleted: bool = False,
+        exclude_from_statistics: bool = False,
     ) -> str:
-        """造一个用户自定义分类（UserId = 该用户、IsPreset = 0）。deleted=True 造一个已软删除的。"""
+        """造一个用户自定义分类（UserId = 该用户、IsPreset = 0）。deleted=True 造一个已软删除的；
+        exclude_from_statistics=True 造一个开着「不计入统计」的（它的账单不进统计 / 首页本月概览 / 预算）。"""
         category_id = new_guid()
         now = to_db_time(datetime.now(timezone.utc))
         with self._connect() as con:
             con.execute(
-                'INSERT INTO "Categories" (Id, Name, Icon, Type, IsPreset, IsDeleted, SortOrder, UserId, CreatedAt, UpdatedAt) '
-                "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
-                (category_id, name or unique_name("E2E分类"), icon, bill_type, 1 if deleted else 0, sort_order, _gid(user_id), now, now),
+                'INSERT INTO "Categories" (Id, Name, Icon, Type, IsPreset, IsDeleted, SortOrder, UserId, ExcludeFromStatistics, CreatedAt, UpdatedAt) '
+                "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+                (
+                    category_id,
+                    name or unique_name("E2E分类"),
+                    icon,
+                    bill_type,
+                    1 if deleted else 0,
+                    sort_order,
+                    _gid(user_id),
+                    1 if exclude_from_statistics else 0,
+                    now,
+                    now,
+                ),
             )
         return category_id
+
+    def set_category_excluded(self, category_id: str, excluded: bool) -> None:
+        """直接改库里某个分类的「不计入统计」开关（造「页面常驻、库被改了」的场景用；不动 UpdatedAt，模拟的就是库里已有的状态）。"""
+        with self._connect() as con:
+            con.execute('UPDATE "Categories" SET ExcludeFromStatistics = ? WHERE Id = ?', (1 if excluded else 0, _gid(category_id)))
 
     def seed_channel(
         self,

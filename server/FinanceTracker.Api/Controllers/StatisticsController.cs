@@ -360,4 +360,46 @@ public class StatisticsController : BaseApiController
             changeRate = c.ChangeRate
         }));
     }
+
+    /// <summary>
+    /// 获取区间内被「不计入统计」的分类排除掉的账单汇总。
+    /// 本控制器的其他统计接口都不含这些账单（分类的 excludeFromStatistics 开着时），这个接口告诉调用方被排除了什么。
+    /// 没有被排除的账单时返回空数组。
+    /// </summary>
+    /// <param name="startDate">开始日期（含当天）</param>
+    /// <param name="endDate">结束日期（含当天）</param>
+    /// <param name="ledgerId">账本ID（可选，null 表示全部账本）</param>
+    /// <returns>被排除的分类汇总列表（金额降序）</returns>
+    [HttpGet("excluded")]
+    public async Task<IActionResult> GetExcludedStatistics(
+        [FromQuery] DateTime startDate,
+        [FromQuery] DateTime endDate,
+        [FromQuery] Guid? ledgerId)
+    {
+        var userId = GetUserId();
+
+        if (startDate.Date > endDate.Date)
+        {
+            return BadRequest(new { message = "开始日期必须早于或等于结束日期" });
+        }
+
+        if (startDate.Date < new DateTime(2000, 1, 1) || endDate.Date > new DateTime(2100, 1, 1))
+        {
+            return BadRequest(new { message = "日期范围无效" });
+        }
+
+        // 接口的日期含当天，服务的区间是左闭右开：终点取结束日的次日零点（与自定义统计的归一化一致）
+        var excluded = await _statisticsService.GetExcludedStatisticsAsync(
+            userId, startDate.Date, endDate.Date.AddDays(1), ledgerId);
+
+        return Ok(excluded.Select(e => new
+        {
+            categoryId = e.CategoryId,
+            categoryName = e.CategoryName,
+            categoryIcon = e.CategoryIcon,
+            type = e.Type.ToString(),
+            amount = e.Amount,
+            count = e.Count
+        }));
+    }
 }

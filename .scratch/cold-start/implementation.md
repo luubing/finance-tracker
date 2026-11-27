@@ -27,7 +27,8 @@
 | 宿主 | `server/FinanceTracker.Web.Server/Pages/_Layout.cshtml`、`src/FinanceTracker.App/wwwroot/index.html` | 加载页标记（`#app` 之外）、`<html data-ft-boot>`、`boot.css` 在 `ui.css` 之后、`boot.js` 在 Blazor 之前、CDN 资源移出 `<head>`、删除旧的「正在加载」 |
 | 原生 | `Resources/Splash/splash.svg`、`FinanceTracker.App.csproj` | 新启动图（画布 108、方块 96）；`MauiSplashScreen Color="#5C2EF7" BaseSize="108,108"` |
 | 原生 | `Resources/AppIcon/appicon.svg` + `appiconfg.svg`（新）、删除 `appicon.png`、csproj 的 `MauiIcon` | 应用图标换成同一个 Logo（渐变背景层 + 白色钱包前景层） |
-| 原生 | `MainPage.xaml` | `BackgroundColor="#5C2EF7"`（WebView 画出来之前露出的就是它） |
+| 原生 | `MainPage.xaml` | `BackgroundColor="#5C2EF7"`（页面容器的底色；**注意**：原先写的「WebView 画出来之前露出的就是它」不成立，见下文「后续：一帧白屏」） |
+| 原生（后续） | `MainPage.xaml.cs`、`Platforms/Android/MainActivity.cs` | 白屏闪动的修复：WebView 底色（两个平台）与 Android 窗口背景，见下文「后续：一帧白屏」 |
 | 原生 | `Platforms/Android/MainActivity.cs`、`Platforms/Android/Resources/values/styles.xml` | 启动主题 `Ft.SplashTheme`（继承 `Maui.SplashTheme`，状态栏图标白色） |
 | 原生 | `Platforms/iOS/Info.plist` | `UIStatusBarStyle = UIStatusBarStyleLightContent` |
 | 测试 | `tests/e2e/boot_test.py`（新）、`e2e_base.py`、`README.md` | 58 项 E2E；基座的 `wait_circuit_ready` 等到加载页收走且 CDN 资源尘埃落定 |
@@ -58,7 +59,7 @@
   做过变异检查（故意破坏交接终点、故意关掉降级覆盖，对应断言确实会失败）。
 - **单元测试**：全量 2023/2023 通过。冷启动新增 9 项：令牌与原生资源取值一致、两个宿主的加载页标记一字不差、`boot.css` 不用 iOS 14 不支持的特性、图表一律经 `EChartsView`（扫描所有 `.razor`）等；都做过变异检查。
 - **最终回归**：见下一节。
-- **原生资源**：Android 目标构建通过，生成的启动图 / 自适应图标分层 / 各 dpi 尺寸逐项量过（截图见 `screenshots/07`、`08`）；**iOS 没有构建**，真机 / 模拟器上没有点开过。
+- **原生资源**：Android 目标构建通过，生成的启动图 / 自适应图标分层 / 各 dpi 尺寸逐项量过（截图见 `screenshots/07`、`08`）；iOS 当时没有构建（后来补测：iOS 目标在本机能编译通过，见「后续：一帧白屏」），真机 / 模拟器上没有点开过。
 
 | 失败兜底卡片 | 超过 0.6 s 出现转圈 |
 |---|---|
@@ -98,7 +99,7 @@
 
 - [ ] **Android 12+**：点图标 → 紫色底 + 扁平 Logo 方块，没有白闪；方块没有被圆形遮罩裁切；状态栏图标是白色；启动画面 → 加载页首帧**没有一帧色差或跳变**（方块位置 / 大小 / 底色）。
 - [ ] **Android 11 及以下**（`windowBackground` 路径）与几家常见厂商 ROM 上同样检查。
-- [ ] **iOS**（模拟器 + 真机）：由 `splash.svg` 生成的启动图 → 加载页首帧是否一致；状态栏图标从第一帧起是白色（`UIStatusBarStyle`）。**本次没有构建过 iOS 目标。**
+- [ ] **iOS**（模拟器 + 真机）：由 `splash.svg` 生成的启动图 → 加载页首帧是否一致；状态栏图标从第一帧起是白色（`UIStatusBarStyle`）。（iOS 目标后来在本机编译通过，但没有链接 / 运行过。）
 - [ ] **应用图标**：Android 自适应图标（圆形 / 方圆形 / 水滴）与 iOS 圆角蒙版下的观感；删除 `appicon.png` 之后各平台的图标生成没有报错、没有回退到旧图。
 - [ ] **已登录冷启动**：幕布收拢成 Hero，中低端 Android 上是否掉帧（`height` + `border-radius` 过渡，只在 `position: fixed` 的加载页里，但没有在低端机上测过）。
 - [ ] **未登录冷启动**：Logo 滑到登录页 Logo 的位置、面板升起。
@@ -110,6 +111,35 @@
   量过「点图标 → 外壳就绪」的分布（尤其低端机）再调；失败卡片在真机上很难自然触发，要看样子可以临时把 `watchdogMs` 改小（宿主页在 `boot.js` 之前设置 `window.FT_BOOT_TIMINGS`）。
 - [ ] CDN **连得上却一直不返回**（挂起）时，统计页图表位置会一直是骨架，直到浏览器自己判定超时——只验证过「脚本加载失败」与「脚本很晚才到」。
 
+## 后续：冷启动仍有一帧白屏（用户反馈）
+
+**根因**（上面设计里「`MainPage` 紫底是 WebView 画出来之前露出的」这个假设不成立）：
+
+| 平台 | 白色从哪来 | 证据 |
+|---|---|---|
+| Android | 原生 WebView 在网页首次绘制前画 Chromium 默认的白色，盖住 `MainPage` 的紫色 | `Microsoft.AspNetCore.Components.WebView.Maui` 10.0.30 的 Android 程序集里没有任何 `SetBackgroundColor` 调用 |
+| Android | `MauiAppCompatActivity.OnCreate` 把 `Ft.SplashTheme` 换成 `Maui.MainTheme`，窗口背景变成主题默认的白色（深色模式是黑色）；Android 11 及以下的启动画面就是 `windowBackground`，换主题那一刻同样露白 | 生成的 `maui_splash.xml` 是 `windowBackground` 用的 layer-list（`maui_splash_color` + 居中图）；窗口背景在换主题后不再是它 |
+| iOS | `WKWebView` 默认不透明，首次绘制前画白色；MAUI 只把 `BackgroundColor` 设成 `Clear`，没关 `Opaque` | iOS 程序集里有 `set_BackgroundColor`、没有 `set_Opaque` / `UnderPageBackgroundColor` |
+
+**修法**（只动原生，不改 Web 层）：
+
+| 文件 | 内容 |
+|---|---|
+| `src/FinanceTracker.App/MainPage.xaml.cs` | `BlazorWebViewInitialized` 两个平台都接（原先只接 iOS）。该事件在 WebView 创建之后、开始加载页面之前触发，赶在第一帧前：Android `SetBackgroundColor`；iOS `Opaque = false` + `BackgroundColor` / `ScrollView.BackgroundColor` / `UnderPageBackgroundColor`（iOS 15+，最低支持 14 所以要判断版本）。颜色取自页面自己的 `BackgroundColor`（单一来源，不再写第二份） |
+| `src/FinanceTracker.App/Platforms/Android/MainActivity.cs` | `ApplyLaunchBackground()` 紧跟 `base.OnCreate`，把窗口背景压成 `maui_splash_color`（MAUI 按 csproj 的 `MauiSplashScreen Color` 生成，与系统启动画面同一个资源） |
+| `tests/unit/.../DesignTokensTests.cs` | 两条守卫：`冷启动不闪白_原生WebView的底色取自MainPage的启动底色_两个平台都处理`、`冷启动不闪白_Android窗口背景在主题切换之后立刻压成启动画面的底色`（两个平台都接事件 / 调用齐全 / 顺序在 `base.OnCreate` 之后 / 不写死颜色） |
+
+**验证了什么**
+
+- Android、iOS 两个目标在本机都编译通过（0 警告 0 错误；iOS 对着 `Microsoft.iOS` 26.5 的参考程序集，没有 Mac 也能编译），产物里确认带上了新调用（`SetBackgroundColor` / `SetBackgroundDrawable` / `set_Opaque` / `set_UnderPageBackgroundColor`）。
+- 守卫单测通过；做过变异检查：把两个原生文件还原成旧代码，两条新测试都红，换回新代码后全绿。
+
+**没有验证（必须真机 / 模拟器逐帧看）**
+
+- 这一帧白屏是否真的消失。本机没有 Android 模拟器镜像（`system-images` 为空、没有 AVD），也没有 Mac，所以没有跑起来过——结论来自对 MAUI 包的取证 + 编译，不是录屏。
+- 要看的场景：Android 12+、Android 11 及以下、系统深色模式开着、iOS 14 与 15+；录屏逐帧确认启动画面到加载页首帧之间没有非紫色的帧（Android：`adb shell screenrecord`；iOS：慢动作录屏）。
+- iOS 15+ 显式设置 `UnderPageBackgroundColor` 后，整页橡皮筋回弹露出的会是紫色（原先是 WebKit 按页面背景自动取色）；应用没有给整页回弹做处理，这一点要在真机上拉一下看看能不能接受。
+
 ## 复跑
 
 ```powershell
@@ -119,8 +149,9 @@ python tests/e2e/boot_test.py
 # 单元测试（令牌 / 原生资源 / 宿主页一致性）
 dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj --filter "FullyQualifiedName~DesignTokensTests"
 
-# 原生资源（Android；iOS 目标需要 macOS 构建主机）
+# 原生资源与原生代码的编译检查（Android；iOS 目标在 Windows 上只能编译，不能链接 / 签名 / 运行，要运行需要 macOS 构建主机）
 dotnet build src/FinanceTracker.App/FinanceTracker.App.csproj -f net10.0-android
+dotnet build src/FinanceTracker.App/FinanceTracker.App.csproj -f net10.0-ios
 ```
 
 `tests/e2e/server.ps1` 的输出不要接管道（会让 shell 挂住），需要时重定向到文件。

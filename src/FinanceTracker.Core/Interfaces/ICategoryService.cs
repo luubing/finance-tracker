@@ -31,9 +31,9 @@ public interface ICategoryService
     Task<Category> CreateCategoryAsync(Category category);
 
     /// <summary>
-    /// 更新自定义分类
+    /// 更新自定义分类：名称 / 图标 / 类型 / 排序 / 「不计入统计」开关都按传入的值整体覆盖（不是「只改传了的字段」）
     /// </summary>
-    /// <param name="category">分类信息</param>
+    /// <param name="category">分类信息，字段要带完整；REST 里「请求没带开关 = 保持原值」由控制器先合并成完整实体再调用这里</param>
     /// <returns>更新的分类</returns>
     Task<Category> UpdateCategoryAsync(Category category);
 
