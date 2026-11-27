@@ -20,17 +20,13 @@ namespace FinanceTracker.App;
 
 public static class MauiProgram
 {
-    /// <summary>
-    /// 云端 API 基址（只需域名/根路径，不要带 /api 后缀，因为 HttpCloudSyncClient 会统一拼上 /api/）。
-    /// Android 模拟器通过 10.0.2.2 访问宿主机；真机（或生产环境）请改为 API 的实际域名/地址。
-    /// 注意：端口必须与 FinanceTracker.Api 实际绑定端口一致，否则同步会因连接失败而无数据。
-    /// 开发环境（docker-compose）API 监听 5270；若用 dotnet run 则本地开发默认为 5065，请同步修改。
-    /// 同时 Android 已允许明文 HTTP（见 AndroidManifest.xml 的 usesCleartextTraffic）。
-    /// </summary>
-    private const string CloudApiBaseUrl = "https://finance.peiran.site/";
-
     public static MauiApp CreateMauiApp()
     {
+        // 云端 API 基址：打包时由 -p:CloudApiBaseUrl 写入程序集元数据，这里读出并校验（带不带结尾的 /api 都行，会规整）。
+        // 源码里不内置任何线上域名；日常开发的默认值（本机 dotnet run 的 API：Android 模拟器 10.0.2.2:5065、其余 localhost:5065）
+        // 与"发布必须显式指定"的规则都在 FinanceTracker.App.csproj，详见 README「构建与发布」
+        var cloudApiBaseUrl = CloudApiBaseUrlResolver.FromAssembly(typeof(MauiProgram).Assembly);
+
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
@@ -198,10 +194,10 @@ public static class MauiProgram
         builder.Services.AddScoped<IBillVoiceParser, BillVoiceParser>();
         builder.Services.AddScoped<BillVoiceInputService>();
         builder.Services.AddScoped<ICloudSyncClient>(sp =>
-            new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), CloudApiBaseUrl));
+            new HttpCloudSyncClient(sp.GetRequiredService<HttpService>(), cloudApiBaseUrl));
 
         // 注册 HttpClient（设置基址以支持相对路径的 API 调用，如导入接口）
-        builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(CloudApiBaseUrl) });
+        builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(cloudApiBaseUrl) });
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
