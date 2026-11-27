@@ -53,6 +53,14 @@ check_dependencies() {
         exit 1
     fi
 
+    # 云端 API 地址：打包出的 App 靠它连服务器同步。仓库不内置任何线上域名，必须自己填
+    # （App 项目文件在 dotnet publish 时也会拦截没指定地址的情况）
+    if [ -z "${CLOUD_API_BASE_URL//[[:space:]]/}" ]; then
+        print_error "CLOUD_API_BASE_URL 未配置：打包出的 App 需要知道云端服务器地址"
+        print_info "请在 $CONFIG_FILE 中设置，例如 CLOUD_API_BASE_URL=\"https://finance.example.com/\""
+        exit 1
+    fi
+
     # Android 打包检查
     if [ "$BUILD_ANDROID" = "true" ]; then
         if [ ! -f "$PROJECT_ROOT/$ANDROID_KEYSTORE_PATH" ]; then
@@ -133,6 +141,7 @@ build_android() {
     dotnet publish src/FinanceTracker.App/FinanceTracker.App.csproj \
         -f net10.0-android \
         -c Release \
+        -p:CloudApiBaseUrl="$CLOUD_API_BASE_URL" \
         -o "$PROJECT_ROOT/build/output/android"
 
     # 查找生成的 APK 文件
@@ -160,6 +169,7 @@ build_ios() {
     dotnet publish src/FinanceTracker.App/FinanceTracker.App.csproj \
         -f net10.0-ios \
         -c Release \
+        -p:CloudApiBaseUrl="$CLOUD_API_BASE_URL" \
         -o "$PROJECT_ROOT/build/output/ios"
 
     # 查找生成的 IPA 文件
@@ -189,20 +199,23 @@ upload_to_pgyer() {
         return 1
     fi
 
-    # 构建上传参数
-    local upload_params="-F \"file=@$file_path\" -F \"_api_key=$PGYER_API_KEY\""
+    # 构建上传参数：用数组，不要拼成字符串再 eval——口令里带 $、引号、反引号时拼接会出错，甚至被当成命令执行
+    local curl_args=(-F "file=@$file_path" -F "_api_key=$PGYER_API_KEY")
 
+    # 蒲公英 apiv2：buildInstallType=2 表示密码安装，口令放 buildPassword（官方文档「上传与发布」，
+    # 与 .github/workflows/build-ios.yml 一致）。此前写的 password= 不在 apiv2 的参数表里，设了口令也不会生效——
+    # 不传 / 传空就是公开安装
     if [ -n "$PGYER_INSTALL_PASSWORD" ]; then
-        upload_params="$upload_params -F \"password=$PGYER_INSTALL_PASSWORD\""
+        curl_args+=(-F "buildInstallType=2" -F "buildPassword=$PGYER_INSTALL_PASSWORD")
     fi
 
     if [ -n "$PGYER_CHANNEL_PASSWORD" ]; then
-        upload_params="$upload_params -F \"channelPassword=$PGYER_CHANNEL_PASSWORD\""
+        curl_args+=(-F "channelPassword=$PGYER_CHANNEL_PASSWORD")
     fi
 
     # 上传文件
     print_info "正在上传，请稍候..."
-    local response=$(eval curl -w "\"\\n%{http_code}\"" $upload_params \
+    local response=$(curl -w "\n%{http_code}" "${curl_args[@]}" \
         "https://www.pgyer.com/apiv2/app/upload" 2>/dev/null)
 
     local http_code=$(echo "$response" | tail -n1)
@@ -234,7 +247,7 @@ upload_to_pgyer() {
 generate_report() {
     print_separator
     print_info "构建报告"
-    print_separator"
+    print_separator
 
     echo "应用名称: 记账本"
     echo "版本号: $APP_VERSION"
@@ -250,14 +263,14 @@ generate_report() {
         echo "iOS IPA: $(cat "$PROJECT_ROOT/build/output/ios_ipa_path.txt")"
     fi
 
-    print_separator"
+    print_separator
 }
 
 # 主函数
 main() {
     print_separator
     print_info "FinanceTracker 打包上传脚本"
-    print_separator"
+    print_separator
 
     # 解析参数
     BUILD_ANDROID=false

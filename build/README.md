@@ -11,6 +11,7 @@
 | `build.sh` | Linux/macOS 打包脚本 |
 | `build.ps1` | Windows PowerShell 打包脚本 |
 | `myapp.keystore` | Android 签名密钥（需自行生成） |
+| `certificates/` | iOS 签名材料的工作区与说明（私钥 / 证书等敏感文件不入库），见 [certificates/README.md](certificates/README.md) |
 
 ## 🚀 快速开始
 
@@ -34,6 +35,9 @@ cp config.example.env config.env
 | `ANDROID_KEY_ALIAS` | 密钥别名 | `myapp` |
 | `ANDROID_KEY_PASSWORD` | 密钥密码 | `your_password` |
 | `PGYER_API_KEY` | 蒲公英 API Key | `xxxxxxxx` |
+| `CLOUD_API_BASE_URL` | 打出的 App 连接的云端 API 根地址（仓库不内置线上域名，不填脚本直接报错） | `https://finance.example.com/` |
+
+`CLOUD_API_BASE_URL` 由脚本通过 `-p:CloudApiBaseUrl=...` 注入 App：只写域名或根路径，带不带结尾的 `/` 都行（结尾的 `/api` 会被自动去掉），不能带用户名密码、`?` 查询参数。不用脚本、直接 `dotnet publish` 时也要自己加这个参数（发布构建不指定会报错；调试构建有本机默认值，见根目录 README「构建与发布」）。
 
 #### 可选配置
 
@@ -101,7 +105,7 @@ chmod +x build/build.sh
 ```
 build/output/
 ├── android/              # Android APK 文件
-│   └── com.financetracker.app.apk
+│   └── com.finance.tracker.app.apk
 ├── ios/                  # iOS IPA 文件 (仅 macOS)
 │   └── FinanceTracker.App.ipa
 ├── android_apk_path.txt  # APK 文件路径

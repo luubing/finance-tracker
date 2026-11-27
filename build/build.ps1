@@ -1,4 +1,4 @@
-# ===========================================
+﻿# ===========================================
 # FinanceTracker 打包上传脚本 (Windows)
 # 支持 Android/iOS 打包并上传到蒲公英
 # ===========================================
@@ -82,6 +82,14 @@ function Test-Dependencies {
         exit 1
     }
 
+    # 云端 API 地址：打包出的 App 靠它连服务器同步。仓库不内置任何线上域名，必须自己填
+    # （App 项目文件在 dotnet publish 时也会拦截没指定地址的情况）
+    if ([string]::IsNullOrWhiteSpace($CLOUD_API_BASE_URL)) {
+        Write-Error "CLOUD_API_BASE_URL 未配置：打包出的 App 需要知道云端服务器地址"
+        Write-Info "请在 $CONFIG_FILE 中设置，例如 CLOUD_API_BASE_URL=`"https://finance.example.com/`""
+        exit 1
+    }
+
     # Android 打包检查
     if ($Android -or $All) {
         $keystorePath = Join-Path $PROJECT_ROOT $ANDROID_KEYSTORE_PATH
@@ -156,6 +164,7 @@ function Build-Android {
         dotnet publish src\FinanceTracker.App\FinanceTracker.App.csproj `
             -f net10.0-android `
             -c Release `
+            "-p:CloudApiBaseUrl=$CLOUD_API_BASE_URL" `
             -o build\output\android
 
         # 查找生成的 APK 文件
@@ -195,6 +204,7 @@ function Build-iOS {
         dotnet publish src\FinanceTracker.App\FinanceTracker.App.csproj `
             -f net10.0-ios `
             -c Release `
+            "-p:CloudApiBaseUrl=$CLOUD_API_BASE_URL" `
             -o build\output\ios
 
         # 查找生成的 IPA 文件
@@ -240,8 +250,11 @@ function Upload-ToPgyer {
         "-F", "_api_key=$PGYER_API_KEY"
     )
 
+    # 蒲公英 apiv2：buildInstallType=2 表示密码安装，口令放 buildPassword（官方文档「上传与发布」，
+    # 与 .github/workflows/build-ios.yml 一致）。此前写的 password= 不在 apiv2 的参数表里，设了口令也不会生效——
+    # 不传 / 传空就是公开安装
     if ($PGYER_INSTALL_PASSWORD) {
-        $curlArgs += "-F", "password=$PGYER_INSTALL_PASSWORD"
+        $curlArgs += "-F", "buildInstallType=2", "-F", "buildPassword=$PGYER_INSTALL_PASSWORD"
     }
 
     if ($PGYER_CHANNEL_PASSWORD) {
@@ -252,7 +265,8 @@ function Upload-ToPgyer {
 
     Write-Info "正在上传，请稍候..."
     try {
-        $response = & curl @curlArgs 2>$null | ConvertFrom-Json
+        # 必须写 curl.exe：Windows PowerShell 5.1 里 curl 是 Invoke-WebRequest 的别名，不认 -F
+        $response = & curl.exe @curlArgs 2>$null | ConvertFrom-Json
 
         if ($response.code -eq 0) {
             Write-Success "上传成功！"

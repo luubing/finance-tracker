@@ -1,13 +1,49 @@
 @echo off
+setlocal
+
 echo ===========================================
 echo iOS Certificate Converter
 echo ===========================================
 echo.
 
-set OPENSSL="C:\Program Files\Git\mingw64\bin\openssl.exe"
 set CERT_FILE=ios_distribution.cer
 set PROFILE_FILE=FinanceTracker_Distribution.mobileprovision
-set P12_PASSWORD=financeTracker
+
+rem ---- openssl: OPENSSL_BIN (full path) > openssl on PATH > the copy bundled with Git for Windows ----
+set "OPENSSL="
+rem (keep these two checks flat: "exit /b 1" in a nested block that has more commands after it returns exit code 0)
+if defined OPENSSL_BIN if not exist "%OPENSSL_BIN%" (
+    echo ERROR: OPENSSL_BIN does not point to an existing file
+    pause
+    exit /b 1
+)
+if defined OPENSSL_BIN set "OPENSSL=%OPENSSL_BIN%"
+if not defined OPENSSL where openssl >nul 2>nul && set "OPENSSL=openssl"
+if not defined OPENSSL if exist "%ProgramFiles%\Git\mingw64\bin\openssl.exe" set "OPENSSL=%ProgramFiles%\Git\mingw64\bin\openssl.exe"
+if not defined OPENSSL (
+    echo ERROR: openssl not found.
+    echo Install Git for Windows, or set OPENSSL_BIN to the full path of openssl.exe
+    pause
+    exit /b 1
+)
+
+rem ---- .p12 export password ----
+rem Never hard-code it: use the P12_PASSWORD environment variable if you set one,
+rem otherwise generate a random one for this run. It is passed to openssl through the
+rem environment (not the command line). A generated one touches the disk only through
+rem a temp file in %TEMP% that is deleted right after it is read.
+set "P12_PASSWORD_GENERATED="
+if not defined P12_PASSWORD (
+    "%OPENSSL%" rand -hex 16 > "%TEMP%\ft_p12_pw.tmp"
+    set /p P12_PASSWORD=<"%TEMP%\ft_p12_pw.tmp"
+    del "%TEMP%\ft_p12_pw.tmp" >nul 2>nul
+    set "P12_PASSWORD_GENERATED=1"
+)
+if not defined P12_PASSWORD (
+    echo ERROR: could not generate a .p12 password
+    pause
+    exit /b 1
+)
 
 echo [1/5] Check files...
 
@@ -27,6 +63,7 @@ if not exist "%PROFILE_FILE%" (
 
 if not exist "ios_distribution.key" (
     echo ERROR: Private key not found: ios_distribution.key
+    echo See README.md, step 0, for how to generate the key and the CSR
     pause
     exit /b 1
 )
@@ -35,7 +72,7 @@ echo OK: All files found
 echo.
 
 echo [2/5] Convert certificate format...
-%OPENSSL% x509 -in "%CERT_FILE%" -inform DER -out ios_distribution.pem -outform PEM
+"%OPENSSL%" x509 -in "%CERT_FILE%" -inform DER -out ios_distribution.pem -outform PEM
 if errorlevel 1 (
     echo ERROR: Certificate conversion failed
     pause
@@ -45,7 +82,7 @@ echo OK: Certificate converted
 echo.
 
 echo [3/5] Generate .p12 file...
-%OPENSSL% pkcs12 -export -inkey ios_distribution.key -in ios_distribution.pem -out ios_distribution.p12 -passout pass:%P12_PASSWORD%
+"%OPENSSL%" pkcs12 -export -inkey ios_distribution.key -in ios_distribution.pem -out ios_distribution.p12 -passout env:P12_PASSWORD
 if errorlevel 1 (
     echo ERROR: .p12 generation failed
     pause
@@ -68,7 +105,7 @@ echo ===========================================
 echo SUCCESS! All files generated.
 echo ===========================================
 echo.
-echo Files created:
+echo Files created (all git-ignored, keep them private):
 echo   - ios_distribution.p12
 echo   - certificate_base64.txt
 echo   - profile_base64.txt
@@ -76,6 +113,13 @@ echo.
 echo Next steps:
 echo   1. Copy certificate_base64.txt content to GitHub Secret: APPLE_CERTIFICATE
 echo   2. Copy profile_base64.txt content to GitHub Secret: APPLE_PROVISIONING_PROFILE
-echo   3. Set APPLE_CERTIFICATE_PASSWORD to: %P12_PASSWORD%
+if defined P12_PASSWORD_GENERATED (
+    echo   3. Set GitHub Secret APPLE_CERTIFICATE_PASSWORD to the random password below.
+    echo      It is shown only this once and is NOT saved anywhere - paste it into the secret now.
+    echo.
+    echo        %P12_PASSWORD%
+) else (
+    echo   3. Set GitHub Secret APPLE_CERTIFICATE_PASSWORD to the P12_PASSWORD you provided.
+)
 echo.
 pause
