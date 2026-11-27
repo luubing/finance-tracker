@@ -126,6 +126,7 @@ build/certificates/*.key
 build/certificates/*.p12
 build/certificates/*.pem
 build/certificates/*.cer
+build/certificates/*.csr
 build/certificates/*.mobileprovision
 /2026-09.csv
 
@@ -135,6 +136,9 @@ design_time.db
 ## .scratch 下的一次性调试脚本（issue 文档仍受跟踪）
 .scratch/*.sh
 .scratch/*.py
+
+## .scratch/cold-start 静态还原页引用的 Masa 样式副本（从 NuGet 包复制，说明见各 HTML 里的注释）
+.scratch/cold-start/masa-blazor.min.css
 
 ## E2E 调试产物（截图 / 页面快照）
 tests/e2e/screenshots/
