@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using FinanceTracker.Core.Exceptions;
 
 namespace FinanceTracker.Web.Services;
 
@@ -127,6 +128,9 @@ public class HttpService
     /// 且本地已保存手机号，则调用云端 /api/auth/login 换取 token 并持久化。
     /// 已持有匹配的 token 或未登录时不做任何事。失败静默（由后续请求报错）；
     /// 调用方主动取消（<paramref name="cancellationToken"/>）不算"失败"，照常向上抛出。
+    /// 唯一的例外：云端以 403 拒绝登录（启用了手机号白名单、当前手机号不在名单内）时抛出
+    /// <see cref="ForbiddenAccessException"/>——这是"无权使用这个云端"，静默放行的话后续请求没有令牌会 401，
+    /// 客户端会把它当成登录过期而登出本地账号。
     /// </summary>
     private async Task EnsureRemoteTokenAsync(CancellationToken cancellationToken)
     {
@@ -158,6 +162,14 @@ public class HttpService
                 "application/json");
 
             using var loginResponse = await _httpClient.PostAsync("api/auth/login", content, cancellationToken);
+            if (loginResponse.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                // 注意与 401 的区别（见 ForbiddenAccessException）：权限拒绝不能让用户被登出，也不能静默放行
+                throw new ForbiddenAccessException(
+                    await ReadServerMessageAsync(loginResponse, cancellationToken)
+                    ?? "云端拒绝了登录请求（HTTP 403），可能是该手机号未获云端服务的使用许可");
+            }
+
             if (!loginResponse.IsSuccessStatusCode)
             {
                 return;
@@ -181,10 +193,47 @@ public class HttpService
             // 吞掉的话会接着发后面的业务请求（它马上也会因取消而失败），白白多做一轮
             throw;
         }
+        catch (ForbiddenAccessException)
+        {
+            // 云端明确拒绝这个手机号（手机号白名单）：要让调用方看到原因，不能当作"换取失败"吞掉
+            throw;
+        }
         catch
         {
             // 远端换取 token 失败（离线/服务不可用等）不影响本地功能，后续请求会再试
         }
+    }
+
+    /// <summary>
+    /// 读取云端错误响应里的提示文案（控制器统一返回 { message }，全局异常中间件返回 { error }）；读不到返回 null。
+    /// </summary>
+    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (var name in new[] { "message", "error" })
+            {
+                if (doc.RootElement.TryGetProperty(name, out var element)
+                    && element.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(element.GetString()))
+                {
+                    return element.GetString();
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // 不是 JSON（例如反向代理 / WAF 返回的 HTML 403 页面）：用调用方的默认文案
+        }
+
+        return null;
     }
 
     /// <summary>

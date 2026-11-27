@@ -1,5 +1,6 @@
 using FinanceTracker.Api.Services;
 using FinanceTracker.Core.Interfaces;
+using FinanceTracker.Core.Services;
 using FinanceTracker.Shared.Validators;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,11 +15,19 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly ITokenService _tokenService;
+    private readonly PhoneAllowList _allowList;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService, ITokenService tokenService)
+    public AuthController(
+        IAuthService authService,
+        ITokenService tokenService,
+        PhoneAllowList allowList,
+        ILogger<AuthController> logger)
     {
         _authService = authService;
         _tokenService = tokenService;
+        _allowList = allowList;
+        _logger = logger;
     }
 
     /// <summary>
@@ -33,6 +42,17 @@ public class AuthController : ControllerBase
         if (!validationResult.IsValid)
         {
             return BadRequest(new { message = validationResult.ErrorMessage });
+        }
+
+        // 手机号白名单（可选，默认关闭）：必须先于 RegisterOrLoginAsync——被拒绝的号码不能在库里留下一个新用户。
+        // 403 而不是 401（架构决策 7）：401 会让客户端当成"登录过期"而登出本地账号；
+        // 注意不要用 Forbid(string)：参数是认证方案名而不是消息，误用会导致 500
+        if (!_allowList.IsAllowed(request.PhoneNumber))
+        {
+            _logger.LogWarning(
+                "手机号不在白名单内，已拒绝登录 / 注册：{PhoneNumber}",
+                PhoneNumberMasker.Mask(request.PhoneNumber));
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = PhoneAllowList.DeniedMessage });
         }
 
         var user = await _authService.RegisterOrLoginAsync(request.PhoneNumber);

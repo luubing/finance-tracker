@@ -41,6 +41,12 @@ if (string.IsNullOrWhiteSpace(jwtSettings.Issuer) || string.IsNullOrWhiteSpace(j
 // 非 Development 环境禁止沿用仓库内公开的占位密钥（漏覆盖时任何人都能伪造 JWT）
 StartupSecurityChecks.EnsureJwtSecretKeyIsNotPlaceholder(jwtSettings.SecretKey, builder.Environment.IsDevelopment());
 
+// 手机号白名单（可选，默认关闭）：云端登录只凭手机号、没有验证码，公开部署时可用它把云端限定在自己人范围内。
+// 配置 Auth:AllowedPhoneNumbers（环境变量 Auth__AllowedPhoneNumbers，英文逗号分隔）后，名单外的手机号不能登录 / 注册，
+// 已签发的令牌也会被拦下（见 PhoneAllowListMiddleware）。详见 docs/adr/0009-cloud-access-hardening.md 与 SECURITY.md
+var phoneAllowList = PhoneAllowList.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(phoneAllowList);
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -108,6 +114,25 @@ if (!app.Environment.IsDevelopment() &&
         "数据库连接串仍在使用默认口令 postgres，请通过环境变量 ConnectionStrings__DefaultConnection 或 appsettings.Production.json 覆盖");
 }
 
+// 手机号白名单的启动状态：启用时只记数量（手机号等同登录凭据，不进日志）；名单里有格式不对的条目时告警——
+// 它们永远匹配不上任何人，多半是分隔符写错了（要用英文逗号分隔，每个号码 11 位）
+if (phoneAllowList.IsEnabled)
+{
+    app.Logger.LogInformation("手机号白名单已启用，共 {Count} 个号码（{Key}）", phoneAllowList.Count, PhoneAllowList.ConfigurationKey);
+    if (phoneAllowList.InvalidEntryCount > 0)
+    {
+        app.Logger.LogWarning(
+            "手机号白名单里有 {Count} 个条目不是 11 位手机号，永远匹配不上任何人（请用英文逗号分隔，每个号码 11 位）",
+            phoneAllowList.InvalidEntryCount);
+    }
+}
+else if (!app.Environment.IsDevelopment())
+{
+    app.Logger.LogWarning(
+        "手机号白名单未启用：任何人只要知道一个手机号，就能注册并登录对应账号。仅自用 / 家用的部署建议配置 {Key}（环境变量 Auth__AllowedPhoneNumbers），详见 SECURITY.md",
+        PhoneAllowList.ConfigurationKey);
+}
+
 // Configure the HTTP request pipeline.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
@@ -119,6 +144,8 @@ app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 
 app.UseAuthentication();
+// 必须在认证之后：已认证请求的令牌手机号不在白名单内就回 403（名单未启用时什么都不做）
+app.UseMiddleware<PhoneAllowListMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
