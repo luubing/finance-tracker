@@ -32,9 +32,11 @@ dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj
 powershell -File tests/e2e/server.ps1 -Action start
 python tests/e2e/run_all.py
 
-# EF Core 数据库迁移 (在 server 目录下)
-dotnet ef migrations add <MigrationName> --project ../src/FinanceTracker.Infrastructure
-dotnet ef database update --project ../src/FinanceTracker.Infrastructure
+# EF Core 数据库迁移：SQLite / PostgreSQL 两套迁移历史各生成一份（在仓库根目录执行；
+# 应用启动时会自动 MigrateAsync，不需要手动 database update；ModelSnapshotTests 守着两套快照与模型一致）
+dotnet ef migrations add <MigrationName> --project src/FinanceTracker.Infrastructure.Sqlite
+export FT_DB_PROVIDER=postgresql   # PowerShell：$env:FT_DB_PROVIDER = 'postgresql'；设计时工厂默认走 SQLite，生成 Npgsql 迁移要先切
+dotnet ef migrations add <MigrationName> --project src/FinanceTracker.Infrastructure
 ```
 
 ## 技术栈
@@ -101,6 +103,8 @@ server/
 9. **同步身份与时间戳**: 本地库与云端库各自生成用户 Id（同一账号在云端是 C，在各设备上分别是 LA/LB），`SyncService` 在同步边界把云端返回的"我"映射回本地用户 Id，历史上误挂在云端 Id 名下的数据每次同步幂等归还；同步代码在 `SyncTimestampScope` 内保存，不自动盖 `UpdatedAt`（标记同步状态不算编辑），采用云端版本时沿用云端的 `UpdatedAt`；服务端推送账本时所有者以 JWT 为准，不信任 DTO 的 `OwnerId`；云端令牌必须属于当前登录手机号（换号即作废，复用前核对令牌里的手机号）；服务端处理客户端推送时不得创建全局预设（`allowCreatePreset=false`）；成员关系的本地合并只走 `ISyncService.MergeLedgerMembersAsync`；读路径（页面加载顺带联网刷新账本成员缓存）不得被不可用的云端拖住——只给 `CloudAvailability` 的短期限（3 秒，真正取消请求），失败后 30 秒内直接读本地缓存，用户主动操作后的刷新不受此限；详见 docs/adr/0006-sync-identity-and-timestamps.md
 10. **视觉体系（iOS 风格、仅浅色）**: 样式的唯一来源是 `src/FinanceTracker.Web/wwwroot/css/tokens.css` 的 `--ft-*` 令牌（C# 侧给图表用的同值常量只放在 `Design/DesignTokens.cs`），页面只用 `Components/Ui` 的复用组件 + 令牌——Razor 里不写静态内联样式、不写死颜色，除白名单（`MApp` / `MErrorHandler` / `PPageStack` / `PStackPageBar` / `MECharts`）外不用 MASA 控件（`VisualSystemGuardTests` 扫描源码拦截）。应用壳是四个一级 Tab（首页 / 账单 / 统计 / 我的）+ 独立的「记一笔」圆钮：**切换 Tab 只用 `NavigationManager.NavigateTo(根路径)`，不得对 Tab 根路径 `Push`**；四个 Tab 的刷新只靠下拉（`PullToRefresh`，只重读本页数据、不联网同步），导航栏 / Hero 里不放刷新按钮（用户拍板，新增页面也不要补）；二级页面用 `SecondaryPage`，弹层（Sheet / Alert / ActionSheet）走 `OverlayBase`；每屏同时叠加的玻璃（`backdrop-filter`）≤ 3 层，玻璃只取 `--ft-glass-*` 令牌（「降低透明度」「低端设备」「不支持 backdrop-filter」三条降级路径共用一组不透明令牌）；金额统一经 `AmountDisplay`；安全区只读 `--ft-safe-*` 变量、不直接用 `env()`；Tab 栏（及与它同口径的 Toast / 多选操作栏 / 一级页面底部留白）的距底只经 `--ft-tabbar-offset`——Tab 栏下沿离屏幕底 21，iPhone 上压住 Home 指示条所在的安全区，只有键盘 / Android 三键导航栏这类实心占用才再避开（宿主经 `SafeAreaInsets.BottomIndicator` 上报「只是指示条」的部分，页面内容与 Sheet 仍避开整个 `--ft-safe-bottom`），不得再自己拼「`--ft-tabbar-bottom` + `--ft-safe-bottom`」（见 ADR 0007 §29）；原生能力（安全区 / 状态栏 / 触感 / 渲染降级）经 Web 层接口抽象，由 MAUI 宿主实现、Web.Server 提供空实现。UI 重构只改展示——不改实体 / 迁移 / REST / 同步 / 权限 / 时区 / 预算规则 / 导入解析；详见 docs/adr/0007-ios-visual-system.md
 11. **分类的「不计入统计」**: `Category.ExcludeFromStatistics`（只给当前用户自己的自定义分类；预设分类没有开关）让该分类的账单不参与统计（月度 / 趋势 / 年度 / 自定义报表）、首页本月概览与预算（总预算 / 账本预算 / 分类预算的已用金额、超支提醒），**账单列表和账单 Tab 汇总卡不排除**（列表行上带「不计入统计」标记）。口径只写在 `Core/Services/StatisticsScope`，`StatisticsService` / `BudgetService` 都经它，新增统计 / 预算类查询必须同样经它；开关在查询时按分类**当前**状态判定（不是入库快照），已软删除的被排除分类仍然排除它名下残留的账单；**禁止把"被排除的分类"作为子查询拼进账单查询**——对分类表用的 `IgnoreQueryFilters()` 是整条查询级开关，会连账单的软删除过滤器一起关掉（已删除账单重新计入），必须先单独查出分类 Id（`List<Guid>`）再 `WithoutExcluded(ids)`（回归用例 `StatisticsSoftDeleteTests`）。同步靠 `CategorySyncDto.ExcludeFromStatistics`（整条记录后写入优先；旧客户端推上来的分类会把开关覆盖成「计入」，属已接受的取舍），REST 更新分类时请求不带该字段 = 保持原值；PostgreSQL / SQLite 两套迁移各一份。界面文案统一叫「不计入统计」，文案与展示规则集中在 `Web/Models/ExcludedFromStatisticsPresentation`；详见 docs/adr/0008-category-exclude-from-statistics.md
+
+12. **公开部署的云端访问收口**: 仓库不内置任何线上域名，App 的云端 API 地址在**构建时注入**——MSBuild 属性 `CloudApiBaseUrl` → 程序集元数据 `CloudApiBaseUrl`，运行时由 `FinanceTracker.Web` 的 `CloudApiBaseUrlResolver` 读出并校验（只认 http / https + 主机名，拒绝用户名密码 / 查询 / 片段，自动去掉结尾的 `/api`、补结尾的 `/`）；`dotnet publish`、`build/build.sh` / `build.ps1`、iOS 工作流不指定就直接报错，调试构建默认指向本机开发 API（Android 模拟器 `http://10.0.2.2:5065/`，其余 `http://localhost:5065/`），`dotnet build -c Release` 不算发布、同样用开发默认值。可选的**手机号白名单**（配置 `Auth:AllowedPhoneNumbers` / 环境变量 `Auth__AllowedPhoneNumbers`，默认空 = 关闭）只放在 **Api 项目**（`PhoneAllowList` + `PhoneAllowListMiddleware`），**不进 Core 的 `AuthService`**（MAUI 本地登录与 Web.Server 不受它影响）；名单里有任何条目即启用，条目写错时**失败即关闭**（宁可全部拒绝也不放开，启动时警告），只在启动时读取、改了要重启；两道闸：`AuthController.Login`（在注册 / 登录之前）与中间件（排在 `UseAuthentication` 之后、`UseAuthorization` 之前，按 JWT 里的手机号拦已签发的令牌，顺序由 `PhoneAllowListMiddlewareTests` 守着）；被拒一律 **403** + `{ message }`，**不是 401**（否则客户端会当成登录过期而登出），客户端 `HttpService` 把云端登录的 403 转成 `ForbiddenAccessException`、其余登录失败仍静默。登录本身仍只凭手机号（无验证码），真正的登录加固是另一个产品决策，已知边界与部署检查清单见 SECURITY.md；详见 docs/adr/0009-cloud-access-hardening.md
 
 ## 开发注意事项
 

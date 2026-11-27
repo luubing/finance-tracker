@@ -2,6 +2,9 @@
 
 个人记账应用，支持多支付渠道、分类统计和云端同步。
 
+> **自托管的开源项目**：仓库里没有线上服务地址、测试账号或预置的云端数据。云端服务需要自己部署（见「部署」），App 连接哪台服务器在打包时指定（见「构建与发布」）。
+> 采用 [MIT 许可证](LICENSE)；数据的去向见 [PRIVACY.md](PRIVACY.md)，安全边界与漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+
 ## 功能特性
 
 - **手动记账**：支持支出/收入账单录入
@@ -115,12 +118,18 @@ dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj
 
 ## 数据库迁移
 
-EF Core 迁移操作（在仓库根目录执行）：
+项目有**两套**迁移历史：改了实体或 `ApplicationDbContext` 后要各生成一份（在仓库根目录执行，需要先 `dotnet tool install -g dotnet-ef`）：
 
 ```bash
+# 本地 SQLite（App 与 Web.Server 使用）
+dotnet ef migrations add <MigrationName> --project src/FinanceTracker.Infrastructure.Sqlite
+
+# 云端 PostgreSQL（Api 使用）：设计时工厂默认走 SQLite，要用环境变量切到 Npgsql
+export FT_DB_PROVIDER=postgresql        # PowerShell：$env:FT_DB_PROVIDER = 'postgresql'
 dotnet ef migrations add <MigrationName> --project src/FinanceTracker.Infrastructure
-dotnet ef database update --project src/FinanceTracker.Infrastructure
 ```
+
+不需要手动 `database update`：App、Api、Web.Server 启动时都会自动执行迁移（`MigrateAsync`）。`ModelSnapshotTests` 会检查两套迁移的快照与当前模型是否一致，漏生成其中一套时单元测试会失败。
 
 ## 配置说明
 
@@ -145,6 +154,7 @@ API 服务配置位于 `server/FinanceTracker.Api/appsettings.json`：
 > - **JWT 密钥**：非 Development 环境下，若 `Jwt:SecretKey` 仍是仓库内的占位值，API 会**拒绝启动**（否则任何人都能凭公开的占位密钥伪造 JWT）。用环境变量 `Jwt__SecretKey` 或 `appsettings.Production.json` 提供至少 32 位的随机密钥。
 > - **数据库口令**：连接串仍在使用默认口令 `postgres` 时只会在启动日志里给出警告，不会阻止启动。
 > - **Swagger**：只在 Development 环境默认开启，生产环境默认关闭（公开完整的接口清单会降低被探测的门槛，而登录只需要手机号）。生产需要时设置环境变量 `Swagger__Enabled=true`；任何环境设为 `false` 都会关闭。
+> - **手机号白名单（可选）**：登录只凭手机号、没有验证码，公网部署时建议用环境变量 `Auth__AllowedPhoneNumbers`（英文逗号分隔，如 `13800000001,13800000002`；分号、换行也认）限定能登录、能调用 API 的手机号；不设置 = 不限制。共享账本按手机号邀请成员，要一起用的家人也得在名单里。名单只在 API 启动时读取，修改后要重启；详见 [SECURITY.md](SECURITY.md) 与 [ADR 0009](docs/adr/0009-cloud-access-hardening.md)。
 
 ## 部署
 
@@ -159,6 +169,33 @@ API 服务配置位于 `server/FinanceTracker.Api/appsettings.json`：
 3. **生产配置**：通过 `appsettings.Production.json` 或环境变量提供数据库连接串与 `Jwt__SecretKey`（见上方「配置说明」；JWT 密钥仍是占位值时 API 拒绝启动）。
 4. **数据库**：API 启动时会执行 EF Core 迁移（`MigrateAsync`）；首次部署前先准备好空的 PostgreSQL 数据库。
 5. **旧版 glibc**：Web.Server 使用 SQLite，目标系统的 glibc 较旧时，SQLite 原生库可能需要替换为兼容版本。
+
+## 构建与发布
+
+### 云端 API 地址（构建时注入）
+
+仓库**不内置任何线上域名**。App 连接哪台云端服务器，由构建时的 MSBuild 属性 `CloudApiBaseUrl` 决定，值写进程序集元数据，运行时读取并校验：
+
+| 构建方式 | 行为 |
+|----------|------|
+| 日常开发（`dotnet build` / IDE 调试），不指定 | 用本机开发地址，也就是「快速开始」里 `dotnet run` 起的 API（端口 5065）：Android 模拟器 `http://10.0.2.2:5065/`，其余平台 `http://localhost:5065/` |
+| 打包发布（`dotnet publish`） | **必须指定**，没指定直接报错，避免打出一个连不上服务器的安装包 |
+
+地址写服务器的根地址即可：带不带结尾的 `/` 都行，结尾的 `/api` 会自动去掉；必须以 `http://` 或 `https://` 开头，不能带用户名密码和 `?` 查询参数（地址会随安装包一起公开）。正式环境请使用 HTTPS。
+
+> `dotnet build -c Release` 不算「发布」，不指定时同样用本机开发地址。要分发给别人的包请走 `dotnet publish`，或者用下面的打包脚本。
+
+### 打包脚本
+
+```bash
+dotnet publish src/FinanceTracker.App/FinanceTracker.App.csproj -f net10.0-android -c Release -p:CloudApiBaseUrl=https://你的服务器/
+```
+
+[`build/build.sh`](build/build.sh) / [`build/build.ps1`](build/build.ps1) 把签名、版本号、上传蒲公英串在一起：先把 [`build/config.example.env`](build/config.example.env) 复制为 `build/config.env`（已被 `.gitignore` 忽略），填好 `CLOUD_API_BASE_URL` 与 Android 签名信息再运行，`CLOUD_API_BASE_URL` 没填脚本会直接报错。详见 [build/README.md](build/README.md)。
+
+### iOS 的 GitHub Actions 构建
+
+[`.github/workflows/build-ios.yml`](.github/workflows/build-ios.yml) 只能手动触发，构建、签名后上传到蒲公英。需要在你自己的仓库里配置 7 项 Secrets / Variables（Apple 证书及密码、描述文件及其名称、蒲公英 API Key 与安装密码、`CLOUD_API_BASE_URL`），缺哪项会在第一步就报出来。配置步骤见 [.github/SETUP-IOS-BUILD.md](.github/SETUP-IOS-BUILD.md)，证书材料的生成与轮换见 [build/certificates/README.md](build/certificates/README.md)。
 
 ## 领域术语约定
 
@@ -178,6 +215,14 @@ API 服务配置位于 `server/FinanceTracker.Api/appsettings.json`：
 - [CLAUDE.md](CLAUDE.md) — AI 辅助开发指引（架构、命令、注意事项）
 - [CONTEXT.md](CONTEXT.md) — 领域语言定义
 - [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) — 完整实现计划与数据模型
-- [docs/adr/](docs/adr/) — 架构决策记录（UI 的视觉体系见 [0007](docs/adr/0007-ios-visual-system.md)）
+- [docs/adr/](docs/adr/) — 架构决策记录（UI 的视觉体系见 [0007](docs/adr/0007-ios-visual-system.md)，云端地址注入与手机号白名单见 [0009](docs/adr/0009-cloud-access-hardening.md)）
 - [docs/design/](docs/design/) — UI 设计稿（iOS 风格重构总览与分屏、冷启动）
 - [tests/e2e/README.md](tests/e2e/README.md) — 端到端测试说明
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 参与贡献：开发流程、提交约定、必须守的规则
+- [SECURITY.md](SECURITY.md) — 安全边界、部署检查清单、漏洞报告方式
+- [PRIVACY.md](PRIVACY.md) — 数据存在哪、发到哪、用到哪些权限
+- [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) — 第三方组件与许可证
+
+## 许可证
+
+[MIT](LICENSE) © 2026 luubing。第三方组件各自的许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
