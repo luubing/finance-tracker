@@ -29,6 +29,18 @@ public class PhoneNumberMaskerTests
     }
 
     [Theory]
+    [InlineData("1\r\n12345678", "1****5678")]   // 11 位但夹着换行：手机号校验只看长度和首位，这样的输入进得来
+    [InlineData("abc\r\n", "****")]               // 末两位恰好是换行
+    public void 夹带换行的输入_输出里没有换行(string input, string expected)
+    {
+        var masked = PhoneNumberMasker.Mask(input);
+
+        Assert.Equal(expected, masked);
+        Assert.DoesNotContain('\n', masked);
+        Assert.DoesNotContain('\r', masked);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     public void 空输入_返回空串(string? input) => Assert.Equal(string.Empty, PhoneNumberMasker.Mask(input));

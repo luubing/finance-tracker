@@ -62,7 +62,7 @@ public class CategoryService : ICategoryService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "创建分类失败，用户: {UserId}, 分类名: {Name}", category.UserId, category.Name);
+            _logger.LogError(ex, "创建分类失败，用户: {UserId}, 分类名: {Name}", category.UserId, LogSanitizer.Clean(category.Name));
             throw;
         }
         finally

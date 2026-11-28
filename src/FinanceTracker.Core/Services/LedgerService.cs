@@ -47,7 +47,7 @@ public class LedgerService : ILedgerService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "创建账本失败，用户: {UserId}, 账本名: {Name}", ledger.UserId, ledger.Name);
+            _logger.LogError(ex, "创建账本失败，用户: {UserId}, 账本名: {Name}", ledger.UserId, LogSanitizer.Clean(ledger.Name));
             throw;
         }
     }

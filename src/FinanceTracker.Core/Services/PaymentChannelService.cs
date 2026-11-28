@@ -51,7 +51,7 @@ public class PaymentChannelService : IPaymentChannelService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "创建支付渠道失败，用户: {UserId}, 渠道名: {Name}", channel.UserId, channel.Name);
+            _logger.LogError(ex, "创建支付渠道失败，用户: {UserId}, 渠道名: {Name}", channel.UserId, LogSanitizer.Clean(channel.Name));
             throw;
         }
     }
