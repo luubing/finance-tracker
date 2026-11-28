@@ -77,7 +77,7 @@ export Auth__AllowedPhoneNumbers="13800138000,13900139000"
 ## 仓库自身的约定
 
 - **不提交**：`build/config.env`、签名证书 / 私钥 / 描述文件（`build/certificates/` 下除 `README.md`、`csr.conf`、`convert.bat` 之外的文件）、`appsettings.Production.json`（唯一的例外是 `server/FinanceTracker.Web.Server/` 里那份：只有日志级别和本机 API 地址，没有任何口令，保持受跟踪；`server/FinanceTracker.Api/` 里的那份放真实连接串和 JWT 密钥，一律不入库）。
-- 云端地址、蒲公英的 API Key 和（可选的）安装密码、Apple 证书等只放 GitHub Secrets / Variables。本仓库是公开的，所以 iOS 打包的工作流不上传 IPA 产物、不在日志里打印下载地址和安装密码，也只申请只读权限（见 [`.github/SETUP-IOS-BUILD.md`](.github/SETUP-IOS-BUILD.md)）。
+- 云端地址、蒲公英的 API Key 和（可选的）安装密码、Apple 证书等只放 GitHub Secrets / Variables。本仓库是公开的，所以 iOS 打包的工作流不上传 IPA 产物、不在日志里打印下载地址和安装密码，把签名任务固定打印的证书主体 / Team ID / 证书指纹登记成遮罩，也只申请只读权限（见 [`.github/SETUP-IOS-BUILD.md`](.github/SETUP-IOS-BUILD.md)）。
 - 蒲公英安装密码是**可选**的：不设置时工作流以公开安装上传，下载页地址就相当于访问凭证（安装包内嵌的描述文件含设备 UDID 和 Team ID），不要把它写进 Issue / PR / 日志；需要限制时再设置 `PGYER_INSTALL_PASSWORD`。
 - 打包时由 `-p:CloudApiBaseUrl` 注入云端地址，源码里不内置线上域名，见 README 的「构建与发布」。
 - 防止误提交密钥有三道防线：`.gitignore` 的通用兜底（按文件名，换个名字就绕过了）；CI 的 `secret-scan` 任务用 gitleaks 扫描每次推送 / PR 新增的提交内容（日志始终脱敏，命中时只显示位置和规则名）；GitHub 自带的密钥扫描与推送保护。被拦下时请换掉密钥，不要想办法绕过检查。万一已经推送了，见 [CONTRIBUTING.md](CONTRIBUTING.md) 的「不要提交的东西」：密钥要立刻轮换，光删文件没用。

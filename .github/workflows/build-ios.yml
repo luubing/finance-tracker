@@ -242,7 +242,54 @@ jobs:
                  openssl rand -hex 16 | sed 's/\(.\{8\}\)\(.\{4\}\)\(.\{4\}\)\(.\{4\}\)\(.\{12\}\)/\1-\2-\3-\4-\5/')
 
           cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
-          echo "✅ Installed provisioning profile: $UUID"
+          echo "✅ Provisioning profile 已安装"
+
+      # 6.1 签名身份信息不进公开日志
+      #   Build iOS 里 Xamarin 的签名任务（Detected signing identity）会把证书主体（含公司 / 个人名）、Team ID、
+      #   证书指纹、描述文件名和 UUID 原样打印出来——这是任务固定的输出，调日志级别压不掉。这些不是密钥
+      #   （装好的 IPA 里也带着），但仓库是公开的，没必要挂在任何人都能读的日志上：这里先登记遮罩，
+      #   之后每个步骤的日志里再出现就显示成 ***。
+      #   只遮日志、不影响签名；某个值取不到就跳过（不让这一步把打包搞失败）；值只在变量里流转，不打印。
+      - name: Mask signing identity in logs
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          masked=0
+
+          mask() {
+            if [ -n "${1:-}" ]; then
+              echo "::add-mask::$1"
+              masked=$((masked + 1))
+            fi
+          }
+
+          # 证书：find-identity 的一行形如  1) <40 位指纹> "iPhone Distribution: 名称 (TEAMID)"
+          IDENTITY_LINE=$(security find-identity -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -m1 -E '"(Apple|iPhone) Distribution' || true)
+          IDENTITY_NAME=$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/^[^"]*"\(.*\)".*$/\1/p')
+          THUMBPRINT=$(printf '%s\n' "$IDENTITY_LINE" | sed -n 's/^[[:space:]]*[0-9]*)[[:space:]]*\([0-9A-Fa-f]\{40\}\)[[:space:]].*$/\1/p')
+          ORG_NAME=$(printf '%s\n' "$IDENTITY_NAME" | sed -n 's/^[^:]*:[[:space:]]*\(.*\)([A-Z0-9]\{10\})$/\1/p' | sed 's/[[:space:]]*$//')
+          TEAM_ID=$(printf '%s\n' "$IDENTITY_NAME" | sed -n 's/^.*(\([A-Z0-9]\{10\}\))$/\1/p')
+          mask "$IDENTITY_NAME"
+          mask "$ORG_NAME"
+          mask "$TEAM_ID"
+          mask "$THUMBPRINT"
+          mask "$(printf '%s' "$THUMBPRINT" | tr 'A-F' 'a-f')"
+
+          # 描述文件：先解开 CMS 签名取出 plist，再按键取值（与上一步取 UUID 的写法一致）
+          PROFILE_PLIST=$(security cms -D -i "$PROFILE_PATH" 2>/dev/null || true)
+          plist_value() {
+            /usr/libexec/PlistBuddy -c "Print :$1" /dev/stdin <<< "$PROFILE_PLIST" 2>/dev/null || true
+          }
+          mask "$(plist_value UUID)"
+          mask "$(plist_value Name)"
+          mask "$(plist_value TeamName)"
+          mask "$(plist_value TeamIdentifier:0)"
+          mask "$(plist_value ApplicationIdentifierPrefix:0)"
+
+          if [ -z "$TEAM_ID" ]; then
+            echo "::warning::没有从钥匙串取到签名身份，构建日志里的证书主体 / Team ID 可能不会被遮住"
+          fi
+          echo "🔒 已登记遮罩 $masked 项（签名身份 / 描述文件信息，只遮日志）"
 
       # 7. 还原依赖
       - name: Restore dependencies

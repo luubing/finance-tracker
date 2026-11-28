@@ -124,7 +124,7 @@ gh workflow run build-ios.yml \
 
 构建完成后，安装包在 **蒲公英后台「应用管理」**里：下载页地址和二维码都在那里。设置了 `PGYER_INSTALL_PASSWORD` 时，安装时输入这个密码；没设置则是公开安装，直接装。
 
-出于安全考虑，工作流**不会**把下载地址打印在日志里，也**不会**把 IPA 作为 GitHub Artifact 上传——公开仓库的日志和 Artifact 任何人都能查看 / 下载，而 IPA 里带着签名信息。
+出于安全考虑，工作流**不会**把下载地址打印在日志里，也**不会**把 IPA 作为 GitHub Artifact 上传——公开仓库的日志和 Artifact 任何人都能查看 / 下载，而 IPA 里带着签名信息。另外，打包时 Xamarin 的签名任务会固定打印证书主体（含公司 / 个人名）、Team ID、证书指纹，工作流在「Mask signing identity in logs」步骤里先把它们登记成遮罩，日志里显示为 `***`。
 
 ---
 
