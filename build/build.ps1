@@ -245,20 +245,24 @@ function Upload-ToPgyer {
     $uploadUrl = "https://www.pgyer.com/apiv2/app/upload"
 
     # 使用 curl 上传
+    #   纯文本字段一律用 --form-string：-F 会把以 @ 或 < 开头的值当成「读本地文件」，
+    #   Key / 口令恰好以这两个字符开头时，文件内容会被发给对方（只有 file 字段才该用 -F）
     $curlArgs = @(
         "-F", "file=@$FilePath",
-        "-F", "_api_key=$PGYER_API_KEY"
+        "--form-string", "_api_key=$PGYER_API_KEY"
     )
 
     # 蒲公英 apiv2：buildInstallType=2 表示密码安装，口令放 buildPassword（官方文档「上传与发布」，
-    # 与 .github/workflows/build-ios.yml 一致）。此前写的 password= 不在 apiv2 的参数表里，设了口令也不会生效——
-    # 不传 / 传空就是公开安装
+    # 与 .github/workflows/build-ios.yml 一致）。此前写的 password= 不在 apiv2 的参数表里，设了口令也不会生效。
+    # 没设口令就是公开安装（buildInstallType=1）：显式写出来，不依赖蒲公英的默认值
     if ($PGYER_INSTALL_PASSWORD) {
-        $curlArgs += "-F", "buildInstallType=2", "-F", "buildPassword=$PGYER_INSTALL_PASSWORD"
+        $curlArgs += "--form-string", "buildInstallType=2", "--form-string", "buildPassword=$PGYER_INSTALL_PASSWORD"
+    } else {
+        $curlArgs += "--form-string", "buildInstallType=1"
     }
 
     if ($PGYER_CHANNEL_PASSWORD) {
-        $curlArgs += "-F", "channelPassword=$PGYER_CHANNEL_PASSWORD"
+        $curlArgs += "--form-string", "channelPassword=$PGYER_CHANNEL_PASSWORD"
     }
 
     $curlArgs += $uploadUrl

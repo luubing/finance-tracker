@@ -1,0 +1,132 @@
+name: CI
+
+# 每次推送到 master 和每个 PR 都跑两个任务：
+#   build-and-test —— 仓库卫生检查 + 构建两个服务端 + 全量单元测试（单元测试用真实 SQLite + 迁移，不需要数据库服务）；
+#   secret-scan    —— 密钥扫描：只扫这次推送 / 这个 PR 新带来的提交。
+# MAUI App 需要 Android / iOS 工作负载，这里不构建；iOS 打包见 build-ios.yml（手动触发，要 Secret）。
+# 本工作流不使用任何 Secret，所以来自 fork 的 PR 也能安全地跑；绝不要把触发条件改成 pull_request_target。
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# 最小权限：只读代码，不申请任何写权限
+permissions:
+  contents: read
+
+# 同一个分支 / PR 上来了新提交，就取消还在跑的旧任务；master 上的每次推送都跑完，保证每个提交都有结果
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # 第三方 Action 一律固定到提交 SHA（行尾注释是对应的版本号），升级交给 Dependabot
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '10.0.x'
+
+      # 已受跟踪的文件不应命中 .gitignore：`git add -f` 能绕过忽略规则，把证书 / 真实配置强行加进仓库；
+      # 另外规则写得太宽时会把源码目录误伤（新增的文件在 git status 里看不到）。
+      # 强制按「大小写不敏感」匹配（Windows / macOS 的默认行为），否则在 Linux 上抓不到
+      # `*.sqlite` 误伤 FinanceTracker.Infrastructure.Sqlite 目录这类只在开发者机器上出现的问题。
+      - name: Repo hygiene - tracked files must not match .gitignore
+        run: |
+          bad="$(git -c core.ignorecase=true ls-files -ci --exclude-standard)"
+          if [ -n "$bad" ]; then
+            echo "::error::下列文件已被 Git 跟踪，却命中了 .gitignore 规则（可能是用 git add -f 提交了密钥 / 真实配置，或规则误伤了源码）："
+            echo "$bad"
+            exit 1
+          fi
+          echo "✅ 没有受跟踪的文件命中 .gitignore"
+
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: Build servers
+        run: |
+          dotnet build server/FinanceTracker.Api/FinanceTracker.Api.csproj --nologo
+          dotnet build server/FinanceTracker.Web.Server/FinanceTracker.Web.Server.csproj --nologo
+
+      - name: Unit tests
+        run: dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj --nologo
+
+  # 密钥扫描（gitleaks）。GitHub 自带的推送保护只认已知服务商的令牌格式，抓不到通用口令、私钥文件、内部地址之类，这里补一道。
+  #   - 只扫本次推送 / 本 PR 新增的提交：历史里早期误提交的构建产物会产生误报，不在范围内；
+  #   - 手动触发（workflow_dispatch）时扫描当前检出的全部文件，用来确认「现在的仓库」是干净的；
+  #   - 直接下载官方发布包并校验 SHA256，不引入第三方 Action；
+  #   - 日志是公开的，所以始终带 --redact，命中的内容只显示位置和规则名。
+  # 升级 gitleaks：同时改下面的版本号和 SHA256（取自该版本 Release 页面 gitleaks_<版本>_checksums.txt 里 linux_x64 那一行）。
+  # 确认是误报时：把输出里的 Fingerprint 加进仓库根目录的 .gitleaksignore（一行一个）。
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: '8.30.1'
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+
+    steps:
+      # 要完整历史：扫描范围是「新提交」，得能找到推送前的提交和 PR 的基线
+      - name: Checkout code (full history)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks (pinned version, SHA256 verified)
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" version
+
+      # 下面这些值都是提交哈希（十六进制），经 env 传入、不直接拼进脚本
+      - name: Scan for secrets
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gitleaks="$RUNNER_TEMP/gitleaks"
+          flags=(--no-banner --redact --verbose)
+
+          case "$EVENT_NAME" in
+            pull_request)
+              echo "扫描范围：本 PR 新增的提交 ${PR_BASE_SHA:0:7}..${PR_HEAD_SHA:0:7}"
+              "$gitleaks" git "${flags[@]}" --log-opts="${PR_BASE_SHA}..${PR_HEAD_SHA}" .
+              ;;
+            push)
+              if [[ "$PUSH_BEFORE_SHA" =~ ^0+$ ]] || ! git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+                # 新建分支，或强制推送后找不到旧提交：退而只扫最新的一个提交
+                echo "扫描范围：最新一个提交 ${PUSH_SHA:0:7}（找不到推送前的提交）"
+                "$gitleaks" git "${flags[@]}" --log-opts="-1 ${PUSH_SHA}" .
+              else
+                echo "扫描范围：本次推送新增的提交 ${PUSH_BEFORE_SHA:0:7}..${PUSH_SHA:0:7}"
+                "$gitleaks" git "${flags[@]}" --log-opts="${PUSH_BEFORE_SHA}..${PUSH_SHA}" .
+              fi
+              ;;
+            *)
+              echo "扫描范围：当前检出的全部文件（不含 Git 历史）"
+              "$gitleaks" dir "${flags[@]}" .
+              ;;
+          esac
+          echo "✅ 没有发现密钥"

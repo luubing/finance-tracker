@@ -1,0 +1,52 @@
+# Dependabot：每周检查一次依赖更新，改动合并前由 ci.yml 跑构建和单元测试。
+# 漏洞告警（Dependabot alerts）与这里的版本更新是两回事，不受下面 ignore 的影响。
+version: 2
+updates:
+  # GitHub Actions：工作流里的 Action 都固定在提交 SHA 上，这里负责把 SHA 和行尾的版本号注释一起升级
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # NuGet：只升级 minor / patch，major 由人决定
+  #   - 不含 src/FinanceTracker.App：它要 MAUI 工作负载才能还原，其依赖跟着 iOS 工作流里固定的工作负载走，手动升级
+  - package-ecosystem: nuget
+    directories:
+      - /src/FinanceTracker.Core
+      - /src/FinanceTracker.Infrastructure
+      - /src/FinanceTracker.Infrastructure.Sqlite
+      - /src/FinanceTracker.Web
+      - /server/FinanceTracker.Api
+      - /server/FinanceTracker.Web.Server
+      - /tests/unit/FinanceTracker.Tests
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      dotnet-minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # MAUI 相关的包要和 build-ios.yml 里固定的 MAUI 工作负载版本对齐，CI 又不构建 MAUI App，不让机器人悄悄升级
+      - dependency-name: "Microsoft.Maui.*"
+      - dependency-name: "Microsoft.AspNetCore.Components.WebView.Maui"
+      # Masa.Blazor：界面样式和行为是按这个版本一条条对过的（见 CLAUDE.md「视觉体系」），升级要连同 E2E 和真机验收一起做
+      - dependency-name: "Masa.Blazor*"
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

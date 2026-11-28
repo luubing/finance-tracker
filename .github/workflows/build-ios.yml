@@ -29,13 +29,14 @@ jobs:
       # 1. 检出代码
       #   persist-credentials: false —— 后面的步骤会运行 NuGet 包带来的 MSBuild 任务，不要把 GITHUB_TOKEN 留在 .git/config 里
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
       # 1.1 预检：缺少必需的 Secret / 变量时，在开始花钱的 macOS 构建之前就失败，并明确说缺哪个
       #   只打印名字，绝不打印值。云端地址是打包必填项（仓库不内置线上域名，见 README「构建与发布」）：
-      #   默认读 Actions 变量 CLOUD_API_BASE_URL；想连构建日志里也隐藏域名，改建同名 Secret（Secret 优先）。
+      #   读 Actions 的 Secret 或变量 CLOUD_API_BASE_URL（同名时 Secret 优先）；两种放法，构建日志里这个地址都会被遮成 ***（见下面的 add-mask）。
+      #   蒲公英安装密码 PGYER_INSTALL_PASSWORD 是可选的（不设 = 公开安装，见上传步骤），不在必填之列。
       - name: Preflight - check required secrets and variables
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -43,12 +44,17 @@ jobs:
           APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
           APPLE_PROVISIONING_PROFILE_NAME: ${{ secrets.APPLE_PROVISIONING_PROFILE_NAME }}
           PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
-          PGYER_INSTALL_PASSWORD: ${{ secrets.PGYER_INSTALL_PASSWORD }}
           CLOUD_API_BASE_URL: ${{ secrets.CLOUD_API_BASE_URL || vars.CLOUD_API_BASE_URL }}
         run: |
+          # 变量（vars）不会被 GitHub 自动脱敏，而这个仓库是公开的、构建日志任何人都能读：
+          # 先显式登记一次，之后每个步骤的日志里出现这个地址都会显示成 ***（放 Secret 时本来就脱敏，重复登记无害）
+          if [ -n "${CLOUD_API_BASE_URL:-}" ]; then
+            echo "::add-mask::$CLOUD_API_BASE_URL"
+          fi
+
           missing=""
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_PROVISIONING_PROFILE \
-                      APPLE_PROVISIONING_PROFILE_NAME PGYER_API_KEY PGYER_INSTALL_PASSWORD CLOUD_API_BASE_URL; do
+                      APPLE_PROVISIONING_PROFILE_NAME PGYER_API_KEY CLOUD_API_BASE_URL; do
             if [ -z "${!name}" ]; then
               missing="$missing $name"
             fi
@@ -69,22 +75,32 @@ jobs:
           echo "✅ 必需的 Secret / 变量都已配置"
 
       # 2. 安装 .NET SDK
+      #   第三方 Action 一律固定到提交 SHA（行尾注释是对应的版本号）：标签可以被改指向别的提交，
+      #   而这个工作流拿得到签名证书等 Secret，不能让标签被劫持后的代码跑在这里。升级交给 Dependabot。
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # 2.1 固定 .NET SDK 为 10.0.x
+      # 2.1 确认实际用的是 .NET 10.0.x SDK
       #   runner 镜像（2026-11 起）的 /Users/runner/.dotnet 里同时预装了 .NET 11 SDK，`dotnet` 默认取最高版本：
       #   工作负载会装成 .NET 11 的清单（iOS 27.x / MAUI 11.0.0），net10.0-ios 只剩 Microsoft.iOS.Sdk.net10.0_26.0，
       #   Build iOS 于是要求 Xcode 26.0（镜像默认是 26.6；切到 26.0.1 又缺 iOS 26.0 模拟器运行时，actool 报
       #   "No simulator runtime version ... available to use with iphonesimulator SDK version 23A339"）。
-      #   用 global.json 把 SDK 锁在 10.0.x（上一步 setup-dotnet 已保证装有 10.0.x）。只在 CI 里生成，不入库。
-      - name: Pin .NET SDK to 10.0
+      #   仓库根目录的 global.json（rollForward: latestFeature）把 SDK 锁在 10.0.x，这里只做校验：
+      #   选错了就立刻失败，不要等到 Build iOS 才报一堆看不懂的 Xcode 版本错误。
+      - name: Verify .NET SDK is 10.0.x
         run: |
-          echo '{ "sdk": { "version": "10.0.100", "rollForward": "latestFeature" } }' > global.json
           dotnet --list-sdks
-          dotnet --version
+          version="$(dotnet --version)"
+          echo "dotnet $version"
+          case "$version" in
+            10.0.*) ;;
+            *)
+              echo "::error::期望 .NET 10.0.x SDK，实际是 $version（检查仓库根目录的 global.json）"
+              exit 1
+              ;;
+          esac
 
       # 3. 安装 MAUI 工作负载
       #   即使锁定了 10.0.x SDK，不指定版本时 `dotnet workload install maui` 也会装最新的工作负载集
@@ -272,10 +288,13 @@ jobs:
 
       # 10. 上传到蒲公英
       #   本仓库是公开的，构建日志和 artifact 任何人都能看 / 下载，所以：
-      #   - 安装密码来自 Secret PGYER_INSTALL_PASSWORD（预检已确认存在），不写进仓库、不打印；
+      #   - 安装方式：默认公开安装（buildInstallType=1，知道下载页地址的人都能装）。想加密码就建 Secret
+      #     PGYER_INSTALL_PASSWORD（可选），设了就改为密码安装（buildInstallType=2）；密码不写进仓库、不打印；
       #   - 下载页地址不打印，到蒲公英后台「应用管理」查看下载页 / 二维码；
       #   - 不再把 IPA 和下载地址当作 artifact 上传（公开仓库的 artifact 任何登录 GitHub 的人都能下载，
-      #     而这是带着签名和描述文件的安装包）。
+      #     而这是带着签名和描述文件的安装包）；
+      #   - 纯文本字段用 --form-string 传：-F 会把以 @ 或 < 开头的值当成「读本地文件」，
+      #     口令 / Key 恰好以这两个字符开头时，文件内容会被发给对方。
       - name: Upload to Pgyer
         env:
           PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
@@ -284,12 +303,17 @@ jobs:
         run: |
           echo "🚀 Uploading to Pgyer..."
 
-          RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" \
-            -F "_api_key=$PGYER_API_KEY" \
-            -F "file=@$IPA_PATH" \
-            -F "buildInstallType=2" \
-            -F "buildName=记账本" \
-            -F "buildPassword=$PGYER_INSTALL_PASSWORD")
+          # 参数放数组里，不拼字符串（与 build/build.sh 一致）
+          curl_args=(--form-string "_api_key=$PGYER_API_KEY" -F "file=@$IPA_PATH" --form-string "buildName=记账本")
+          if [ -n "$PGYER_INSTALL_PASSWORD" ]; then
+            curl_args+=(--form-string "buildInstallType=2" --form-string "buildPassword=$PGYER_INSTALL_PASSWORD")
+            echo "🔒 安装方式：密码安装"
+          else
+            curl_args+=(--form-string "buildInstallType=1")
+            echo "🔓 安装方式：公开安装（未设置 PGYER_INSTALL_PASSWORD）"
+          fi
+
+          RESPONSE=$(curl -s -X POST "https://www.pgyer.com/apiv2/app/upload" "${curl_args[@]}")
 
           # 解析响应
           CODE=$(echo "$RESPONSE" | jq -r '.code')
