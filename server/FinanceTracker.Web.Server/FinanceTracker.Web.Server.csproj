@@ -23,11 +23,11 @@
 
   <ItemGroup>
     <PackageReference Include="Masa.Blazor" Version="1.11.9" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.15">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
     <!-- Blazor Server 框架静态资源 (blazor.server.js)。SDK 未隐式注入，需显式引用，否则 _framework/blazor.server.js 404，电路无法连接 -->
     <!--<PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" Version="10.0.11">
       <PrivateAssets>all</PrivateAssets>
