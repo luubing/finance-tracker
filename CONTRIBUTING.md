@@ -30,6 +30,8 @@ dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj
 - 测试尽量用真实 SQLite 加迁移（见 `TestSupport/SqliteTestDatabase.cs`），不要用 mock 替掉数据库——mock 测不出迁移、查询过滤器和软删除的问题。
 - 每个 PR 和 master 上的每次推送都会跑 CI（`.github/workflows/ci.yml`，Ubuntu），分两个任务：`build-and-test`（仓库卫生检查、构建 Api 与 Web.Server、全量单元测试）和 `secret-scan`（用 gitleaks 扫描这次新增的提交里有没有密钥）。本地等价的做法就是上面的 `dotnet test`；MAUI App 需要 Android / iOS 工作负载，CI 里不构建。
 - `secret-scan` 被判成误报时，把输出里的 `Fingerprint` 加进仓库根目录的 `.gitleaksignore`（一行一个）并在 PR 里说明为什么是误报；真是密钥就当作已经泄露处理（见下面「不要提交的东西」）。想在本地提前跑：装好 [gitleaks](https://github.com/gitleaks/gitleaks) 后在仓库根目录执行 `gitleaks git --redact --log-opts="origin/master..HEAD" .`。
+- 仓库设置里只允许 GitHub 官方 Action，并且要求按提交 SHA 引用：新增或升级 Action 请写成 `uses: actions/xxx@<40 位提交 SHA> # v4.x.x`，写成 `@v4` 这样的标签会被直接拒绝；Dependabot 每周会提升级 PR（改到 `build-ios.yml` 的升级，合并前请先手动跑一次 iOS 打包验证）。master 分支禁止强推和删除，PR 要 `build-and-test` 与 `secret-scan` 都通过才能合并；另外开着 CodeQL 代码扫描（C# 和 GitHub Actions 工作流）。
+- **日志里的用户输入**（分类名、账本名、支付渠道名、手机号等）写进日志前要先过 `LogSanitizer.Clean`（去掉换行等控制字符，防止伪造日志行）；手机号用 `PhoneNumberMasker.Mask`，它内部已经做了这一步。`PhoneValidator` 只校验长度和首位，不保证后面全是数字，所以不能假定手机号里没有奇怪的字符。
 
 ## 提交信息
 

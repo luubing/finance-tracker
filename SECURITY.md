@@ -81,3 +81,4 @@ export Auth__AllowedPhoneNumbers="13800138000,13900139000"
 - 蒲公英安装密码是**可选**的：不设置时工作流以公开安装上传，下载页地址就相当于访问凭证（安装包内嵌的描述文件含设备 UDID 和 Team ID），不要把它写进 Issue / PR / 日志；需要限制时再设置 `PGYER_INSTALL_PASSWORD`。
 - 打包时由 `-p:CloudApiBaseUrl` 注入云端地址，源码里不内置线上域名，见 README 的「构建与发布」。
 - 防止误提交密钥有三道防线：`.gitignore` 的通用兜底（按文件名，换个名字就绕过了）；CI 的 `secret-scan` 任务用 gitleaks 扫描每次推送 / PR 新增的提交内容（日志始终脱敏，命中时只显示位置和规则名）；GitHub 自带的密钥扫描与推送保护。被拦下时请换掉密钥，不要想办法绕过检查。万一已经推送了，见 [CONTRIBUTING.md](CONTRIBUTING.md) 的「不要提交的东西」：密钥要立刻轮换，光删文件没用。
+- 仓库还开着 Dependabot 告警与安全更新、CodeQL 代码扫描（C# 和 GitHub Actions 工作流）；GitHub Actions 只允许官方 Action，并且必须按提交 SHA 引用；master 分支禁止强推和删除。
