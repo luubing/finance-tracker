@@ -13,6 +13,8 @@
 
 环境要求与启动方式见 [README 的「快速开始」](README.md#快速开始)：.NET 10 SDK、Docker（PostgreSQL）、MAUI 工作负载（只在调试移动端时需要）。改数据库迁移还需要 `dotnet tool install -g dotnet-ef`。
 
+仓库根目录的 `global.json` 把 SDK 锁在 10.0.x（装了更高的 10.0.x 补丁版本会自动用上），`.editorconfig` 统一了编码、缩进和文件结尾——主流编辑器会自动读取，不用额外配置。
+
 目录结构与依赖方向见 README 的「项目结构」：`App → Web → Core → Shared`，`Api → Core → Shared`，`Infrastructure → Core`。`FinanceTracker.Web` 是同时被 MAUI App 和 Blazor Server 引用的共享组件库，改它要考虑两个宿主。
 
 ## 提交前自查
@@ -26,6 +28,8 @@ dotnet test tests/unit/FinanceTracker.Tests/FinanceTracker.Tests.csproj
 - **改了实体 / `ApplicationDbContext`**：两套迁移都要生成，命令见 README 的「数据库迁移」；`ModelSnapshotTests` 会检查快照与模型是否一致。
 - **修 Bug**：先写一个能复现它的失败用例，再修。`StatisticsSoftDeleteTests` 这类回归用例就是这么来的。
 - 测试尽量用真实 SQLite 加迁移（见 `TestSupport/SqliteTestDatabase.cs`），不要用 mock 替掉数据库——mock 测不出迁移、查询过滤器和软删除的问题。
+- 每个 PR 和 master 上的每次推送都会跑 CI（`.github/workflows/ci.yml`，Ubuntu），分两个任务：`build-and-test`（仓库卫生检查、构建 Api 与 Web.Server、全量单元测试）和 `secret-scan`（用 gitleaks 扫描这次新增的提交里有没有密钥）。本地等价的做法就是上面的 `dotnet test`；MAUI App 需要 Android / iOS 工作负载，CI 里不构建。
+- `secret-scan` 被判成误报时，把输出里的 `Fingerprint` 加进仓库根目录的 `.gitleaksignore`（一行一个）并在 PR 里说明为什么是误报；真是密钥就当作已经泄露处理（见下面「不要提交的东西」）。想在本地提前跑：装好 [gitleaks](https://github.com/gitleaks/gitleaks) 后在仓库根目录执行 `gitleaks git --redact --log-opts="origin/master..HEAD" .`。
 
 ## 提交信息
 
@@ -82,14 +86,16 @@ docs: 补充 iOS 风格重构的设计稿
 - 真实数据：你自己的账单导出（CSV）、本地数据库文件、日志、含手机号的截图；
 - 线上信息：服务器地址、IP、部署脚本。
 
-`.gitignore` 只忽略了其中一部分（`build/` 下的签名材料与 `build/config.env`、`appsettings.Production.json`、作者本机的部署脚本等），规则是按路径写的，**放在别处就不会被忽略**。提交前请看一眼 `git status`，也别用 `git add -A` 一把梭。
+`.gitignore` 里有一层通用兜底（任意目录下的 `*.p12`、`*.pem`、`*.key`、`*.keystore`、`*.mobileprovision`，`.env*`、`appsettings.Production.json`、`*.csv`、本地数据库、`*.binlog` 等；`server/FinanceTracker.Web.Server/` 里那份没有任何口令的 `appsettings.Production.json` 是放行的例外），再加上 `build/` 下按路径写的规则，但**它不可能覆盖所有东西**（换个文件名就绕过了）。提交前请看一眼 `git status` 和 `git diff --staged`，别用 `git add -A` 一把梭。用 `git add -f` 强行添加被忽略的文件，会让 CI 的「仓库卫生」检查失败。
+
+测试需要账单 CSV 样本时，只放**自己编造的假数据**，放在 `tests/**/fixtures/` 目录下（只有这里的 `.csv` 不被忽略）；不要拿真实导出脱敏后凑数。
 
 万一提交了，不要只靠后续提交把它删掉——它还留在 git 历史里。请立刻轮换对应的密钥，并联系维护者处理历史。
 
 ## 提 PR
 
 1. Fork 后从主分支拉一个新分支，改动尽量小而聚焦。
-2. 保证单元测试通过；改了界面就跑 E2E。
+2. 保证 CI（`build-and-test` 与 `secret-scan`）通过；改了界面就跑 E2E。
 3. PR 描述写清楚：改了什么、为什么、怎么验证的、哪些没法验证。
 4. 同步更新受影响的文档（README、ADR、CLAUDE.md）。
 

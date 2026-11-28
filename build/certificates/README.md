@@ -181,7 +181,7 @@ https://github.com/<你的用户名>/<仓库名>
 | `APPLE_PROVISIONING_PROFILE` | 粘贴 `profile_base64.txt` 的内容 |
 | `APPLE_PROVISIONING_PROFILE_NAME` | `FinanceTracker Distribution` |
 | `PGYER_API_KEY` | 蒲公英后台「API 信息」中的 API Key（仅配置在 GitHub Secrets，切勿写入仓库） |
-| `PGYER_INSTALL_PASSWORD` | 蒲公英应用的安装密码（自己定；仓库是公开的，所以只放 Secret，不要写进代码或文档） |
+| `PGYER_INSTALL_PASSWORD` | **可选**。蒲公英应用的安装密码（自己定；不设就是公开安装；仓库是公开的，所以只放 Secret，不要写进代码或文档） |
 
 另外还需要 `CLOUD_API_BASE_URL`（打出的 App 连哪台云端服务器）：在同一页面添加为 **Secret 或 Variable**（二选一，同名时 Secret 优先），值形如 `https://api.example.com/`。仓库不内置线上域名，没配的话工作流会在第一步报错。
 
@@ -211,7 +211,7 @@ https://github.com/<你的用户名>/<仓库名>
 ## ⚠️ 注意事项
 
 1. **私钥安全**：`ios_distribution.key` 文件非常重要，不要泄露或丢失
-2. **密码不入库**：任何密码（`.p12`、蒲公英安装密码、API Key）都不要写进仓库——包括脚本、文档、Issue、PR 描述；仓库是公开的
+2. **密码不入库**：任何密码（`.p12`、蒲公英安装密码（如果设置了）、API Key）都不要写进仓库——包括脚本、文档、Issue、PR 描述；仓库是公开的
 3. **证书有效期**：Distribution 证书有效期为 1 年，需要定期更新
 4. **Profile 有效期**：Provisioning Profile 有效期为 1 年
 5. **Bundle ID 必须匹配**：Profile 中的 App ID 必须与项目的 `ApplicationId` 一致

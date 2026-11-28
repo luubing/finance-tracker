@@ -1,5 +1,7 @@
 # FinanceTracker（记账本）
 
+[![CI](https://github.com/luubing/finance-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/luubing/finance-tracker/actions/workflows/ci.yml)
+
 个人记账应用，支持多支付渠道、分类统计和云端同步。
 
 > **自托管的开源项目**：仓库里没有线上服务地址、测试账号或预置的云端数据。云端服务需要自己部署（见「部署」），App 连接哪台服务器在打包时指定（见「构建与发布」）。
@@ -65,7 +67,7 @@ FinanceTracker/
 
 ### 环境要求
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download)（仓库的 `global.json` 把 SDK 锁在 10.0.x）
 - Docker（用于运行 PostgreSQL）
 - MAUI 工作负载（仅调试移动端需要）：`dotnet workload install maui`
 
@@ -75,7 +77,7 @@ FinanceTracker/
 docker compose up -d
 ```
 
-将启动 PostgreSQL 17（端口 `5432`，用户名/密码均为 `postgres`，数据库 `finance_tracker`）。
+将启动 PostgreSQL 17（只监听本机 `127.0.0.1:5432`，用户名/密码均为 `postgres`，数据库 `finance_tracker`）。这份 `docker-compose.yml` 仅供本机开发，口令是公开的默认值，不要原样用到服务器上。
 
 ### 2. 运行 API 服务
 
@@ -195,7 +197,7 @@ dotnet publish src/FinanceTracker.App/FinanceTracker.App.csproj -f net10.0-andro
 
 ### iOS 的 GitHub Actions 构建
 
-[`.github/workflows/build-ios.yml`](.github/workflows/build-ios.yml) 只能手动触发，构建、签名后上传到蒲公英。需要在你自己的仓库里配置 7 项 Secrets / Variables（Apple 证书及密码、描述文件及其名称、蒲公英 API Key 与安装密码、`CLOUD_API_BASE_URL`），缺哪项会在第一步就报出来。配置步骤见 [.github/SETUP-IOS-BUILD.md](.github/SETUP-IOS-BUILD.md)，证书材料的生成与轮换见 [build/certificates/README.md](build/certificates/README.md)。
+[`.github/workflows/build-ios.yml`](.github/workflows/build-ios.yml) 只能手动触发，构建、签名后上传到蒲公英。需要在你自己的仓库里配置 6 项必填的 Secrets / Variables（Apple 证书及密码、描述文件及其名称、蒲公英 API Key、`CLOUD_API_BASE_URL`），缺哪项会在第一步就报出来；另有一项可选的蒲公英安装密码（`PGYER_INSTALL_PASSWORD`），不设就是公开安装。配置步骤见 [.github/SETUP-IOS-BUILD.md](.github/SETUP-IOS-BUILD.md)，证书材料的生成与轮换见 [build/certificates/README.md](build/certificates/README.md)。
 
 ## 领域术语约定
 

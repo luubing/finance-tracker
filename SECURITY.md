@@ -19,7 +19,7 @@
 | 客户端把登录令牌、手机号、用户 Id 存在 WebView 的 `localStorage`，本地 SQLite 数据库**未加密** | 设备被 root / 越狱、或备份被提取时，这些数据可被读取。Android 的 `allowBackup` 目前为 `true`，允许系统备份应用数据 |
 | Android 允许明文 HTTP（`usesCleartextTraffic="true"`） | 为了模拟器访问 `http://10.0.2.2` 的开发便利。正式部署请使用 HTTPS 地址；后续会收紧 |
 | API 的 CORS 目前允许任意来源（`AllowAnyOrigin`） | 认证用的是 Bearer 令牌而不是 Cookie，风险有限；公开部署建议在反向代理层把允许的来源收紧到自己的域名；后续会收紧 |
-| 数据库默认口令是 `postgres`（`appsettings.json`、`docker-compose.yml`），仍在使用时**只在启动日志里告警** | 生产环境务必改口令；`docker-compose.yml` 只用于本机开发，它把 PostgreSQL 映射到了 `5432` 端口，不要原样放到公网服务器上 |
+| 数据库默认口令是 `postgres`（`appsettings.json`、`docker-compose.yml`），仍在使用时**只在启动日志里告警** | 生产环境务必改口令；`docker-compose.yml` 只用于本机开发，它只把 PostgreSQL 映射到本机回环地址（`127.0.0.1:5432`），但口令是公开的默认值，不要原样用到服务器上 |
 | `FinanceTracker.Web.Server`（Blazor Server 宿主）自己的登录用的是它本机的 SQLite 用户库 | 手机号白名单只作用于 `FinanceTracker.Api`，不约束 Web.Server 自己的登录；若要把 Web.Server 部署到公网，请在反向代理层另做访问控制 |
 
 已有的防护：非 Development 环境下，`Jwt:SecretKey` 仍是仓库里的占位值时 API **拒绝启动**；Swagger 默认只在 Development 环境开启；登录 / 注册相关的日志（服务端与客户端）里，手机号做了脱敏（保留前 3 位和后 4 位）。日志没有统一的脱敏层：新增的日志要带手机号时，请自己用 `PhoneNumberMasker.Mask`。
@@ -76,6 +76,8 @@ export Auth__AllowedPhoneNumbers="13800138000,13900139000"
 
 ## 仓库自身的约定
 
-- **不提交**：`build/config.env`、签名证书 / 私钥 / 描述文件（`build/certificates/` 下除 `README.md`、`csr.conf`、`convert.bat` 之外的文件）、`appsettings.Production.json`。
-- 云端地址、蒲公英的 API Key 和安装密码、Apple 证书等只放 GitHub Secrets / Variables。本仓库是公开的，所以 iOS 打包的工作流不上传 IPA 产物、不在日志里打印下载地址和安装密码，也只申请只读权限（见 [`.github/SETUP-IOS-BUILD.md`](.github/SETUP-IOS-BUILD.md)）。
+- **不提交**：`build/config.env`、签名证书 / 私钥 / 描述文件（`build/certificates/` 下除 `README.md`、`csr.conf`、`convert.bat` 之外的文件）、`appsettings.Production.json`（唯一的例外是 `server/FinanceTracker.Web.Server/` 里那份：只有日志级别和本机 API 地址，没有任何口令，保持受跟踪；`server/FinanceTracker.Api/` 里的那份放真实连接串和 JWT 密钥，一律不入库）。
+- 云端地址、蒲公英的 API Key 和（可选的）安装密码、Apple 证书等只放 GitHub Secrets / Variables。本仓库是公开的，所以 iOS 打包的工作流不上传 IPA 产物、不在日志里打印下载地址和安装密码，也只申请只读权限（见 [`.github/SETUP-IOS-BUILD.md`](.github/SETUP-IOS-BUILD.md)）。
+- 蒲公英安装密码是**可选**的：不设置时工作流以公开安装上传，下载页地址就相当于访问凭证（安装包内嵌的描述文件含设备 UDID 和 Team ID），不要把它写进 Issue / PR / 日志；需要限制时再设置 `PGYER_INSTALL_PASSWORD`。
 - 打包时由 `-p:CloudApiBaseUrl` 注入云端地址，源码里不内置线上域名，见 README 的「构建与发布」。
+- 防止误提交密钥有三道防线：`.gitignore` 的通用兜底（按文件名，换个名字就绕过了）；CI 的 `secret-scan` 任务用 gitleaks 扫描每次推送 / PR 新增的提交内容（日志始终脱敏，命中时只显示位置和规则名）；GitHub 自带的密钥扫描与推送保护。被拦下时请换掉密钥，不要想办法绕过检查。万一已经推送了，见 [CONTRIBUTING.md](CONTRIBUTING.md) 的「不要提交的东西」：密钥要立刻轮换，光删文件没用。
