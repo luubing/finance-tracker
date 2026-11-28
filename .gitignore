@@ -148,3 +148,65 @@ tests/e2e/__pycache__/
 ## iOS UI 重构逐屏截图与设计稿并排对照（.scratch/ios-ui-refactor/impl/design_capture.py 的输出，随时可重新生成）
 .scratch/ios-ui-refactor/impl/shots/
 .scratch/ios-ui-refactor/impl/__pycache__/
+
+## ===== 通用兜底：密钥 / 证书 / 本地配置 / 真实数据（防止误提交；上面按目录写的规则仍然有效）=====
+## 需要提交的示例文件用 ! 放行。改规则后用 `git ls-files -ci --exclude-standard` 确认没有误伤已受跟踪的文件。
+
+# 私钥、证书、签名材料（任意目录）。*_base64.txt 是 convert.bat 把 .p12 / 描述文件转成 Base64 的产物，等同于密钥本身
+*.p12
+*.pfx
+*.p8
+*.key
+*.pem
+*.cer
+*.csr
+*.keystore
+*.jks
+*.mobileprovision
+*.provisionprofile
+*_base64.txt
+
+# SSH 私钥（默认文件名）、PuTTY 私钥、数据库 / 网络口令文件
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.ppk
+.pgpass
+.netrc
+
+# 环境变量 / 本机配置（真实值）；示例文件放行
+.env
+.env.*
+*.env
+!.env.example
+!.env.*.example
+!*.example.env
+
+# 带真实口令 / 连接串的部署配置（任意目录）。仓库里受跟踪的 appsettings.json / appsettings.Development.json
+# 只放占位值与本机开发值；Web.Server 的 appsettings.Production.json 只有日志级别和本机 API 地址，保持受跟踪
+**/appsettings.Production.json
+!/server/FinanceTracker.Web.Server/appsettings.Production.json
+**/appsettings.*.local.json
+
+# 真实账单导出（微信 / 支付宝 CSV 带交易对方、金额等隐私）。测试用的假数据请放在 fixtures 目录下
+*.csv
+!tests/**/fixtures/**/*.csv
+
+# 本地数据库及其备份
+# 注意：不要加 *.sqlite —— Windows / macOS 上 Git 默认忽略大小写，它会把目录 FinanceTracker.Infrastructure.Sqlite
+# 整个当成匹配项，之后新增的迁移文件在 git status 里都看不到
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+*.bak
+
+# 部署包、日志、MSBuild 二进制日志（binlog 会把 -p:xxx 全局属性原样记下来，其中可能带着签名口令）
+*.tar.gz
+*.tgz
+*.log
+*.binlog
+
+# AI 助手的本机设置（可能含本机路径或命令里的口令）
+.claude/settings.local.json

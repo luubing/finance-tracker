@@ -1,13 +1,19 @@
+# 仅供本机开发使用：PostgreSQL 只监听本机回环地址（127.0.0.1），局域网和公网都连不进来。
+# 默认口令 postgres 是公开的，不要把这份文件原样用到服务器上（部署清单见 SECURITY.md）。
+#
+# 想换口令：先 export POSTGRES_PASSWORD=...（或写进被 .gitignore 忽略的 .env），再启动，
+# 并让 API 的连接串（ConnectionStrings__DefaultConnection）用同一个口令。
+# 注意：口令只在数据卷第一次初始化时生效；已有数据卷想改口令，要先 `docker compose down -v`（会删掉数据）。
 services:
   postgres:
     image: postgres:17-alpine
     container_name: finance-tracker-postgres
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: finance_tracker
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - finance_tracker_pgdata:/var/lib/postgresql/data
     healthcheck:

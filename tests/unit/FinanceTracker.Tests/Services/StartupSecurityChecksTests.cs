@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using FinanceTracker.Api.Services;
 using Xunit;
@@ -11,7 +12,8 @@ namespace FinanceTracker.Tests.Services;
 public sealed class StartupSecurityChecksTests
 {
     private const string Placeholder = "YourSuperSecretKeyThatIsAtLeast32CharactersLong!";
-    private const string RealLookingKey = "b7e1c0d94a2f4e6f8a3d5c7b9e1f2a4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a";
+    // 运行时随机生成：不在仓库里放高熵字面量（会被 gitleaks、GitHub 密钥扫描等反复误报）
+    private static readonly string RealLookingKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
 
     [Fact]
     public void 非Development环境_占位密钥_拒绝启动并给出可操作的修复指引()

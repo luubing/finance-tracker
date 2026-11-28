@@ -1,0 +1,31 @@
+# 行尾：仓库里一律存 LF；工作区里是什么样由各人本机的 core.autocrlf 决定（Windows 上通常是 CRLF）。
+# 不要给整个仓库写 eol=crlf：脚本要在 Linux / macOS / CI 上执行，CRLF 会让它们跑不起来。
+* text=auto
+
+# 必须是 LF：shell 脚本（CRLF 会破坏 shebang 和 heredoc）
+*.sh text eol=lf
+
+# 必须是 CRLF：Windows 批处理（LF 行尾在个别情况下会让 cmd 解析 goto / call 标签出错）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# diff 时用更合适的函数 / 标题分段规则（只影响显示）
+*.cs diff=csharp
+*.md diff=markdown
+*.css diff=css
+*.html diff=html
+
+# 二进制：不转换行尾，不做文本 diff / merge
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.pdf binary
